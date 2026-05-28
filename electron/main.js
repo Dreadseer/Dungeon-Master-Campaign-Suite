@@ -1,9 +1,12 @@
 const { app, BrowserWindow, ipcMain, shell, safeStorage } = require('electron')
 const path = require('path')
-const DatabaseService  = require('./database/DatabaseService')
-const SrdService       = require('./services/SrdService')
+const DatabaseService    = require('./database/DatabaseService')
+const SrdService         = require('./services/SrdService')
+const AIService          = require('./services/AIService')
+const KeyService         = require('./services/KeyService')
 const registerDbHandlers  = require('./ipc/dbHandlers')
 const registerSrdHandlers = require('./ipc/srdHandlers')
+const registerAiHandlers  = require('./ipc/aiHandlers')
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -24,15 +27,23 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   const dbPath = path.join(app.getPath('userData'), 'dmcs.db')
   console.log('[DB] Path:', dbPath)
 
   global.db         = new DatabaseService(dbPath)
   global.srdService = new SrdService(global.db)
+  global.keyService = new KeyService()
+  global.aiService  = new AIService()
 
   registerDbHandlers(global.db)
   registerSrdHandlers(global.db, global.srdService)
+  registerAiHandlers(global.aiService, global.keyService)
+
+  // Auto-initialize AI with saved key (if any)
+  const savedKey = global.keyService.loadKey()
+  const result   = await global.aiService.initialize(savedKey)
+  console.log('[AI] Mode:', result.mode)
 
   createWindow()
 

@@ -39,5 +39,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onProgress:    (cb)      => ipcRenderer.on('srd:progress', (_event, data) => cb(data)),
   },
 
-  // ai methods added in Prompt 04
+  ai: {
+    initialize:  ()                      => ipcRenderer.invoke('ai:initialize'),
+    getMode:     ()                      => ipcRenderer.invoke('ai:getMode'),
+    complete:    (systemPrompt, message) => ipcRenderer.invoke('ai:complete', systemPrompt, message),
+    saveKey:     (key)                   => ipcRenderer.invoke('ai:saveKey', key),
+    deleteKey:   ()                      => ipcRenderer.invoke('ai:deleteKey'),
+    hasKey:      ()                      => ipcRenderer.invoke('ai:hasKey'),
+  },
 })
