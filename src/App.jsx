@@ -1,7 +1,8 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import Sidebar from './components/Sidebar'
-import TopBar from './components/TopBar'
-import SrdLoader from './components/SrdLoader'
+import Sidebar        from './components/Sidebar'
+import TopBar         from './components/TopBar'
+import SrdLoader      from './components/SrdLoader'
+import CampaignGuard  from './components/CampaignGuard'
 
 import CampaignManager  from './pages/CampaignManager'
 import WorldBuilder     from './pages/WorldBuilder'
@@ -15,6 +16,10 @@ import CombatCalculator from './pages/CombatCalculator'
 import AIAssistant      from './pages/AIAssistant'
 import Settings         from './pages/Settings'
 
+function Guarded({ children }) {
+  return <CampaignGuard>{children}</CampaignGuard>
+}
+
 export default function App() {
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -25,14 +30,14 @@ export default function App() {
         <main className="main-content">
           <Routes>
             <Route index              element={<CampaignManager />} />
-            <Route path="/world"      element={<WorldBuilder />} />
-            <Route path="/lore"       element={<LoreConnections />} />
-            <Route path="/mindmap"    element={<MindMap />} />
-            <Route path="/maps"       element={<MapEngine />} />
+            <Route path="/world"      element={<Guarded><WorldBuilder /></Guarded>} />
+            <Route path="/lore"       element={<Guarded><LoreConnections /></Guarded>} />
+            <Route path="/mindmap"    element={<Guarded><MindMap /></Guarded>} />
+            <Route path="/maps"       element={<Guarded><MapEngine /></Guarded>} />
+            <Route path="/characters" element={<Guarded><CharacterSheets /></Guarded>} />
+            <Route path="/encounters" element={<Guarded><EncounterBuilder /></Guarded>} />
+            <Route path="/calculator" element={<Guarded><CombatCalculator /></Guarded>} />
             <Route path="/compendium" element={<Compendium />} />
-            <Route path="/characters" element={<CharacterSheets />} />
-            <Route path="/encounters" element={<EncounterBuilder />} />
-            <Route path="/calculator" element={<CombatCalculator />} />
             <Route path="/ai"         element={<AIAssistant />} />
             <Route path="/settings"   element={<Settings />} />
           </Routes>

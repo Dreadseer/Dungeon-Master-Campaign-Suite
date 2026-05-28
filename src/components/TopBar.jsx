@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import useCampaignStore from '../stores/campaignStore'
 
 const MODE_CONFIG = {
   'online':         { label: 'Claude API',          color: '#2d6a2d', text: '#8fbc5a', border: '#4a8a4a' },
@@ -10,6 +11,7 @@ const MODE_CONFIG = {
 export default function TopBar() {
   const [aiMode, setAiMode] = useState(null)
   const navigate = useNavigate()
+  const activeCampaign = useCampaignStore(s => s.activeCampaign)
 
   useEffect(() => {
     window.electronAPI.ai.getMode().then(({ mode }) => setAiMode(mode))
@@ -30,7 +32,9 @@ export default function TopBar() {
             {modeConf.label}
           </button>
         )}
-        <span style={styles.campaign}>No Campaign Loaded</span>
+        <span style={{ ...styles.campaign, color: activeCampaign?.name ? '#c9a84c' : '#6b5a3a' }}>
+          {activeCampaign?.name ?? 'No Campaign Loaded'}
+        </span>
       </div>
     </header>
   )
