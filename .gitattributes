@@ -1,0 +1,2 @@
+# Normalize all text files to LF on commit, check out as-is on Windows
+* text=auto eol=lf
