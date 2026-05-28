@@ -30,5 +30,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
-  // srd and ai methods added in Prompts 03–04
+  srd: {
+    seedAll:       ()        => ipcRenderer.invoke('srd:seedAll'),
+    getMonsters:   (filters) => ipcRenderer.invoke('srd:getMonsters', filters),
+    getSpells:     (filters) => ipcRenderer.invoke('srd:getSpells', filters),
+    getEquipment:  (filters) => ipcRenderer.invoke('srd:getEquipment', filters),
+    getCacheStats: ()        => ipcRenderer.invoke('srd:getCacheStats'),
+    onProgress:    (cb)      => ipcRenderer.on('srd:progress', (_event, data) => cb(data)),
+  },
+
+  // ai methods added in Prompt 04
 })

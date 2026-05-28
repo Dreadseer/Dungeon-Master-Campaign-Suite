@@ -1,7 +1,9 @@
 const { app, BrowserWindow, ipcMain, shell, safeStorage } = require('electron')
 const path = require('path')
-const DatabaseService = require('./database/DatabaseService')
-const registerDbHandlers = require('./ipc/dbHandlers')
+const DatabaseService  = require('./database/DatabaseService')
+const SrdService       = require('./services/SrdService')
+const registerDbHandlers  = require('./ipc/dbHandlers')
+const registerSrdHandlers = require('./ipc/srdHandlers')
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -26,8 +28,11 @@ app.whenReady().then(() => {
   const dbPath = path.join(app.getPath('userData'), 'dmcs.db')
   console.log('[DB] Path:', dbPath)
 
-  global.db = new DatabaseService(dbPath)
+  global.db         = new DatabaseService(dbPath)
+  global.srdService = new SrdService(global.db)
+
   registerDbHandlers(global.db)
+  registerSrdHandlers(global.db, global.srdService)
 
   createWindow()
 

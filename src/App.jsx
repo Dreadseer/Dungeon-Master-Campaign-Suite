@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import TopBar from './components/TopBar'
+import SrdLoader from './components/SrdLoader'
 
 import CampaignManager  from './pages/CampaignManager'
 import WorldBuilder     from './pages/WorldBuilder'
@@ -17,6 +18,7 @@ import Settings         from './pages/Settings'
 export default function App() {
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <SrdLoader />
       <TopBar />
       <div className="app-layout">
         <Sidebar />
