@@ -1,5 +1,7 @@
 const { app, BrowserWindow, ipcMain, shell, safeStorage } = require('electron')
 const path = require('path')
+const DatabaseService = require('./database/DatabaseService')
+const registerDbHandlers = require('./ipc/dbHandlers')
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -12,7 +14,6 @@ function createWindow() {
     },
   })
 
-  // Load Vite dev server in development, built index.html in production
   if (process.env.NODE_ENV === 'development') {
     win.loadURL('http://localhost:5173')
     win.webContents.openDevTools()
@@ -22,6 +23,12 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  const dbPath = path.join(app.getPath('userData'), 'dmcs.db')
+  console.log('[DB] Path:', dbPath)
+
+  global.db = new DatabaseService(dbPath)
+  registerDbHandlers(global.db)
+
   createWindow()
 
   app.on('activate', () => {
@@ -33,5 +40,4 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-// Placeholder IPC handler — additional handlers added in Prompts 02–04
 ipcMain.handle('app:version', () => app.getVersion())
