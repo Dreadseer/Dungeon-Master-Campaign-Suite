@@ -217,6 +217,45 @@ function registerDbHandlers(db) {
     return { locations, factions, npcs, lore,
              total: locations.length + factions.length + npcs.length + lore.length }
   })
+
+  // Maps — Phase 3
+  ipcMain.handle('db:maps:getAll', (_, campaignId) =>
+    db.all(`
+      SELECT m.*, l.name AS location_name
+      FROM maps m
+      LEFT JOIN locations l ON m.location_id = l.id
+      WHERE m.campaign_id = ?
+      ORDER BY m.name ASC`,
+      [campaignId]))
+
+  ipcMain.handle('db:maps:getById', (_, id) =>
+    db.get('SELECT * FROM maps WHERE id = ?', [id]))
+
+  ipcMain.handle('db:maps:create', (_, data) =>
+    db.run(`
+      INSERT INTO maps
+        (campaign_id, name, location_id, image_path, grid_size, fog_data, tokens, created_at)
+      VALUES (?,?,?,?,?,?,?,datetime('now'))`,
+      [data.campaign_id, data.name, data.location_id ?? null,
+       data.image_path ?? null, data.grid_size ?? 50,
+       JSON.stringify([]), JSON.stringify([])]))
+
+  ipcMain.handle('db:maps:update', (_, id, data) =>
+    db.run(`
+      UPDATE maps SET name=?, location_id=?, grid_size=? WHERE id=?`,
+      [data.name, data.location_id ?? null, data.grid_size ?? 50, id]))
+
+  ipcMain.handle('db:maps:updateImagePath', (_, id, imagePath) =>
+    db.run('UPDATE maps SET image_path=? WHERE id=?', [imagePath, id]))
+
+  ipcMain.handle('db:maps:updateFog', (_, id, fogData) =>
+    db.run('UPDATE maps SET fog_data=? WHERE id=?', [JSON.stringify(fogData), id]))
+
+  ipcMain.handle('db:maps:updateTokens', (_, id, tokens) =>
+    db.run('UPDATE maps SET tokens=? WHERE id=?', [JSON.stringify(tokens), id]))
+
+  ipcMain.handle('db:maps:delete', (_, id) =>
+    db.run('DELETE FROM maps WHERE id=?', [id]))
 }
 
 module.exports = registerDbHandlers

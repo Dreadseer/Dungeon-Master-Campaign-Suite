@@ -43,6 +43,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       update:         (id, data)             => ipcRenderer.invoke('db:connections:update', id, data),
       delete:         (id)                   => ipcRenderer.invoke('db:connections:delete', id),
     },
+    maps: {
+      getAll:         (campaignId)    => ipcRenderer.invoke('db:maps:getAll', campaignId),
+      getById:        (id)            => ipcRenderer.invoke('db:maps:getById', id),
+      create:         (data)          => ipcRenderer.invoke('db:maps:create', data),
+      update:         (id, data)      => ipcRenderer.invoke('db:maps:update', id, data),
+      updateImagePath:(id, imagePath) => ipcRenderer.invoke('db:maps:updateImagePath', id, imagePath),
+      updateFog:      (id, fogData)   => ipcRenderer.invoke('db:maps:updateFog', id, fogData),
+      updateTokens:   (id, tokens)    => ipcRenderer.invoke('db:maps:updateTokens', id, tokens),
+      delete:         (id)            => ipcRenderer.invoke('db:maps:delete', id),
+    },
     world: {
       search: (campaignId, query) => ipcRenderer.invoke('db:world:search', campaignId, query),
     },
@@ -53,6 +63,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       update:   (id, data)   => ipcRenderer.invoke('db:lore:update', id, data),
       delete:   (id)         => ipcRenderer.invoke('db:lore:delete', id),
     },
+  },
+
+  file: {
+    openImageDialog:  ()              => ipcRenderer.invoke('file:openImageDialog'),
+    copyMapImage:     (sourcePath)    => ipcRenderer.invoke('file:copyMapImage', sourcePath),
+    readImageAsBase64:(filePath)      => ipcRenderer.invoke('file:readImageAsBase64', filePath),
+    saveThumbnail:    (mapId, base64) => ipcRenderer.invoke('file:saveThumbnail', mapId, base64),
+    readThumbnail:    (mapId)         => ipcRenderer.invoke('file:readThumbnail', mapId),
   },
 
   srd: {
