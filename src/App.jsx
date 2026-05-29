@@ -16,6 +16,10 @@ import CombatCalculator from './pages/CombatCalculator'
 import AIAssistant      from './pages/AIAssistant'
 import Settings         from './pages/Settings'
 
+// Phase 2 — World Builder pages
+import Factions  from './pages/world/Factions'
+import Locations from './pages/world/Locations'
+
 function Guarded({ children }) {
   return <CampaignGuard>{children}</CampaignGuard>
 }
@@ -30,7 +34,12 @@ export default function App() {
         <main className="main-content">
           <Routes>
             <Route index              element={<CampaignManager />} />
-            <Route path="/world"      element={<Guarded><WorldBuilder /></Guarded>} />
+
+            {/* World Builder routes */}
+            <Route path="/world"            element={<Guarded><WorldBuilder /></Guarded>} />
+            <Route path="/world/factions"   element={<Guarded><Factions /></Guarded>} />
+            <Route path="/world/locations"  element={<Guarded><Locations /></Guarded>} />
+
             <Route path="/lore"       element={<Guarded><LoreConnections /></Guarded>} />
             <Route path="/mindmap"    element={<Guarded><MindMap /></Guarded>} />
             <Route path="/maps"       element={<Guarded><MapEngine /></Guarded>} />
