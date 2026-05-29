@@ -12,10 +12,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       delete:   (id)       => ipcRenderer.invoke('db:campaigns:delete', id),
     },
     npcs: {
-      getAll:   (campaignId) => ipcRenderer.invoke('db:npcs:getAll', campaignId),
-      create:   (data)       => ipcRenderer.invoke('db:npcs:create', data),
-      update:   (id, data)   => ipcRenderer.invoke('db:npcs:update', id, data),
-      delete:   (id)         => ipcRenderer.invoke('db:npcs:delete', id),
+      getAll:         (campaignId) => ipcRenderer.invoke('db:npcs:getAll', campaignId),
+      getById:        (id)         => ipcRenderer.invoke('db:npcs:getById', id),
+      getByLocation:  (locationId) => ipcRenderer.invoke('db:npcs:getByLocation', locationId),
+      getByFaction:   (factionId)  => ipcRenderer.invoke('db:npcs:getByFaction', factionId),
+      create:         (data)       => ipcRenderer.invoke('db:npcs:create', data),
+      update:         (id, data)   => ipcRenderer.invoke('db:npcs:update', id, data),
+      toggleAlive:    (id, isAlive)=> ipcRenderer.invoke('db:npcs:toggleAlive', id, isAlive),
+      delete:         (id)         => ipcRenderer.invoke('db:npcs:delete', id),
     },
     locations: {
       getAll:      (campaignId)       => ipcRenderer.invoke('db:locations:getAll', campaignId),
