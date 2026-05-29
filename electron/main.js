@@ -1,5 +1,13 @@
-const { app, BrowserWindow, ipcMain, shell, safeStorage } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, safeStorage, protocol } = require('electron')
+const fs   = require('fs')
 const path = require('path')
+
+// Must be called before app is ready — registers dmcs-asset:// as a secure scheme
+// so Chromium accepts it as an image source when the page is served from localhost
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'dmcs-asset', privileges: { bypassCSP: true, supportFetchAPI: true, secure: true } },
+])
+
 const DatabaseService    = require('./database/DatabaseService')
 const SrdService         = require('./services/SrdService')
 const AIService          = require('./services/AIService')
@@ -8,6 +16,8 @@ const registerDbHandlers  = require('./ipc/dbHandlers')
 const registerSrdHandlers = require('./ipc/srdHandlers')
 const registerAiHandlers  = require('./ipc/aiHandlers')
 require('./ipc/fileHandlers')   // file dialog + image copy/read (self-registering)
+
+const MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' }
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -29,6 +39,24 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // Electron 25+ requires protocol.handle (not registerFileProtocol).
+  // URL format: dmcs-asset:///C:/path/to/file.jpg  (forward slashes, encodeURI-encoded)
+  // The renderer constructs these via window.electronAPI.file.getLocalUrl(absPath).
+  protocol.handle('dmcs-asset', async (request) => {
+    try {
+      // Strip scheme + leading slash: "dmcs-asset:///C:/..." → "C:/..."
+      const encoded  = request.url.slice('dmcs-asset:///'.length)
+      const filePath = decodeURIComponent(encoded)   // handles spaces, brackets, etc.
+      const buffer   = await fs.promises.readFile(filePath)
+      const ext      = path.extname(filePath).slice(1).toLowerCase()
+      const mimeType = MIME[ext] || 'application/octet-stream'
+      return new Response(buffer, { headers: { 'Content-Type': mimeType } })
+    } catch (err) {
+      console.error('[dmcs-asset] Failed to serve:', request.url, err.message)
+      return new Response('Not found', { status: 404 })
+    }
+  })
+
   const dbPath = path.join(app.getPath('userData'), 'dmcs.db')
   console.log('[DB] Path:', dbPath)
 

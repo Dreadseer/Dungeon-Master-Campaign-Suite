@@ -168,7 +168,7 @@ const s = {
   toolBtnActive: {
     background: '#c9a84c',
     color: '#0d0a05',
-    borderColor: '#c9a84c',
+    border: '1px solid #c9a84c',
     fontWeight: 'bold',
   },
   brushBtn: {
@@ -184,7 +184,7 @@ const s = {
   brushBtnActive: {
     background: '#3a2a10',
     color: '#c9a84c',
-    borderColor: '#c9a84c',
+    border: '1px solid #c9a84c',
   },
   fogActionBtn: {
     background: 'transparent',

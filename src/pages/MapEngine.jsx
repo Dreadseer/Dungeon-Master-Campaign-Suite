@@ -101,8 +101,8 @@ export default function MapEngine() {
     const sourcePath = await window.electronAPI.file.openImageDialog()
     if (!sourcePath) return
     setChosenImagePath(sourcePath)
-    const base64 = await window.electronAPI.file.readImageAsBase64(sourcePath)
-    setImagePreview(base64)
+    // Use protocol URL directly — no base64 round-trip needed for preview
+    setImagePreview(window.electronAPI.file.getLocalUrl(sourcePath))
   }
 
   async function handleCreate(e) {
@@ -289,12 +289,8 @@ export default function MapEngine() {
 // ── Sub-components ──────────────────────────────────────────────────
 
 function ImageThumb({ imagePath }) {
-  const [src, setSrc] = useState(null)
-  useEffect(() => {
-    window.electronAPI.file.readImageAsBase64(imagePath).then(setSrc)
-  }, [imagePath])
-  if (!src) return <div style={s.thumbPlaceholder}>⏳</div>
-  return <img src={src} alt="map" style={s.thumb} />
+  const src = window.electronAPI.file.getLocalUrl(imagePath)
+  return <img src={src} alt="map" style={s.thumb} onError={e => { e.target.style.display = 'none' }} />
 }
 
 function DeleteBtn({ onConfirm, name }) {
