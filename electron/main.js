@@ -7,6 +7,7 @@ const KeyService         = require('./services/KeyService')
 const registerDbHandlers  = require('./ipc/dbHandlers')
 const registerSrdHandlers = require('./ipc/srdHandlers')
 const registerAiHandlers  = require('./ipc/aiHandlers')
+require('./ipc/fileHandlers')   // file dialog + image copy/read (self-registering)
 
 function createWindow() {
   const win = new BrowserWindow({
