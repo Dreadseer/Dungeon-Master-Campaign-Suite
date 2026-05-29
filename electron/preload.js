@@ -18,10 +18,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
       delete:   (id)         => ipcRenderer.invoke('db:npcs:delete', id),
     },
     locations: {
-      getAll:   (campaignId) => ipcRenderer.invoke('db:locations:getAll', campaignId),
-      create:   (data)       => ipcRenderer.invoke('db:locations:create', data),
-      update:   (id, data)   => ipcRenderer.invoke('db:locations:update', id, data),
-      delete:   (id)         => ipcRenderer.invoke('db:locations:delete', id),
+      getAll:      (campaignId)       => ipcRenderer.invoke('db:locations:getAll', campaignId),
+      getById:     (id)               => ipcRenderer.invoke('db:locations:getById', id),
+      getByType:   (campaignId, type) => ipcRenderer.invoke('db:locations:getByType', campaignId, type),
+      create:      (data)             => ipcRenderer.invoke('db:locations:create', data),
+      update:      (id, data)         => ipcRenderer.invoke('db:locations:update', id, data),
+      delete:      (id)               => ipcRenderer.invoke('db:locations:delete', id),
+    },
+    factions: {
+      getAll:   (campaignId) => ipcRenderer.invoke('db:factions:getAll', campaignId),
+      getById:  (id)         => ipcRenderer.invoke('db:factions:getById', id),
+      create:   (data)       => ipcRenderer.invoke('db:factions:create', data),
+      update:   (id, data)   => ipcRenderer.invoke('db:factions:update', id, data),
+      delete:   (id)         => ipcRenderer.invoke('db:factions:delete', id),
     },
     connections: {
       getAll:   (campaignId) => ipcRenderer.invoke('db:connections:getAll', campaignId),

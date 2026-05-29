@@ -50,27 +50,63 @@ function registerDbHandlers(db) {
   ipcMain.handle('db:npcs:delete',   (_, id) =>
     db.run('DELETE FROM npcs WHERE id = ?', [id]))
 
-  // Locations
-  ipcMain.handle('db:locations:getAll',   (_, campaignId) =>
-    db.all('SELECT * FROM locations WHERE campaign_id = ?', [campaignId]))
+  // Locations — Phase 2: upgraded getAll with parent join, parent_location_id in update,
+  //             new getById and getByType channels
+  ipcMain.handle('db:locations:getAll', (_, campaignId) =>
+    db.all(`
+      SELECT l.*, p.name AS parent_name
+      FROM locations l
+      LEFT JOIN locations p ON l.parent_location_id = p.id
+      WHERE l.campaign_id = ?
+      ORDER BY l.name ASC
+    `, [campaignId]))
 
-  ipcMain.handle('db:locations:create',   (_, data) =>
+  ipcMain.handle('db:locations:getById', (_, id) =>
+    db.get('SELECT * FROM locations WHERE id = ?', [id]))
+
+  ipcMain.handle('db:locations:getByType', (_, campaignId, type) =>
+    db.all('SELECT * FROM locations WHERE campaign_id = ? AND type = ? ORDER BY name ASC', [campaignId, type]))
+
+  ipcMain.handle('db:locations:create', (_, data) =>
     db.run(
       `INSERT INTO locations (campaign_id, name, type, description, lore, parent_location_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
-      [data.campaign_id, data.name, data.type, data.description, data.lore, data.parent_location_id]
+      [data.campaign_id, data.name, data.type, data.description, data.lore, data.parent_location_id ?? null]
     ))
 
-  ipcMain.handle('db:locations:update',   (_, id, data) =>
+  ipcMain.handle('db:locations:update', (_, id, data) =>
     db.run(
-      'UPDATE locations SET name = ?, type = ?, description = ?, lore = ? WHERE id = ?',
-      [data.name, data.type, data.description, data.lore, id]
+      'UPDATE locations SET name = ?, type = ?, description = ?, lore = ?, parent_location_id = ? WHERE id = ?',
+      [data.name, data.type, data.description, data.lore, data.parent_location_id ?? null, id]
     ))
 
-  ipcMain.handle('db:locations:delete',   (_, id) =>
+  ipcMain.handle('db:locations:delete', (_, id) =>
     db.run('DELETE FROM locations WHERE id = ?', [id]))
 
-  // Connections
+  // Factions — Phase 2: all new
+  ipcMain.handle('db:factions:getAll', (_, campaignId) =>
+    db.all('SELECT * FROM factions WHERE campaign_id = ? ORDER BY name ASC', [campaignId]))
+
+  ipcMain.handle('db:factions:getById', (_, id) =>
+    db.get('SELECT * FROM factions WHERE id = ?', [id]))
+
+  ipcMain.handle('db:factions:create', (_, data) =>
+    db.run(
+      `INSERT INTO factions (campaign_id, name, description, alignment, notes, created_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+      [data.campaign_id, data.name, data.description, data.alignment, data.notes]
+    ))
+
+  ipcMain.handle('db:factions:update', (_, id, data) =>
+    db.run(
+      'UPDATE factions SET name = ?, description = ?, alignment = ?, notes = ? WHERE id = ?',
+      [data.name, data.description, data.alignment, data.notes, id]
+    ))
+
+  ipcMain.handle('db:factions:delete', (_, id) =>
+    db.run('DELETE FROM factions WHERE id = ?', [id]))
+
+  // Connections — Phase 1 stub (replaced in Phase 2 Prompt 03)
   ipcMain.handle('db:connections:getAll',  (_, campaignId) =>
     db.all(
       `SELECT c.* FROM connections c

@@ -1,0 +1,224 @@
+import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import useCampaignStore from '../../stores/campaignStore'
+import EntityCard from '../../components/world/EntityCard'
+import EntityModal from '../../components/world/EntityModal'
+
+const TYPES = ['town', 'dungeon', 'shop', 'region', 'landmark']
+const TABS  = ['All', ...TYPES]
+const EMPTY_FORM = { name: '', type: 'town', description: '', lore: '', parent_location_id: null }
+
+export default function Locations() {
+  const activeCampaign = useCampaignStore(s => s.activeCampaign)
+  const [locations, setLocations]   = useState([])
+  const [tab, setTab]               = useState('All')
+  const [modalOpen, setModalOpen]   = useState(false)
+  const [editing, setEditing]       = useState(null)
+  const [form, setForm]             = useState(EMPTY_FORM)
+  const [saving, setSaving]         = useState(false)
+  const [error, setError]           = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const load = useCallback(() => {
+    if (!activeCampaign?.id) return
+    window.electronAPI.db.locations.getAll(activeCampaign.id).then(setLocations)
+  }, [activeCampaign?.id])
+
+  useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (searchParams.get('create') === 'true') {
+      openCreate()
+      setSearchParams({}, { replace: true })
+    }
+  }, []) // eslint-disable-line
+
+  const filtered = tab === 'All' ? locations : locations.filter(l => l.type === tab)
+
+  function openCreate() {
+    setEditing(null)
+    setForm(EMPTY_FORM)
+    setError('')
+    setModalOpen(true)
+  }
+
+  function openEdit(loc) {
+    setEditing(loc)
+    setForm({
+      name: loc.name, type: loc.type || 'town',
+      description: loc.description || '', lore: loc.lore || '',
+      parent_location_id: loc.parent_location_id ?? null,
+    })
+    setError('')
+    setModalOpen(true)
+  }
+
+  function closeModal() { setModalOpen(false); setEditing(null) }
+  function setField(k, v) { setForm(f => ({ ...f, [k]: v })) }
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (!form.name.trim()) { setError('Location name is required.'); return }
+    if (editing && form.parent_location_id === editing.id) {
+      setError('A location cannot be its own parent.'); return
+    }
+    setSaving(true)
+    const payload = { ...form, campaign_id: activeCampaign.id, parent_location_id: form.parent_location_id || null }
+    if (editing) {
+      await window.electronAPI.db.locations.update(editing.id, payload)
+    } else {
+      await window.electronAPI.db.locations.create(payload)
+    }
+    setSaving(false)
+    load()
+    closeModal()
+  }
+
+  async function handleDelete(loc) {
+    await window.electronAPI.db.locations.delete(loc.id)
+    load()
+  }
+
+  // Parent picker opens edit modal for that parent
+  function openParent(parentId, e) {
+    e.stopPropagation()
+    const parent = locations.find(l => l.id === parentId)
+    if (parent) openEdit(parent)
+  }
+
+  return (
+    <div style={s.page}>
+      <div style={s.header}>
+        <div>
+          <h1 style={s.title}>Locations</h1>
+          <p style={s.count}>{filtered.length} of {locations.length}</p>
+        </div>
+        <button style={s.btnPrimary} onClick={openCreate}>+ New Location</button>
+      </div>
+
+      {/* Type filter tabs */}
+      <div style={s.tabs}>
+        {TABS.map(t => (
+          <button key={t} style={{ ...s.tab, ...(tab === t ? s.tabActive : {}) }}
+            onClick={() => setTab(t)}>
+            {t.charAt(0).toUpperCase() + t.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div style={s.empty}>
+          <p style={s.emptyText}>
+            {tab === 'All' ? 'No locations yet. Build your world.' : `No ${tab}s yet. Add your first one.`}
+          </p>
+          <button style={s.btnPrimary} onClick={openCreate}>+ New Location</button>
+        </div>
+      ) : (
+        <div style={s.list}>
+          {filtered.map(loc => {
+            const tags = []
+            if (loc.lore) tags.push({ label: 'Has Lore', color: '#1a2a1a', text: '#6abf6a' })
+            if (loc.parent_location_id) tags.push({ label: 'Sub-location', color: '#1a1a2a', text: '#6a8abf' })
+
+            const subtitle = loc.parent_name
+              ? `${loc.type} in ${loc.parent_name}`
+              : loc.type
+
+            return (
+              <EntityCard
+                key={loc.id}
+                title={loc.name}
+                subtitle={subtitle}
+                tags={tags}
+                meta={new Date(loc.created_at).toLocaleDateString()}
+                onClick={() => openEdit(loc)}
+                onDelete={() => handleDelete(loc)}
+                accentColor="#6a8abf"
+              >
+                {loc.parent_location_id && loc.parent_name && (
+                  <div style={s.breadcrumb}>
+                    <button style={s.breadcrumbBtn} onClick={(e) => openParent(loc.parent_location_id, e)}>
+                      {loc.parent_name}
+                    </button>
+                    <span style={s.breadcrumbSep}> › </span>
+                    <span style={s.breadcrumbCurrent}>{loc.name}</span>
+                  </div>
+                )}
+              </EntityCard>
+            )
+          })}
+        </div>
+      )}
+
+      <EntityModal
+        title={editing ? `Edit: ${editing.name}` : 'New Location'}
+        isOpen={modalOpen}
+        onClose={closeModal}
+      >
+        <form onSubmit={handleSubmit}>
+          <label style={s.label}>Location Name *</label>
+          <input style={s.input} value={form.name} onChange={e => setField('name', e.target.value)}
+            placeholder="Riverdale" autoFocus required />
+          {error && <p style={s.err}>{error}</p>}
+
+          <label style={s.label}>Type</label>
+          <select style={s.input} value={form.type} onChange={e => setField('type', e.target.value)}>
+            {TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+          </select>
+
+          <label style={s.label}>Located within… (optional)</label>
+          <select
+            style={s.input}
+            value={form.parent_location_id ?? ''}
+            onChange={e => setField('parent_location_id', e.target.value ? Number(e.target.value) : null)}
+          >
+            <option value="">None (top-level location)</option>
+            {locations
+              .filter(l => !editing || l.id !== editing.id)
+              .map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+
+          <label style={s.label}>Description (player-facing)</label>
+          <textarea style={{ ...s.input, height: 68, resize: 'vertical' }}
+            value={form.description} onChange={e => setField('description', e.target.value)}
+            placeholder="What the players see and experience here..." />
+
+          <label style={s.label}>Lore (DM only)</label>
+          <textarea style={{ ...s.input, height: 96, resize: 'vertical' }}
+            value={form.lore} onChange={e => setField('lore', e.target.value)}
+            placeholder="History, secrets, hidden details..." />
+
+          <div style={s.row}>
+            <button style={s.btnPrimary} type="submit" disabled={saving}>
+              {saving ? 'Saving…' : editing ? 'Save Changes' : 'Create Location'}
+            </button>
+            <button style={s.btnSecondary} type="button" onClick={closeModal}>Cancel</button>
+          </div>
+        </form>
+      </EntityModal>
+    </div>
+  )
+}
+
+const s = {
+  page:           { padding: '2rem', maxWidth: 800 },
+  header:         { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' },
+  title:          { color: '#c9a84c', fontSize: '1.6rem', margin: 0 },
+  count:          { color: '#6b5a3a', fontSize: '0.8rem', margin: '0.2rem 0 0' },
+  tabs:           { display: 'flex', gap: '0.25rem', marginBottom: '1.25rem', flexWrap: 'wrap' },
+  tab:            { background: 'transparent', border: '1px solid #3a2a10', color: '#a89060', padding: '0.35rem 0.85rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.82rem' },
+  tabActive:      { background: '#2d1f0a', border: '1px solid #c9a84c', color: '#c9a84c' },
+  list:           { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
+  empty:          { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 220, gap: '1rem' },
+  emptyText:      { color: '#6b5a3a', fontSize: '1rem' },
+  breadcrumb:     { display: 'flex', alignItems: 'center', marginTop: '0.3rem', gap: '0.15rem' },
+  breadcrumbBtn:  { background: 'none', border: 'none', color: '#6a8abf', fontSize: '0.75rem', cursor: 'pointer', padding: 0, textDecoration: 'underline' },
+  breadcrumbSep:  { color: '#5a4a2a', fontSize: '0.75rem' },
+  breadcrumbCurrent: { color: '#a89060', fontSize: '0.75rem' },
+  label:          { display: 'block', color: '#a89060', fontSize: '0.82rem', marginBottom: '0.35rem' },
+  input:          { display: 'block', width: '100%', background: '#0d0a05', border: '1px solid #3a2a10', borderRadius: 4, color: '#e8e0d0', padding: '0.45rem 0.7rem', fontSize: '0.9rem', marginBottom: '0.9rem', outline: 'none', boxSizing: 'border-box' },
+  row:            { display: 'flex', gap: '0.75rem', marginTop: '0.5rem' },
+  err:            { color: '#e05050', fontSize: '0.82rem', marginTop: '-0.6rem', marginBottom: '0.75rem' },
+  btnPrimary:     { background: '#c9a84c', color: '#0d0a05', border: 'none', padding: '0.5rem 1.2rem', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: '0.88rem' },
+  btnSecondary:   { background: 'transparent', color: '#a89060', border: '1px solid #a89060', padding: '0.5rem 1.2rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.88rem' },
+}
