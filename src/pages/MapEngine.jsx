@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import useCampaignStore from '../stores/campaignStore'
 import EntityModal from '../components/world/EntityModal'
 import Skeleton from '../components/ui/Skeleton'
@@ -39,6 +39,14 @@ export default function MapEngine() {
     height: window.innerHeight - TOPBAR_H - MAPTOOLBAR_H,
   })
 
+  // ── Fog of War state ───────────────────────────────────────────────
+  const [fogBrushSize, setFogBrushSize] = useState(1)   // 1 | 3 | 5
+  const fogControlsRef = useRef(null)   // holds { revealAll, hideAll } from MapCanvas
+
+  const registerFogControls = useCallback((controls) => {
+    fogControlsRef.current = controls
+  }, [])
+
   // ── Reset canvas state when a new map is opened ────────────────────
   function openMap(map) {
     setActiveMap(map)
@@ -46,6 +54,8 @@ export default function MapEngine() {
     setStagePos({ x: 0, y: 0 })
     setActiveTool('pan')
     setCurrentGridSize(map.grid_size || 50)
+    setFogBrushSize(1)
+    fogControlsRef.current = null
   }
 
   // ── Data loading ───────────────────────────────────────────────────
@@ -142,6 +152,10 @@ export default function MapEngine() {
             setActiveMap(prev => ({ ...prev, grid_size: gs }))
           }}
           map={activeMap}
+          fogBrushSize={fogBrushSize}
+          onFogBrushSizeChange={setFogBrushSize}
+          onRevealAll={() => fogControlsRef.current?.revealAll()}
+          onHideAll={() => fogControlsRef.current?.hideAll()}
         />
         <MapCanvas
           map={activeMap}
@@ -153,9 +167,11 @@ export default function MapEngine() {
           setStageScale={setStageScale}
           setStagePos={setStagePos}
           activeTool={activeTool}
+          fogBrushSize={fogBrushSize}
           gridSize={currentGridSize}
           canvasSize={canvasSize}
           setCanvasSize={setCanvasSize}
+          registerFogControls={registerFogControls}
         />
       </div>
     )

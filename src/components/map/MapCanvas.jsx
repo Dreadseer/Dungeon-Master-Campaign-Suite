@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Stage, Layer, Image as KonvaImage, Line } from 'react-konva'
+import { Stage, Layer, Image as KonvaImage, Line, Rect } from 'react-konva'
+import {
+  initFog, isCellRevealed, setBrushRevealed,
+  getMapDimensions, isCellInViewport,
+} from '../../utils/fogUtils'
 
 // Layout constants — keep in sync with Sidebar, TopBar, and MapToolbar heights
 const SIDEBAR_W    = 240
@@ -16,9 +20,14 @@ export default function MapCanvas({
   setStageScale,
   setStagePos,
   activeTool,
+  fogBrushSize,     // 1 | 3 | 5 — passed from MapEngine via MapToolbar
   gridSize,         // live value from toolbar (may differ from map.grid_size before save)
   canvasSize,
   setCanvasSize,
+  // Imperative handles for Reveal All / Hide All from toolbar
+  onRevealAll,
+  onHideAll,
+  registerFogControls,  // callback to expose revealAll/hideAll up to MapEngine
 }) {
   const stageRef = useRef(null)
 
@@ -29,6 +38,11 @@ export default function MapCanvas({
   // Pan state
   const [isPanning,   setIsPanning]   = useState(false)
   const [lastPanPos,  setLastPanPos]  = useState({ x: 0, y: 0 })
+
+  // Fog state
+  const [fogData,        setFogData]        = useState([])
+  const [isFogPainting,  setIsFogPainting]  = useState(false)
+  const saveFogRef = useRef(null)
 
   // ── Canvas resize listener ─────────────────────────────────────────
   useEffect(() => {
@@ -59,6 +73,81 @@ export default function MapCanvas({
     })
   }, [map.image_path])
 
+  // ── Fog initialisation ─────────────────────────────────────────────
+  // Re-run whenever image dimensions or grid size change (map resize/reimport)
+  useEffect(() => {
+    const effectiveGrid = gridSize || map.grid_size || 50
+    const { numCols, numRows } = getMapDimensions(imageSize, effectiveGrid)
+    const saved = map.fog_data ? JSON.parse(map.fog_data) : []
+    if (saved.length === numCols * numRows) {
+      setFogData(saved)
+    } else {
+      // Fresh map or dimensions changed — start fully hidden
+      setFogData(initFog(numCols, numRows, false))
+    }
+  }, [imageSize, map.grid_size, map.fog_data]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Note: intentionally exclude gridSize from deps — we only reinit on saved grid_size change,
+  // not on every live toolbar nudge (that would wipe unsaved fog state).
+
+  // ── Debounced fog save ─────────────────────────────────────────────
+  const debounceSaveFog = useCallback((next) => {
+    clearTimeout(saveFogRef.current)
+    saveFogRef.current = setTimeout(() => {
+      window.electronAPI.db.maps.updateFog(map.id, next)
+      onFogChange?.(next)
+    }, 500)
+  }, [map.id, onFogChange])
+
+  // ── Reveal All / Hide All (exposed to toolbar via registerFogControls) ──
+  const revealAll = useCallback(() => {
+    const effectiveGrid = gridSize || map.grid_size || 50
+    const { numCols, numRows } = getMapDimensions(imageSize, effectiveGrid)
+    const next = initFog(numCols, numRows, true)
+    setFogData(next)
+    window.electronAPI.db.maps.updateFog(map.id, next)
+    onFogChange?.(next)
+  }, [imageSize, gridSize, map.grid_size, map.id, onFogChange])
+
+  const hideAll = useCallback(() => {
+    const effectiveGrid = gridSize || map.grid_size || 50
+    const { numCols, numRows } = getMapDimensions(imageSize, effectiveGrid)
+    const next = initFog(numCols, numRows, false)
+    setFogData(next)
+    window.electronAPI.db.maps.updateFog(map.id, next)
+    onFogChange?.(next)
+  }, [imageSize, gridSize, map.grid_size, map.id, onFogChange])
+
+  // Register controls with parent so toolbar buttons can call them
+  useEffect(() => {
+    registerFogControls?.({ revealAll, hideAll })
+  }, [registerFogControls, revealAll, hideAll])
+
+  // ── Fog brush helpers ──────────────────────────────────────────────
+  const pointerToStage = useCallback((e) => {
+    const stage   = e.target.getStage()
+    const pointer = stage.getPointerPosition()
+    return {
+      x: (pointer.x - stagePos.x) / stageScale,
+      y: (pointer.y - stagePos.y) / stageScale,
+    }
+  }, [stagePos, stageScale])
+
+  const applyFogBrush = useCallback((e) => {
+    if (mode !== 'dm') return
+    if (activeTool !== 'fog-reveal' && activeTool !== 'fog-hide') return
+    const effectiveGrid = gridSize || map.grid_size || 50
+    const { x, y }           = pointerToStage(e)
+    const col                 = Math.floor(x / effectiveGrid)
+    const row                 = Math.floor(y / effectiveGrid)
+    const { numCols, numRows } = getMapDimensions(imageSize, effectiveGrid)
+    const revealed             = activeTool === 'fog-reveal'
+    const brushSize            = fogBrushSize ?? 1
+    const next = setBrushRevealed(fogData, col, row, numCols, numRows, brushSize, revealed)
+    setFogData(next)
+    debounceSaveFog(next)
+  }, [mode, activeTool, gridSize, map.grid_size, imageSize, fogBrushSize,
+      fogData, pointerToStage, debounceSaveFog])
+
   // ── Grid renderer ─────────────────────────────────────────────────
   const renderGrid = useCallback(() => {
     const lines    = []
@@ -67,7 +156,6 @@ export default function MapCanvas({
     const h        = imageSize.height || 3000
     const color    = 'rgba(201, 168, 76, 0.35)'
 
-    // Viewport-bounded range to avoid drawing off-screen lines
     const visX0 = (-stagePos.x) / stageScale
     const visY0 = (-stagePos.y) / stageScale
     const visX1 = visX0 + canvasSize.width  / stageScale
@@ -80,20 +168,49 @@ export default function MapCanvas({
 
     for (let col = colStart; col <= colEnd; col++) {
       const x = col * cellSize
-      lines.push(
-        <Line key={`v${col}`} points={[x, rowStart * cellSize, x, rowEnd * cellSize]}
-          stroke={color} strokeWidth={0.5} listening={false} />
-      )
+      lines.push(<Line key={`v${col}`} points={[x, rowStart * cellSize, x, rowEnd * cellSize]}
+        stroke={color} strokeWidth={0.5} listening={false} />)
     }
     for (let row = rowStart; row <= rowEnd; row++) {
       const y = row * cellSize
-      lines.push(
-        <Line key={`h${row}`} points={[colStart * cellSize, y, colEnd * cellSize, y]}
-          stroke={color} strokeWidth={0.5} listening={false} />
-      )
+      lines.push(<Line key={`h${row}`} points={[colStart * cellSize, y, colEnd * cellSize, y]}
+        stroke={color} strokeWidth={0.5} listening={false} />)
     }
     return lines
   }, [gridSize, map.grid_size, imageSize, stagePos, stageScale, canvasSize])
+
+  // ── Fog renderer ──────────────────────────────────────────────────
+  const renderFog = useCallback(() => {
+    if (!fogData.length) return null
+    const effectiveGrid        = gridSize || map.grid_size || 50
+    const { numCols, numRows } = getMapDimensions(imageSize, effectiveGrid)
+    const rects = []
+
+    // TODO Phase 7 optimization: merge fog into a single clipping mask
+    for (let row = 0; row < numRows; row++) {
+      for (let col = 0; col < numCols; col++) {
+        if (isCellRevealed(fogData, col, row, numCols)) continue
+
+        // Viewport cull — skip off-screen fog cells
+        if (!isCellInViewport(col, row, effectiveGrid, stagePos, stageScale, canvasSize)) continue
+
+        // In player mode, fog is fully opaque — no hint of what lies beneath
+        const alpha = mode === 'player' ? 1.0 : 0.92
+        rects.push(
+          <Rect
+            key={`fog-${col}-${row}`}
+            x={col * effectiveGrid}
+            y={row * effectiveGrid}
+            width={effectiveGrid}
+            height={effectiveGrid}
+            fill={`rgba(10, 8, 5, ${alpha})`}
+            listening={false}
+          />
+        )
+      }
+    }
+    return rects
+  }, [fogData, gridSize, map.grid_size, imageSize, stagePos, stageScale, canvasSize, mode])
 
   // ── Zoom to cursor ────────────────────────────────────────────────
   const handleWheel = useCallback((e) => {
@@ -117,30 +234,44 @@ export default function MapCanvas({
     })
   }, [stageScale, stagePos, setStageScale, setStagePos])
 
-  // ── Pan (middle-click or right-click drag) ────────────────────────
+  // ── Mouse handlers (pan + fog brush) ─────────────────────────────
   const handleMouseDown = useCallback((e) => {
+    // Pan: middle or right button
     if (e.evt.button === 1 || e.evt.button === 2) {
       e.evt.preventDefault()
       setIsPanning(true)
       setLastPanPos({ x: e.evt.clientX, y: e.evt.clientY })
+      return
     }
-  }, [])
+    // Fog brush: left button
+    if (e.evt.button === 0 && (activeTool === 'fog-reveal' || activeTool === 'fog-hide')) {
+      setIsFogPainting(true)
+      applyFogBrush(e)
+    }
+  }, [activeTool, applyFogBrush])
 
   const handleMouseMove = useCallback((e) => {
-    if (!isPanning) return
-    const dx = e.evt.clientX - lastPanPos.x
-    const dy = e.evt.clientY - lastPanPos.y
-    setStagePos(prev => ({ x: prev.x + dx, y: prev.y + dy }))
-    setLastPanPos({ x: e.evt.clientX, y: e.evt.clientY })
-  }, [isPanning, lastPanPos, setStagePos])
+    if (isPanning) {
+      const dx = e.evt.clientX - lastPanPos.x
+      const dy = e.evt.clientY - lastPanPos.y
+      setStagePos(prev => ({ x: prev.x + dx, y: prev.y + dy }))
+      setLastPanPos({ x: e.evt.clientX, y: e.evt.clientY })
+      return
+    }
+    if (isFogPainting) {
+      applyFogBrush(e)
+    }
+  }, [isPanning, lastPanPos, setStagePos, isFogPainting, applyFogBrush])
 
   const handleMouseUp = useCallback(() => {
     setIsPanning(false)
+    setIsFogPainting(false)
   }, [])
 
   // ── Cursor style ──────────────────────────────────────────────────
-  const cursor = isPanning ? 'grabbing'
-    : activeTool === 'pan' ? 'grab'
+  const cursor = isPanning     ? 'grabbing'
+    : activeTool === 'pan'     ? 'grab'
+    : activeTool === 'fog-reveal' || activeTool === 'fog-hide' ? 'cell'
     : 'crosshair'
 
   return (
@@ -171,8 +302,10 @@ export default function MapCanvas({
         {renderGrid()}
       </Layer>
 
-      {/* Layer 3 — Fog of war (Prompt 03) */}
-      <Layer>{/* fog renders here */}</Layer>
+      {/* Layer 3 — Fog of war */}
+      <Layer listening={false}>
+        {renderFog()}
+      </Layer>
 
       {/* Layer 4 — Tokens (Prompt 04) */}
       <Layer>{/* tokens render here */}</Layer>
