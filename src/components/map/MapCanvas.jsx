@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Stage, Layer, Image as KonvaImage, Line, Rect } from 'react-konva'
+import { Stage, Layer, Image as KonvaImage, Line, Rect, Text } from 'react-konva'
 import {
   initFog, isCellRevealed, setBrushRevealed,
   getMapDimensions, isCellInViewport,
@@ -34,6 +34,7 @@ export default function MapCanvas({
   // Background image
   const [backgroundImage, setBackgroundImage] = useState(null)
   const [imageSize, setImageSize]             = useState({ width: 0, height: 0 })
+  const [imageError, setImageError]           = useState(false)
 
   // Pan state
   const [isPanning,   setIsPanning]   = useState(false)
@@ -56,21 +57,25 @@ export default function MapCanvas({
   }, [setCanvasSize])
 
   // ── Background image loader ────────────────────────────────────────
+  // Uses dmcs-asset:// protocol — no base64/IPC overhead, works with large files
   useEffect(() => {
+    setImageError(false)
     if (!map.image_path) {
       setBackgroundImage(null)
       setImageSize({ width: 0, height: 0 })
       return
     }
-    window.electronAPI.file.readImageAsBase64(map.image_path).then(base64 => {
-      if (!base64) return
-      const img = new window.Image()
-      img.onload = () => {
-        setBackgroundImage(img)
-        setImageSize({ width: img.width, height: img.height })
-      }
-      img.src = base64
-    })
+    const url = window.electronAPI.file.getLocalUrl(map.image_path)
+    const img = new window.Image()
+    img.onload = () => {
+      setBackgroundImage(img)
+      setImageSize({ width: img.width, height: img.height })
+    }
+    img.onerror = (e) => {
+      console.error('[MapCanvas] Failed to load image via protocol:', map.image_path, e)
+      setImageError(true)
+    }
+    img.src = url
   }, [map.image_path])
 
   // ── Fog initialisation ─────────────────────────────────────────────
@@ -294,6 +299,21 @@ export default function MapCanvas({
       <Layer>
         {backgroundImage && (
           <KonvaImage image={backgroundImage} x={0} y={0} listening={false} />
+        )}
+        {/* Show placeholder text when no image is set or image failed — visible
+            through fog so DM knows the image state without needing to reveal all */}
+        {!backgroundImage && (
+          <Text
+            x={20} y={20}
+            text={imageError
+              ? `⚠ Image failed to load\n${map.image_path}`
+              : map.image_path
+                ? '⏳ Loading image…'
+                : '🗺 No background image\nChoose an image when editing this map.'}
+            fontSize={14}
+            fill={imageError ? '#e05050' : '#6b5a3a'}
+            listening={false}
+          />
         )}
       </Layer>
 

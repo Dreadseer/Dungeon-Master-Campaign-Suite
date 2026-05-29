@@ -71,6 +71,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     readImageAsBase64:(filePath)      => ipcRenderer.invoke('file:readImageAsBase64', filePath),
     saveThumbnail:    (mapId, base64) => ipcRenderer.invoke('file:saveThumbnail', mapId, base64),
     readThumbnail:    (mapId)         => ipcRenderer.invoke('file:readThumbnail', mapId),
+    // Convert an absolute local path → dmcs-asset:// URL (no IPC round-trip, no base64).
+    // Uses encodeURI (preserves / and :) after normalising backslashes → forward slashes.
+    // Handler in main.js decodes and reads the file, returning it as a Response.
+    getLocalUrl: (filePath) => filePath
+      ? 'dmcs-asset:///' + encodeURI(filePath.replace(/\\/g, '/'))
+      : null,
   },
 
   srd: {
