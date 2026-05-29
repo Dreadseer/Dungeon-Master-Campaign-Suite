@@ -4,6 +4,9 @@ import {
   initFog, isCellRevealed, setBrushRevealed,
   getMapDimensions, isCellInViewport,
 } from '../../utils/fogUtils'
+import MapToken    from './MapToken'
+import AddTokenModal  from './AddTokenModal'
+import TokenInspector from './TokenInspector'
 
 // Layout constants — keep in sync with Sidebar, TopBar, and MapToolbar heights
 const SIDEBAR_W    = 240
@@ -13,6 +16,7 @@ const MAPTOOLBAR_H = 46
 export default function MapCanvas({
   map,
   mode,
+  campaignId,
   onFogChange,
   onTokensChange,
   stageScale,
@@ -44,6 +48,13 @@ export default function MapCanvas({
   const [fogData,        setFogData]        = useState([])
   const [isFogPainting,  setIsFogPainting]  = useState(false)
   const saveFogRef = useRef(null)
+
+  // Token state
+  const [tokens,            setTokens]            = useState([])
+  const [selectedToken,     setSelectedToken]     = useState(null)
+  const [showAddTokenModal, setShowAddTokenModal] = useState(false)
+  const [addTokenCell,      setAddTokenCell]      = useState({ col: 0, row: 0 })
+  const saveTokensRef = useRef(null)
 
   // ── Canvas resize listener ─────────────────────────────────────────
   useEffect(() => {
@@ -94,6 +105,16 @@ export default function MapCanvas({
   // Note: intentionally exclude gridSize from deps — we only reinit on saved grid_size change,
   // not on every live toolbar nudge (that would wipe unsaved fog state).
 
+  // ── Token initialisation ───────────────────────────────────────────
+  useEffect(() => {
+    try {
+      setTokens(map.tokens ? JSON.parse(map.tokens) : [])
+    } catch {
+      setTokens([])
+    }
+    setSelectedToken(null)
+  }, [map.tokens])
+
   // ── Debounced fog save ─────────────────────────────────────────────
   const debounceSaveFog = useCallback((next) => {
     clearTimeout(saveFogRef.current)
@@ -102,6 +123,41 @@ export default function MapCanvas({
       onFogChange?.(next)
     }, 500)
   }, [map.id, onFogChange])
+
+  // ── Token save & mutators ──────────────────────────────────────────
+  const saveTokens = useCallback((next) => {
+    clearTimeout(saveTokensRef.current)
+    saveTokensRef.current = setTimeout(() => {
+      window.electronAPI.db.maps.updateTokens(map.id, next)
+      onTokensChange?.(next)
+    }, 300)
+  }, [map.id, onTokensChange])
+
+  const handleTokenDragEnd = useCallback((tokenId, newCol, newRow) => {
+    setTokens(prev => {
+      const next = prev.map(t => t.id === tokenId ? { ...t, col: newCol, row: newRow } : t)
+      saveTokens(next)
+      return next
+    })
+  }, [saveTokens])
+
+  const addToken = useCallback((token) => {
+    setTokens(prev => {
+      const next = [...prev, token]
+      saveTokens(next)
+      return next
+    })
+  }, [saveTokens])
+
+  const deleteSelectedToken = useCallback(() => {
+    if (!selectedToken) return
+    setTokens(prev => {
+      const next = prev.filter(t => t.id !== selectedToken.id)
+      saveTokens(next)
+      return next
+    })
+    setSelectedToken(null)
+  }, [selectedToken, saveTokens])
 
   // ── Reveal All / Hide All (exposed to toolbar via registerFogControls) ──
   const revealAll = useCallback(() => {
@@ -152,6 +208,20 @@ export default function MapCanvas({
     debounceSaveFog(next)
   }, [mode, activeTool, gridSize, map.grid_size, imageSize, fogBrushSize,
       fogData, pointerToStage, debounceSaveFog])
+
+  // ── Double-click: open AddTokenModal on empty canvas ──────────────
+  const handleDblClick = useCallback((e) => {
+    if (activeTool !== 'token') return
+    if (mode !== 'dm') return
+    // Only fire when clicking on empty stage background (not a token shape)
+    if (e.target !== e.target.getStage()) return
+    const { x, y }      = pointerToStage(e)
+    const effectiveGrid  = gridSize || map.grid_size || 50
+    const col            = Math.floor(x / effectiveGrid)
+    const row            = Math.floor(y / effectiveGrid)
+    setAddTokenCell({ col, row })
+    setShowAddTokenModal(true)
+  }, [activeTool, mode, pointerToStage, gridSize, map.grid_size])
 
   // ── Grid renderer ─────────────────────────────────────────────────
   const renderGrid = useCallback(() => {
@@ -253,6 +323,10 @@ export default function MapCanvas({
       setIsFogPainting(true)
       applyFogBrush(e)
     }
+    // Deselect token when clicking empty canvas with token tool
+    if (e.evt.button === 0 && activeTool === 'token' && e.target === e.target.getStage()) {
+      setSelectedToken(null)
+    }
   }, [activeTool, applyFogBrush])
 
   const handleMouseMove = useCallback((e) => {
@@ -277,58 +351,99 @@ export default function MapCanvas({
   const cursor = isPanning     ? 'grabbing'
     : activeTool === 'pan'     ? 'grab'
     : activeTool === 'fog-reveal' || activeTool === 'fog-hide' ? 'cell'
-    : 'crosshair'
+    : activeTool === 'token'   ? 'crosshair'
+    : 'default'
+
+  const effectiveGrid = gridSize || map.grid_size || 50
 
   return (
-    <Stage
-      ref={stageRef}
-      width={canvasSize.width}
-      height={canvasSize.height}
-      scaleX={stageScale}
-      scaleY={stageScale}
-      x={stagePos.x}
-      y={stagePos.y}
-      onWheel={handleWheel}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onContextMenu={e => e.evt.preventDefault()}
-      style={{ background: '#0d0a05', cursor, display: 'block' }}
-    >
-      {/* Layer 1 — Background image */}
-      <Layer>
-        {backgroundImage && (
-          <KonvaImage image={backgroundImage} x={0} y={0} listening={false} />
-        )}
-        {/* Show placeholder text when no image is set or image failed — visible
-            through fog so DM knows the image state without needing to reveal all */}
-        {!backgroundImage && (
-          <Text
-            x={20} y={20}
-            text={imageError
-              ? `⚠ Image failed to load\n${map.image_path}`
-              : map.image_path
-                ? '⏳ Loading image…'
-                : '🗺 No background image\nChoose an image when editing this map.'}
-            fontSize={14}
-            fill={imageError ? '#e05050' : '#6b5a3a'}
-            listening={false}
-          />
-        )}
-      </Layer>
+    <div style={{ position: 'relative', width: canvasSize.width, height: canvasSize.height }}>
+      <Stage
+        ref={stageRef}
+        width={canvasSize.width}
+        height={canvasSize.height}
+        scaleX={stageScale}
+        scaleY={stageScale}
+        x={stagePos.x}
+        y={stagePos.y}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onDblClick={handleDblClick}
+        onContextMenu={e => e.evt.preventDefault()}
+        style={{ background: '#0d0a05', cursor, display: 'block' }}
+      >
+        {/* Layer 1 — Background image */}
+        <Layer>
+          {backgroundImage && (
+            <KonvaImage image={backgroundImage} x={0} y={0} listening={false} />
+          )}
+          {/* Placeholder when no image is loaded — helps DM distinguish
+              "image hidden by fog" from "image not loaded" */}
+          {!backgroundImage && (
+            <Text
+              x={20} y={20}
+              text={imageError
+                ? `⚠ Image failed to load\n${map.image_path}`
+                : map.image_path
+                  ? '⏳ Loading image…'
+                  : '🗺 No background image\nChoose an image when editing this map.'}
+              fontSize={14}
+              fill={imageError ? '#e05050' : '#6b5a3a'}
+              listening={false}
+            />
+          )}
+        </Layer>
 
-      {/* Layer 2 — Grid */}
-      <Layer listening={false}>
-        {renderGrid()}
-      </Layer>
+        {/* Layer 2 — Grid */}
+        <Layer listening={false}>
+          {renderGrid()}
+        </Layer>
 
-      {/* Layer 3 — Fog of war */}
-      <Layer listening={false}>
-        {renderFog()}
-      </Layer>
+        {/* Layer 3 — Fog of war */}
+        <Layer listening={false}>
+          {renderFog()}
+        </Layer>
 
-      {/* Layer 4 — Tokens (Prompt 04) */}
-      <Layer>{/* tokens render here */}</Layer>
-    </Stage>
+        {/* Layer 4 — Tokens */}
+        <Layer>
+          {tokens.map(token => (
+            <MapToken
+              key={token.id}
+              token={token}
+              gridSize={effectiveGrid}
+              isSelected={selectedToken?.id === token.id}
+              onSelect={setSelectedToken}
+              onDragEnd={handleTokenDragEnd}
+              mode={mode}
+            />
+          ))}
+        </Layer>
+      </Stage>
+
+      {/* Token inspector overlay — bottom-left of canvas */}
+      {selectedToken && (
+        <TokenInspector
+          token={selectedToken}
+          onDelete={deleteSelectedToken}
+          onDeselect={() => setSelectedToken(null)}
+        />
+      )}
+
+      {/* Add token modal */}
+      {showAddTokenModal && (
+        <AddTokenModal
+          isOpen={showAddTokenModal}
+          onClose={() => setShowAddTokenModal(false)}
+          onAdd={(token) => {
+            addToken(token)
+            setShowAddTokenModal(false)
+          }}
+          cell={addTokenCell}
+          campaignId={campaignId}
+        />
+      )}
+    </div>
   )
 }

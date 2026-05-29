@@ -58,13 +58,20 @@ export default function MapToolbar({
           🌫️ Hide
         </button>
         <button
-          style={s.toolBtn}
-          disabled
-          title="Tokens — Prompt 04"
+          style={activeTool === 'token' ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn}
+          onClick={() => onToolChange('token')}
+          title="Token tool — double-click to place, drag to move"
         >
           🪙 Token
         </button>
       </div>
+
+      {/* Token tool hint */}
+      {activeTool === 'token' && (
+        <div style={s.section}>
+          <span style={s.hint}>Double-click to place · Click to select · Drag to move</span>
+        </div>
+      )}
 
       {/* ── Fog controls (visible when a fog tool is active) ── */}
       {isFogTool && (
@@ -255,6 +262,12 @@ const s = {
     fontSize: '0.68rem',
     padding: '0.1rem 0.35rem',
     borderRadius: 3,
+  },
+  hint: {
+    color:     '#6b5a3a',
+    fontSize:  '0.72rem',
+    fontStyle: 'italic',
+    whiteSpace: 'nowrap',
   },
   backBtn: {
     background: 'none',
