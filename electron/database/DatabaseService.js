@@ -22,7 +22,8 @@ class DatabaseService {
     )
 
     const migrations = [
-      { id: 1, name: 'core_schema', sql: MIGRATION_001 },
+      { id: 1, name: 'core_schema',       sql: MIGRATION_001 },
+      { id: 2, name: 'connections_lore',  sql: MIGRATION_002 },
     ]
 
     for (const m of migrations) {
@@ -187,6 +188,25 @@ const MIGRATION_001 = `
     x_pos       REAL,
     y_pos       REAL
   );
+`
+
+// Migration 002 — add campaign_id to connections; expand compendium_custom type check to include 'lore'
+const MIGRATION_002 = `
+  ALTER TABLE connections ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id);
+
+  CREATE TABLE IF NOT EXISTS compendium_custom_new (
+    id          INTEGER PRIMARY KEY,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    type        TEXT CHECK(type IN ('item','spell','equipment','monster','lore')),
+    name        TEXT NOT NULL,
+    data        TEXT,
+    source      TEXT DEFAULT 'custom' CHECK(source IN ('custom','srd','pdf_upload')),
+    created_at  DATETIME DEFAULT (datetime('now'))
+  );
+
+  INSERT INTO compendium_custom_new SELECT * FROM compendium_custom;
+  DROP TABLE compendium_custom;
+  ALTER TABLE compendium_custom_new RENAME TO compendium_custom;
 `
 
 module.exports = DatabaseService

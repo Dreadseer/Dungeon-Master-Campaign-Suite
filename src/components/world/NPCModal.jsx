@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import EntityModal from './EntityModal'
 import useCampaignStore from '../../stores/campaignStore'
 
@@ -7,7 +7,9 @@ const EMPTY_FORM = { name: '', race: '', class: '', role: '', location_id: null,
 
 export default function NPCModal({ isOpen, npc, onClose, onSaved }) {
   const activeCampaign = useCampaignStore(s => s.activeCampaign)
-  const [tab, setTab]           = useState(0)
+  const [tab, setTab]             = useState(0)
+  const [connections, setConnections] = useState([])
+  const [entityMap, setEntityMap]     = useState({})
   const [form, setForm]         = useState(EMPTY_FORM)
   const [locations, setLocations] = useState([])
   const [factions, setFactions]   = useState([])
@@ -37,6 +39,24 @@ export default function NPCModal({ isOpen, npc, onClose, onSaved }) {
     ]).then(([locs, facs]) => { setLocations(locs); setFactions(facs) })
   }, [isOpen, npc?.id]) // eslint-disable-line
 
+  // Load connections for Tab 3 when NPC exists and tab is open
+  useEffect(() => {
+    if (tab !== 2 || !npc?.id) return
+    Promise.all([
+      window.electronAPI.db.connections.getForEntity('npc', npc.id),
+      window.electronAPI.db.npcs.getAll(activeCampaign.id),
+      window.electronAPI.db.locations.getAll(activeCampaign.id),
+      window.electronAPI.db.factions.getAll(activeCampaign.id),
+    ]).then(([conns, npcs, locs, facs]) => {
+      setConnections(conns)
+      const map = {}
+      npcs.forEach(e  => { map[`npc:${e.id}`]      = e.name })
+      locs.forEach(e  => { map[`location:${e.id}`] = e.name })
+      facs.forEach(e  => { map[`faction:${e.id}`]  = e.name })
+      setEntityMap(map)
+    })
+  }, [tab, npc?.id]) // eslint-disable-line
+
   function setField(k, v) { setForm(f => ({ ...f, [k]: v })) }
 
   async function handleSubmit(e) {
@@ -65,7 +85,7 @@ export default function NPCModal({ isOpen, npc, onClose, onSaved }) {
     >
       {/* Tab bar */}
       <div style={s.tabs}>
-        {['Identity', 'Details'].map((label, i) => (
+        {['Identity', 'Details', ...(npc ? ['Connections'] : [])].map((label, i) => (
           <button key={i} style={{ ...s.tab, ...(tab === i ? s.tabActive : {}) }}
             type="button" onClick={() => setTab(i)}>
             {label}
@@ -140,21 +160,71 @@ export default function NPCModal({ isOpen, npc, onClose, onSaved }) {
           </div>
         )}
 
+        {/* Tab 2 — Connections (edit mode only) */}
+        {tab === 2 && npc && (
+          <div style={connS.panel}>
+            {connections.length === 0 ? (
+              <p style={connS.empty}>No connections for this NPC yet.</p>
+            ) : (
+              <div style={connS.list}>
+                {connections.map(conn => {
+                  const isA  = conn.entity_a_type === 'npc' && conn.entity_a_id === npc.id
+                  const otherType = isA ? conn.entity_b_type : conn.entity_a_type
+                  const otherId   = isA ? conn.entity_b_id   : conn.entity_a_id
+                  const otherName = entityMap[`${otherType}:${otherId}`] || `Unknown ${otherType}`
+                  return (
+                    <div key={conn.id} style={connS.row}>
+                      <span style={connS.rel}>{conn.relationship}</span>
+                      {' with '}
+                      <span style={connS.name}>{otherName}</span>
+                      <span style={connS.type}>{otherType}</span>
+                      {conn.notes && <p style={connS.notes}>{conn.notes}</p>}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            <button style={s.btnSecondary} type="button"
+              onClick={() => { onClose(); window.location.href = `/world/connections` }}>
+              + Manage Connections
+            </button>
+          </div>
+        )}
+
         <div style={s.footer}>
           <div style={s.tabNav}>
             {tab === 0 && <button style={s.btnSecondary} type="button" onClick={() => setTab(1)}>Details →</button>}
-            {tab === 1 && <button style={s.btnSecondary} type="button" onClick={() => setTab(0)}>← Identity</button>}
+            {tab === 1 && (
+              <>
+                <button style={s.btnSecondary} type="button" onClick={() => setTab(0)}>← Identity</button>
+                {npc && <button style={{ ...s.btnSecondary, marginLeft: '0.4rem' }} type="button" onClick={() => setTab(2)}>Connections →</button>}
+              </>
+            )}
+            {tab === 2 && <button style={s.btnSecondary} type="button" onClick={() => setTab(1)}>← Details</button>}
           </div>
           <div style={s.actions}>
-            <button style={s.btnPrimary} type="submit" disabled={saving}>
-              {saving ? 'Saving…' : npc ? 'Save Changes' : 'Create NPC'}
-            </button>
+            {tab !== 2 && (
+              <button style={s.btnPrimary} type="submit" disabled={saving}>
+                {saving ? 'Saving…' : npc ? 'Save Changes' : 'Create NPC'}
+              </button>
+            )}
             <button style={s.btnSecondary} type="button" onClick={onClose}>Cancel</button>
           </div>
         </div>
       </form>
     </EntityModal>
   )
+}
+
+const connS = {
+  panel: { padding: '0.5rem 0 1rem' },
+  empty: { color: '#6b5a3a', fontSize: '0.9rem', marginBottom: '1rem' },
+  list:  { display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' },
+  row:   { background: '#0d0a05', border: '1px solid #2a1c08', borderRadius: 4, padding: '0.6rem 0.8rem', fontSize: '0.85rem', color: '#e8e0d0' },
+  rel:   { color: '#c9a84c', fontStyle: 'italic' },
+  name:  { fontWeight: 500, marginLeft: '0.25rem' },
+  type:  { color: '#6b5a3a', fontSize: '0.75rem', marginLeft: '0.4rem' },
+  notes: { color: '#6b5a3a', fontSize: '0.78rem', margin: '0.3rem 0 0', fontStyle: 'italic' },
 }
 
 const s = {
