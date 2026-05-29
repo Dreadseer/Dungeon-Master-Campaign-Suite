@@ -160,6 +160,7 @@ export default function MapEngine() {
         <MapCanvas
           map={activeMap}
           mode="dm"
+          campaignId={activeCampaign.id}
           onFogChange={null}
           onTokensChange={null}
           stageScale={stageScale}
