@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import useCampaignStore from '../../stores/campaignStore'
 import EntityCard from '../../components/world/EntityCard'
 import EntityModal from '../../components/world/EntityModal'
+import Skeleton from '../../components/ui/Skeleton'
 
 const CATEGORIES = ['History', 'Faction', 'Location', 'Secret', 'Other']
 const EMPTY_FORM  = { name: '', category: 'History', content: '', is_secret: false }
@@ -12,6 +13,7 @@ export default function Lore() {
   const [searchParams, setSearchParams] = useSearchParams()
 
   const [lore, setLore]         = useState([])
+  const [loading, setLoading]   = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing]   = useState(null)
   const [viewEntry, setViewEntry] = useState(null) // full-view mode
@@ -22,7 +24,8 @@ export default function Lore() {
 
   const load = useCallback(() => {
     if (!activeCampaign?.id) return
-    window.electronAPI.db.lore.getAll(activeCampaign.id).then(setLore)
+    setLoading(true)
+    window.electronAPI.db.lore.getAll(activeCampaign.id).then(l => { setLore(l); setLoading(false) })
   }, [activeCampaign?.id])
 
   useEffect(() => { load() }, [load])
@@ -107,7 +110,9 @@ export default function Lore() {
         ))}
       </div>
 
-      {lore.length === 0 ? (
+      {loading ? (
+        <Skeleton count={3} height="4rem" />
+      ) : lore.length === 0 ? (
         <div style={s.empty}>
           <p style={s.emptyText}>No lore entries yet. Every world has a history waiting to be written.</p>
           <button style={s.btnPrimary} onClick={openCreate}>+ New Lore Entry</button>

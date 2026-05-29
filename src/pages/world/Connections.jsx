@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import useCampaignStore from '../../stores/campaignStore'
 import EntityModal from '../../components/world/EntityModal'
+import Skeleton from '../../components/ui/Skeleton'
 
 const ENTITY_TYPES = ['npc', 'location', 'faction']
 const RELATIONSHIP_SUGGESTIONS = [
@@ -19,7 +20,8 @@ export default function Connections() {
   const activeCampaign = useCampaignStore(s => s.activeCampaign)
 
   const [connections, setConnections] = useState([])
-  const [entityMap, setEntityMap]     = useState({})  // { "npc:1": "Mira Ashveil", ... }
+  const [entityMap, setEntityMap]     = useState({})
+  const [loading, setLoading]         = useState(true)  // { "npc:1": "Mira Ashveil", ... }
   const [allEntities, setAllEntities] = useState({ npc: [], location: [], faction: [] })
 
   const [modalOpen, setModalOpen] = useState(false)
@@ -39,6 +41,7 @@ export default function Connections() {
     ])
     setConnections(conns)
     setAllEntities({ npc: npcs, location: locations, faction: factions })
+    setLoading(false)
     const map = {}
     npcs.forEach(e      => { map[`npc:${e.id}`]      = e.name })
     locations.forEach(e => { map[`location:${e.id}`] = e.name })
@@ -135,7 +138,9 @@ export default function Connections() {
         ))}
       </div>
 
-      {connections.length === 0 ? (
+      {loading ? (
+        <Skeleton count={3} height="3rem" />
+      ) : connections.length === 0 ? (
         <div style={s.empty}>
           <p style={s.emptyText}>No connections yet. Every web of intrigue starts with a single thread.</p>
           <button style={s.btnPrimary} onClick={openCreate}>+ New Connection</button>

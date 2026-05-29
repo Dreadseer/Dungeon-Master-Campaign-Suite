@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import useCampaignStore from '../../stores/campaignStore'
 import EntityCard from '../../components/world/EntityCard'
 import EntityModal from '../../components/world/EntityModal'
+import Skeleton from '../../components/ui/Skeleton'
 
 const TYPES = ['town', 'dungeon', 'shop', 'region', 'landmark']
 const TABS  = ['All', ...TYPES]
@@ -15,16 +16,21 @@ export default function Locations() {
   const [modalOpen, setModalOpen]   = useState(false)
   const [editing, setEditing]       = useState(null)
   const [form, setForm]             = useState(EMPTY_FORM)
+  const [loading, setLoading]       = useState(true)
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState('')
   const [searchParams, setSearchParams] = useSearchParams()
+  const [locSearch, setLocSearch]   = useState('')
+  const [hasSubs, setHasSubs]       = useState(false)
+  const [sortBy, setSortBy]         = useState('name-asc')
   const [locConnections, setLocConnections] = useState([])
   const [locConnOpen, setLocConnOpen]       = useState(false)
   const [locEntityMap, setLocEntityMap]     = useState({})
 
   const load = useCallback(() => {
     if (!activeCampaign?.id) return
-    window.electronAPI.db.locations.getAll(activeCampaign.id).then(setLocations)
+    setLoading(true)
+    window.electronAPI.db.locations.getAll(activeCampaign.id).then(l => { setLocations(l); setLoading(false) })
   }, [activeCampaign?.id])
 
   useEffect(() => { load() }, [load])
@@ -36,7 +42,20 @@ export default function Locations() {
     }
   }, []) // eslint-disable-line
 
-  const filtered = tab === 'All' ? locations : locations.filter(l => l.type === tab)
+  const filtered = useMemo(() => {
+    let list = tab === 'All' ? locations : locations.filter(l => l.type === tab)
+    if (locSearch) {
+      const q = locSearch.toLowerCase()
+      list = list.filter(l => l.name.toLowerCase().includes(q) || (l.description || '').toLowerCase().includes(q))
+    }
+    if (hasSubs) list = list.filter(l => locations.some(c => c.parent_location_id === l.id))
+    switch (sortBy) {
+      case 'type':   list = [...list].sort((a, b) => a.type.localeCompare(b.type)); break
+      case 'recent': list = [...list].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)); break
+      default:       list = [...list].sort((a, b) => a.name.localeCompare(b.name))
+    }
+    return list
+  }, [locations, tab, locSearch, hasSubs, sortBy])
 
   function openCreate() {
     setEditing(null)
@@ -127,7 +146,24 @@ export default function Locations() {
         ))}
       </div>
 
-      {filtered.length === 0 ? (
+      {/* Extra filters */}
+      <div style={s.filterBar}>
+        <input style={s.searchInput} value={locSearch} onChange={e => setLocSearch(e.target.value)}
+          placeholder="Search locations…" />
+        <label style={s.checkLabel}>
+          <input type="checkbox" checked={hasSubs} onChange={e => setHasSubs(e.target.checked)} />
+          {' '}Has Sub-locations
+        </label>
+        <select style={s.filterSelect} value={sortBy} onChange={e => setSortBy(e.target.value)}>
+          <option value="name-asc">Name A–Z</option>
+          <option value="type">Type</option>
+          <option value="recent">Recently Added</option>
+        </select>
+      </div>
+
+      {loading ? (
+        <Skeleton count={4} height="4rem" />
+      ) : filtered.length === 0 ? (
         <div style={s.empty}>
           <p style={s.emptyText}>
             {tab === 'All' ? 'No locations yet. Build your world.' : `No ${tab}s yet. Add your first one.`}
@@ -270,6 +306,10 @@ const s = {
   input:          { display: 'block', width: '100%', background: '#0d0a05', border: '1px solid #3a2a10', borderRadius: 4, color: '#e8e0d0', padding: '0.45rem 0.7rem', fontSize: '0.9rem', marginBottom: '0.9rem', outline: 'none', boxSizing: 'border-box' },
   row:            { display: 'flex', gap: '0.75rem', marginTop: '0.5rem' },
   err:            { color: '#e05050', fontSize: '0.82rem', marginTop: '-0.6rem', marginBottom: '0.75rem' },
+  filterBar:      { display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center' },
+  searchInput:    { background: '#0d0a05', border: '1px solid #3a2a10', borderRadius: 4, color: '#e8e0d0', padding: '0.4rem 0.7rem', fontSize: '0.85rem', outline: 'none', minWidth: 150 },
+  checkLabel:     { color: '#a89060', fontSize: '0.82rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem' },
+  filterSelect:   { background: '#0d0a05', border: '1px solid #3a2a10', borderRadius: 4, color: '#a89060', padding: '0.4rem 0.5rem', fontSize: '0.82rem', outline: 'none' },
   btnPrimary:     { background: '#c9a84c', color: '#0d0a05', border: 'none', padding: '0.5rem 1.2rem', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: '0.88rem' },
   btnSecondary:   { background: 'transparent', color: '#a89060', border: '1px solid #a89060', padding: '0.5rem 1.2rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.88rem' },
   connSection:    { borderTop: '1px solid #2a1c08', marginTop: '0.75rem', paddingTop: '0.75rem' },

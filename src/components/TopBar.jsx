@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useCampaignStore from '../stores/campaignStore'
+import WorldSearch from './world/WorldSearch'
 
 const MODE_CONFIG = {
   'online':         { label: 'Claude API',          color: '#2d6a2d', text: '#8fbc5a', border: '#4a8a4a' },
@@ -23,6 +24,7 @@ export default function TopBar() {
     <header style={styles.bar}>
       <span style={styles.title}>⚔ DM Campaign Suite</span>
       <div style={styles.right}>
+        {activeCampaign && <WorldSearch />}
         {modeConf && (
           <button
             onClick={() => navigate('/settings')}
