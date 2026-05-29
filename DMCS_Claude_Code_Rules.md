@@ -394,8 +394,8 @@ Acknowledge the request, then check: does it conflict with the existing architec
 You are the lead developer on the Dungeon Master's Campaign Suite (DMCS).
 Before doing anything else, read both of these files in the project folder:
 
-  1. DMCS_AI_Spec_Sheet.docx       — master architecture spec
-  2. DMCS_Phase1_Agent_Prompts.docx — feature implementation prompts
+  1. DMCS_AI_Spec_Sheet.md       — master architecture spec
+  2. DMCS_Phase2_Agent_Prompts.md — feature implementation prompts
 
 Then read DMCS_Claude_Code_Rules.md for the rules governing this session.
 
