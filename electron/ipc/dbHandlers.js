@@ -198,6 +198,25 @@ function registerDbHandlers(db) {
 
   ipcMain.handle('db:lore:delete', (_, id) =>
     db.run('DELETE FROM compendium_custom WHERE id=?', [id]))
+
+  // Global world search
+  ipcMain.handle('db:world:search', (_, campaignId, query) => {
+    const q = `%${query}%`
+    const locations = db.all(
+      `SELECT id, name, type, 'location' AS entity_type FROM locations WHERE campaign_id=? AND (name LIKE ? OR description LIKE ? OR lore LIKE ?)`,
+      [campaignId, q, q, q])
+    const factions = db.all(
+      `SELECT id, name, alignment AS subtitle, 'faction' AS entity_type FROM factions WHERE campaign_id=? AND (name LIKE ? OR description LIKE ? OR notes LIKE ?)`,
+      [campaignId, q, q, q])
+    const npcs = db.all(
+      `SELECT id, name, role AS subtitle, 'npc' AS entity_type FROM npcs WHERE campaign_id=? AND (name LIKE ? OR notes LIKE ? OR motivation LIKE ?)`,
+      [campaignId, q, q, q])
+    const lore = db.all(
+      `SELECT id, name, 'lore' AS entity_type FROM compendium_custom WHERE campaign_id=? AND type='lore' AND name LIKE ?`,
+      [campaignId, q])
+    return { locations, factions, npcs, lore,
+             total: locations.length + factions.length + npcs.length + lore.length }
+  })
 }
 
 module.exports = registerDbHandlers

@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import useCampaignStore from '../../stores/campaignStore'
 import EntityCard from '../../components/world/EntityCard'
 import EntityModal from '../../components/world/EntityModal'
+import Skeleton from '../../components/ui/Skeleton'
 
 const ALIGNMENTS = [
   'Lawful Good', 'Neutral Good', 'Chaotic Good',
@@ -15,6 +16,7 @@ const EMPTY_FORM = { name: '', alignment: 'Unknown', description: '', notes: '' 
 export default function Factions() {
   const activeCampaign = useCampaignStore(s => s.activeCampaign)
   const [factions, setFactions]       = useState([])
+  const [loading, setLoading]         = useState(true)
   const [modalOpen, setModalOpen]     = useState(false)
   const [editing, setEditing]         = useState(null)
   const [form, setForm]               = useState(EMPTY_FORM)
@@ -24,7 +26,8 @@ export default function Factions() {
 
   const load = useCallback(() => {
     if (!activeCampaign?.id) return
-    window.electronAPI.db.factions.getAll(activeCampaign.id).then(setFactions)
+    setLoading(true)
+    window.electronAPI.db.factions.getAll(activeCampaign.id).then(f => { setFactions(f); setLoading(false) })
   }, [activeCampaign?.id])
 
   useEffect(() => { load() }, [load])
@@ -86,7 +89,9 @@ export default function Factions() {
         <button style={s.btnPrimary} onClick={openCreate}>+ New Faction</button>
       </div>
 
-      {factions.length === 0 ? (
+      {loading ? (
+        <Skeleton count={3} height="4rem" />
+      ) : factions.length === 0 ? (
         <div style={s.empty}>
           <p style={s.emptyText}>No factions yet. Great stories need sides to take.</p>
           <button style={s.btnPrimary} onClick={openCreate}>+ New Faction</button>

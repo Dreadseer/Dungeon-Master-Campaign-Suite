@@ -43,6 +43,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       update:         (id, data)             => ipcRenderer.invoke('db:connections:update', id, data),
       delete:         (id)                   => ipcRenderer.invoke('db:connections:delete', id),
     },
+    world: {
+      search: (campaignId, query) => ipcRenderer.invoke('db:world:search', campaignId, query),
+    },
     lore: {
       getAll:   (campaignId) => ipcRenderer.invoke('db:lore:getAll', campaignId),
       getById:  (id)         => ipcRenderer.invoke('db:lore:getById', id),
