@@ -18,6 +18,9 @@ export default function Locations() {
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState('')
   const [searchParams, setSearchParams] = useSearchParams()
+  const [locConnections, setLocConnections] = useState([])
+  const [locConnOpen, setLocConnOpen]       = useState(false)
+  const [locEntityMap, setLocEntityMap]     = useState({})
 
   const load = useCallback(() => {
     if (!activeCampaign?.id) return
@@ -53,7 +56,25 @@ export default function Locations() {
     setModalOpen(true)
   }
 
-  function closeModal() { setModalOpen(false); setEditing(null) }
+  function closeModal() { setModalOpen(false); setEditing(null); setLocConnOpen(false); setLocConnections([]) }
+
+  // Load connections when editing a location and panel is opened
+  useEffect(() => {
+    if (!locConnOpen || !editing?.id) return
+    Promise.all([
+      window.electronAPI.db.connections.getForEntity('location', editing.id),
+      window.electronAPI.db.npcs.getAll(activeCampaign.id),
+      window.electronAPI.db.locations.getAll(activeCampaign.id),
+      window.electronAPI.db.factions.getAll(activeCampaign.id),
+    ]).then(([conns, npcs, locs, facs]) => {
+      setLocConnections(conns)
+      const map = {}
+      npcs.forEach(e  => { map[`npc:${e.id}`]      = e.name })
+      locs.forEach(e  => { map[`location:${e.id}`] = e.name })
+      facs.forEach(e  => { map[`faction:${e.id}`]  = e.name })
+      setLocEntityMap(map)
+    })
+  }, [locConnOpen, editing?.id]) // eslint-disable-line
   function setField(k, v) { setForm(f => ({ ...f, [k]: v })) }
 
   async function handleSubmit(e) {
@@ -195,6 +216,36 @@ export default function Locations() {
             <button style={s.btnSecondary} type="button" onClick={closeModal}>Cancel</button>
           </div>
         </form>
+
+        {editing && (
+          <div style={s.connSection}>
+            <button style={s.connToggle} type="button" onClick={() => setLocConnOpen(o => !o)}>
+              {locConnOpen ? '▾' : '▸'} Connections
+            </button>
+            {locConnOpen && (
+              <div style={s.connBody}>
+                {locConnections.length === 0 ? (
+                  <p style={s.connEmpty}>No connections for this location.</p>
+                ) : (
+                  locConnections.map(conn => {
+                    const isA  = conn.entity_a_type === 'location' && conn.entity_a_id === editing.id
+                    const otherType = isA ? conn.entity_b_type : conn.entity_a_type
+                    const otherId   = isA ? conn.entity_b_id   : conn.entity_a_id
+                    const otherName = locEntityMap[`${otherType}:${otherId}`] || `Unknown ${otherType}`
+                    return (
+                      <div key={conn.id} style={s.connRow}>
+                        <span style={s.connRel}>{conn.relationship}</span>
+                        {' with '}
+                        <span style={s.connName}>{otherName}</span>
+                        <span style={s.connType}>{otherType}</span>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </EntityModal>
     </div>
   )
@@ -221,4 +272,12 @@ const s = {
   err:            { color: '#e05050', fontSize: '0.82rem', marginTop: '-0.6rem', marginBottom: '0.75rem' },
   btnPrimary:     { background: '#c9a84c', color: '#0d0a05', border: 'none', padding: '0.5rem 1.2rem', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: '0.88rem' },
   btnSecondary:   { background: 'transparent', color: '#a89060', border: '1px solid #a89060', padding: '0.5rem 1.2rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.88rem' },
+  connSection:    { borderTop: '1px solid #2a1c08', marginTop: '0.75rem', paddingTop: '0.75rem' },
+  connToggle:     { background: 'none', border: 'none', color: '#a89060', fontSize: '0.85rem', cursor: 'pointer', padding: 0 },
+  connBody:       { marginTop: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' },
+  connEmpty:      { color: '#6b5a3a', fontSize: '0.82rem' },
+  connRow:        { background: '#0d0a05', border: '1px solid #2a1c08', borderRadius: 4, padding: '0.5rem 0.7rem', fontSize: '0.82rem', color: '#e8e0d0' },
+  connRel:        { color: '#c9a84c', fontStyle: 'italic' },
+  connName:       { fontWeight: 500, marginLeft: '0.2rem' },
+  connType:       { color: '#6b5a3a', fontSize: '0.72rem', marginLeft: '0.35rem' },
 }

@@ -137,25 +137,67 @@ function registerDbHandlers(db) {
   ipcMain.handle('db:factions:delete', (_, id) =>
     db.run('DELETE FROM factions WHERE id = ?', [id]))
 
-  // Connections — Phase 1 stub (replaced in Phase 2 Prompt 03)
-  ipcMain.handle('db:connections:getAll',  (_, campaignId) =>
-    db.all(
-      `SELECT c.* FROM connections c
-       WHERE (c.entity_a_type = 'npc' AND c.entity_a_id IN (SELECT id FROM npcs WHERE campaign_id = ?))
-          OR (c.entity_b_type = 'npc' AND c.entity_b_id IN (SELECT id FROM npcs WHERE campaign_id = ?))`,
-      [campaignId, campaignId]
-    ))
+  // Connections — Phase 2 Prompt 03 (replaces Phase 1 stub)
+  ipcMain.handle('db:connections:getAll', (_, campaignId) =>
+    db.all(`
+      SELECT c.*
+      FROM connections c
+      WHERE c.campaign_id = ?
+      ORDER BY c.relationship ASC
+    `, [campaignId]))
 
-  ipcMain.handle('db:connections:create',  (_, data) =>
-    db.run(
-      `INSERT INTO connections (entity_a_type, entity_a_id, entity_b_type, entity_b_id, relationship, notes)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [data.entity_a_type, data.entity_a_id, data.entity_b_type, data.entity_b_id,
-       data.relationship, data.notes]
-    ))
+  ipcMain.handle('db:connections:getForEntity', (_, entityType, entityId) =>
+    db.all(`
+      SELECT * FROM connections
+      WHERE (entity_a_type = ? AND entity_a_id = ?)
+         OR (entity_b_type = ? AND entity_b_id = ?)`,
+      [entityType, entityId, entityType, entityId]))
 
-  ipcMain.handle('db:connections:delete',  (_, id) =>
-    db.run('DELETE FROM connections WHERE id = ?', [id]))
+  ipcMain.handle('db:connections:create', (_, data) =>
+    db.run(`
+      INSERT INTO connections
+        (campaign_id, entity_a_type, entity_a_id, entity_b_type, entity_b_id, relationship, notes)
+      VALUES (?,?,?,?,?,?,?)`,
+      [data.campaign_id, data.entity_a_type, data.entity_a_id,
+       data.entity_b_type, data.entity_b_id, data.relationship, data.notes]))
+
+  ipcMain.handle('db:connections:update', (_, id, data) =>
+    db.run(`
+      UPDATE connections SET relationship=?, notes=? WHERE id=?`,
+      [data.relationship, data.notes, id]))
+
+  ipcMain.handle('db:connections:delete', (_, id) =>
+    db.run('DELETE FROM connections WHERE id=?', [id]))
+
+  // Lore entries (stored in compendium_custom with type='lore')
+  ipcMain.handle('db:lore:getAll', (_, campaignId) =>
+    db.all(`
+      SELECT * FROM compendium_custom
+      WHERE campaign_id = ? AND type = 'lore'
+      ORDER BY name ASC`,
+      [campaignId]))
+
+  ipcMain.handle('db:lore:getById', (_, id) =>
+    db.get('SELECT * FROM compendium_custom WHERE id = ?', [id]))
+
+  ipcMain.handle('db:lore:create', (_, data) =>
+    db.run(`
+      INSERT INTO compendium_custom
+        (campaign_id, type, name, data, source, created_at)
+      VALUES (?, 'lore', ?, ?, 'custom', datetime('now'))`,
+      [data.campaign_id, data.name,
+       JSON.stringify({ content: data.content, category: data.category, is_secret: data.is_secret ?? false })]))
+
+  ipcMain.handle('db:lore:update', (_, id, data) =>
+    db.run(`
+      UPDATE compendium_custom
+      SET name=?, data=? WHERE id=?`,
+      [data.name,
+       JSON.stringify({ content: data.content, category: data.category, is_secret: data.is_secret ?? false }),
+       id]))
+
+  ipcMain.handle('db:lore:delete', (_, id) =>
+    db.run('DELETE FROM compendium_custom WHERE id=?', [id]))
 }
 
 module.exports = registerDbHandlers

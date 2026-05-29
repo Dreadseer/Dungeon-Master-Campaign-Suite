@@ -37,9 +37,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
       delete:   (id)         => ipcRenderer.invoke('db:factions:delete', id),
     },
     connections: {
-      getAll:   (campaignId) => ipcRenderer.invoke('db:connections:getAll', campaignId),
-      create:   (data)       => ipcRenderer.invoke('db:connections:create', data),
-      delete:   (id)         => ipcRenderer.invoke('db:connections:delete', id),
+      getAll:         (campaignId)           => ipcRenderer.invoke('db:connections:getAll', campaignId),
+      getForEntity:   (entityType, entityId) => ipcRenderer.invoke('db:connections:getForEntity', entityType, entityId),
+      create:         (data)                 => ipcRenderer.invoke('db:connections:create', data),
+      update:         (id, data)             => ipcRenderer.invoke('db:connections:update', id, data),
+      delete:         (id)                   => ipcRenderer.invoke('db:connections:delete', id),
+    },
+    lore: {
+      getAll:   (campaignId) => ipcRenderer.invoke('db:lore:getAll', campaignId),
+      getById:  (id)         => ipcRenderer.invoke('db:lore:getById', id),
+      create:   (data)       => ipcRenderer.invoke('db:lore:create', data),
+      update:   (id, data)   => ipcRenderer.invoke('db:lore:update', id, data),
+      delete:   (id)         => ipcRenderer.invoke('db:lore:delete', id),
     },
   },
 
