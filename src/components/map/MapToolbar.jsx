@@ -11,6 +11,11 @@ export default function MapToolbar({
   onResetView,
   onSaveGridSize,
   map,
+  // Fog of War
+  fogBrushSize,
+  onFogBrushSizeChange,
+  onRevealAll,
+  onHideAll,
 }) {
   const [savingGrid, setSavingGrid] = useState(false)
 
@@ -25,28 +30,66 @@ export default function MapToolbar({
     onSaveGridSize?.(gridSize)
   }
 
-  const tools = [
-    { id: 'pan',      label: '🤚 Pan',        disabled: false },
-    { id: 'fog',      label: '🌫️ Fog',        disabled: true,  title: 'Fog of War — Prompt 03' },
-    { id: 'token',    label: '🪙 Token',       disabled: true,  title: 'Tokens — Prompt 04' },
-  ]
+  const isFogTool = activeTool === 'fog-reveal' || activeTool === 'fog-hide'
 
   return (
     <div style={s.toolbar}>
       {/* ── Left: Tool buttons ─────────────────────────── */}
       <div style={s.section}>
-        {tools.map(t => (
-          <button
-            key={t.id}
-            style={activeTool === t.id ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn}
-            onClick={() => !t.disabled && onToolChange(t.id)}
-            disabled={t.disabled}
-            title={t.title ?? t.label}
-          >
-            {t.label}
-          </button>
-        ))}
+        <button
+          style={activeTool === 'pan' ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn}
+          onClick={() => onToolChange('pan')}
+          title="Pan / Navigate"
+        >
+          🤚 Pan
+        </button>
+        <button
+          style={activeTool === 'fog-reveal' ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn}
+          onClick={() => onToolChange('fog-reveal')}
+          title="Fog Reveal — paint to uncover"
+        >
+          🌟 Reveal
+        </button>
+        <button
+          style={activeTool === 'fog-hide' ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn}
+          onClick={() => onToolChange('fog-hide')}
+          title="Fog Hide — paint to cover"
+        >
+          🌫️ Hide
+        </button>
+        <button
+          style={s.toolBtn}
+          disabled
+          title="Tokens — Prompt 04"
+        >
+          🪙 Token
+        </button>
       </div>
+
+      {/* ── Fog controls (visible when a fog tool is active) ── */}
+      {isFogTool && (
+        <div style={s.section}>
+          <span style={s.label}>Brush</span>
+          {[1, 3, 5].map(size => (
+            <button
+              key={size}
+              style={fogBrushSize === size
+                ? { ...s.brushBtn, ...s.brushBtnActive }
+                : s.brushBtn}
+              onClick={() => onFogBrushSizeChange(size)}
+              title={`${size}×${size} brush`}
+            >
+              {size === 1 ? '1×1' : size === 3 ? '3×3' : '5×5'}
+            </button>
+          ))}
+          <button style={s.fogActionBtn} onClick={onRevealAll} title="Reveal entire map">
+            Reveal All
+          </button>
+          <button style={s.fogActionBtn} onClick={onHideAll} title="Hide entire map">
+            Hide All
+          </button>
+        </div>
+      )}
 
       {/* ── Center: Grid size control ──────────────────── */}
       <div style={s.section}>
@@ -127,6 +170,31 @@ const s = {
     color: '#0d0a05',
     borderColor: '#c9a84c',
     fontWeight: 'bold',
+  },
+  brushBtn: {
+    background: 'transparent',
+    border: '1px solid #3a2a10',
+    color: '#a89060',
+    borderRadius: 3,
+    padding: '0.18rem 0.45rem',
+    cursor: 'pointer',
+    fontSize: '0.72rem',
+    whiteSpace: 'nowrap',
+  },
+  brushBtnActive: {
+    background: '#3a2a10',
+    color: '#c9a84c',
+    borderColor: '#c9a84c',
+  },
+  fogActionBtn: {
+    background: 'transparent',
+    border: '1px solid #3a2a10',
+    color: '#a89060',
+    borderRadius: 3,
+    padding: '0.18rem 0.5rem',
+    cursor: 'pointer',
+    fontSize: '0.72rem',
+    whiteSpace: 'nowrap',
   },
   nudgeBtn: {
     background: 'transparent',
