@@ -25,29 +25,60 @@ function registerDbHandlers(db) {
   ipcMain.handle('db:campaigns:delete',  (_, id) =>
     db.run('DELETE FROM campaigns WHERE id = ?', [id]))
 
-  // NPCs
-  ipcMain.handle('db:npcs:getAll',   (_, campaignId) =>
-    db.all('SELECT * FROM npcs WHERE campaign_id = ?', [campaignId]))
+  // NPCs — Phase 2: JOIN queries, getById, getByLocation, getByFaction, toggleAlive
+  ipcMain.handle('db:npcs:getAll', (_, campaignId) =>
+    db.all(`
+      SELECT n.*,
+             l.name AS location_name,
+             f.name AS faction_name
+      FROM npcs n
+      LEFT JOIN locations l ON n.location_id = l.id
+      LEFT JOIN factions  f ON n.faction_id  = f.id
+      WHERE n.campaign_id = ?
+      ORDER BY n.name ASC
+    `, [campaignId]))
 
-  ipcMain.handle('db:npcs:create',   (_, data) =>
-    db.run(
-      `INSERT INTO npcs (campaign_id, name, race, class, role, location_id, faction_id,
+  ipcMain.handle('db:npcs:getById', (_, id) =>
+    db.get(`
+      SELECT n.*,
+             l.name AS location_name,
+             f.name AS faction_name
+      FROM npcs n
+      LEFT JOIN locations l ON n.location_id = l.id
+      LEFT JOIN factions  f ON n.faction_id  = f.id
+      WHERE n.id = ?
+    `, [id]))
+
+  ipcMain.handle('db:npcs:getByLocation', (_, locationId) =>
+    db.all('SELECT * FROM npcs WHERE location_id = ? ORDER BY name ASC', [locationId]))
+
+  ipcMain.handle('db:npcs:getByFaction', (_, factionId) =>
+    db.all('SELECT * FROM npcs WHERE faction_id = ? ORDER BY name ASC', [factionId]))
+
+  ipcMain.handle('db:npcs:create', (_, data) =>
+    db.run(`
+      INSERT INTO npcs
+        (campaign_id, name, race, class, role, location_id, faction_id,
          notes, secrets, motivation, is_alive, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))`,
-      [data.campaign_id, data.name, data.race, data.class, data.role,
-       data.location_id, data.faction_id, data.notes, data.secrets, data.motivation]
-    ))
+      VALUES (?,?,?,?,?,?,?,?,?,?,1,datetime('now'))
+    `, [data.campaign_id, data.name, data.race, data.class, data.role,
+        data.location_id ?? null, data.faction_id ?? null,
+        data.notes, data.secrets, data.motivation]))
 
-  ipcMain.handle('db:npcs:update',   (_, id, data) =>
-    db.run(
-      `UPDATE npcs SET name = ?, race = ?, class = ?, role = ?,
-         notes = ?, secrets = ?, motivation = ?, is_alive = ?
-       WHERE id = ?`,
-      [data.name, data.race, data.class, data.role,
-       data.notes, data.secrets, data.motivation, data.is_alive, id]
-    ))
+  ipcMain.handle('db:npcs:update', (_, id, data) =>
+    db.run(`
+      UPDATE npcs
+      SET name=?, race=?, class=?, role=?, location_id=?, faction_id=?,
+          notes=?, secrets=?, motivation=?, is_alive=?
+      WHERE id=?
+    `, [data.name, data.race, data.class, data.role,
+        data.location_id ?? null, data.faction_id ?? null,
+        data.notes, data.secrets, data.motivation, data.is_alive, id]))
 
-  ipcMain.handle('db:npcs:delete',   (_, id) =>
+  ipcMain.handle('db:npcs:toggleAlive', (_, id, isAlive) =>
+    db.run('UPDATE npcs SET is_alive = ? WHERE id = ?', [isAlive ? 1 : 0, id]))
+
+  ipcMain.handle('db:npcs:delete', (_, id) =>
     db.run('DELETE FROM npcs WHERE id = ?', [id]))
 
   // Locations — Phase 2: upgraded getAll with parent join, parent_location_id in update,

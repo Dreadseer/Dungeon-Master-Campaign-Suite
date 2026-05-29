@@ -11,8 +11,9 @@ const navSections = [
     label: 'WORLD',
     links: [
       { to: '/world',            label: 'World Builder' },
-      { to: '/world/factions',   label: 'Factions',          sub: true },
-      { to: '/world/locations',  label: 'Locations',          sub: true },
+      { to: '/world/factions',   label: 'Factions',   sub: true },
+      { to: '/world/npcs',       label: 'NPCs',       sub: true },
+      { to: '/world/locations',  label: 'Locations',  sub: true },
       { to: '/lore',             label: 'Lore & Connections' },
       { to: '/mindmap',          label: 'Mind Map' },
     ],

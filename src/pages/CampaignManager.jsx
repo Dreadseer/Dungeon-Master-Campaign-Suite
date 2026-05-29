@@ -6,7 +6,7 @@ export default function CampaignManager() {
   const { activeCampaign, setActiveCampaign, clearActiveCampaign } = useCampaignStore()
   const [campaigns, setCampaigns]   = useState([])
   const [showModal, setShowModal]   = useState(false)
-  const [stats, setStats]           = useState({ npcs: 0, locations: 0, encounters: 0, characters: 0 })
+  const [stats, setStats]           = useState({ npcsAlive: 0, npcsDead: 0, locations: 0, encounters: 0, characters: 0 })
   const [notes, setNotes]           = useState('')
   const navigate = useNavigate()
 
@@ -33,7 +33,8 @@ export default function CampaignManager() {
       window.electronAPI.db.npcs.getAll(activeCampaign.id),
       window.electronAPI.db.locations.getAll(activeCampaign.id),
     ]).then(([npcs, locations]) => {
-      setStats({ npcs: npcs.length, locations: locations.length, encounters: 0, characters: 0 })
+      const alive = npcs.filter(n => n.is_alive).length
+      setStats({ npcsAlive: alive, npcsDead: npcs.length - alive, locations: locations.length, encounters: 0, characters: 0 })
     })
   }, [activeCampaign?.id]) // eslint-disable-line
 
@@ -186,7 +187,7 @@ function ViewB({ campaign, stats, notes, onNotesChange, onNotesBlur, onSwitch, n
       </div>
 
       <div style={s.statsGrid}>
-        <StatCard label="NPCs"       value={stats.npcs} />
+        <StatCard label="NPCs"       value={stats.npcsAlive + stats.npcsDead} sub={`${stats.npcsAlive} alive · ${stats.npcsDead} dead`} />
         <StatCard label="Locations"  value={stats.locations} />
         <StatCard label="Encounters" value={stats.encounters} />
         <StatCard label="Characters" value={stats.characters} />
@@ -215,11 +216,12 @@ function ViewB({ campaign, stats, notes, onNotesChange, onNotesBlur, onSwitch, n
   )
 }
 
-function StatCard({ label, value }) {
+function StatCard({ label, value, sub }) {
   return (
     <div style={s.statCard}>
       <span style={s.statValue}>{value}</span>
       <span style={s.statLabel}>{label}</span>
+      {sub && <span style={s.statSub}>{sub}</span>}
     </div>
   )
 }
@@ -241,6 +243,7 @@ const s = {
   statCard:     { background: '#1a1208', border: '1px solid #3a2a10', borderRadius: 8, padding: '1.25rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' },
   statValue:    { color: '#c9a84c', fontSize: '2rem', fontWeight: 'bold' },
   statLabel:    { color: '#a89060', fontSize: '0.8rem' },
+  statSub:      { color: '#6b5a3a', fontSize: '0.72rem' },
   section:      { marginBottom: '1.5rem' },
   empty:        { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 300, gap: '1rem' },
   emptyText:    { color: '#6b5a3a', fontSize: '1rem' },

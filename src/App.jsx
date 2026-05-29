@@ -19,6 +19,7 @@ import Settings         from './pages/Settings'
 // Phase 2 — World Builder pages
 import Factions  from './pages/world/Factions'
 import Locations from './pages/world/Locations'
+import NPCs      from './pages/world/NPCs'
 
 function Guarded({ children }) {
   return <CampaignGuard>{children}</CampaignGuard>
@@ -39,6 +40,7 @@ export default function App() {
             <Route path="/world"            element={<Guarded><WorldBuilder /></Guarded>} />
             <Route path="/world/factions"   element={<Guarded><Factions /></Guarded>} />
             <Route path="/world/locations"  element={<Guarded><Locations /></Guarded>} />
+            <Route path="/world/npcs"       element={<Guarded><NPCs /></Guarded>} />
 
             <Route path="/lore"       element={<Guarded><LoreConnections /></Guarded>} />
             <Route path="/mindmap"    element={<Guarded><MindMap /></Guarded>} />
