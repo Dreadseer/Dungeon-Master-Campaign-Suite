@@ -2,26 +2,53 @@ import { useState, useEffect, useCallback } from 'react'
 import useCampaignStore from '../stores/campaignStore'
 import EntityModal from '../components/world/EntityModal'
 import Skeleton from '../components/ui/Skeleton'
+import MapCanvas from '../components/map/MapCanvas'
+import MapToolbar from '../components/map/MapToolbar'
+
+const SIDEBAR_W    = 240
+const TOPBAR_H     = 56
+const MAPTOOLBAR_H = 46
 
 export default function MapEngine() {
   const activeCampaign = useCampaignStore(s => s.activeCampaign)
 
+  // ── View A state ───────────────────────────────────────────────────
   const [maps, setMaps]           = useState([])
   const [locations, setLocations] = useState([])
   const [loading, setLoading]     = useState(true)
-  const [activeMap, setActiveMap] = useState(null)     // View B
+  const [activeMap, setActiveMap] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
 
   // Form state
   const [form, setForm]           = useState({ name: '', location_id: null, grid_size: 50 })
-  const [chosenImagePath, setChosenImagePath] = useState(null)   // raw source path
-  const [imagePreview, setImagePreview]       = useState(null)   // base64 preview
+  const [chosenImagePath, setChosenImagePath] = useState(null)
+  const [imagePreview, setImagePreview]       = useState(null)
   const [saving, setSaving]       = useState(false)
   const [error, setError]         = useState('')
 
   // Thumbnails: { mapId: base64 | null }
   const [thumbnails, setThumbnails] = useState({})
 
+  // ── View B (canvas) lifted state ───────────────────────────────────
+  const [stageScale,   setStageScale]   = useState(1.0)
+  const [stagePos,     setStagePos]     = useState({ x: 0, y: 0 })
+  const [activeTool,   setActiveTool]   = useState('pan')
+  const [currentGridSize, setCurrentGridSize] = useState(50)    // live toolbar value
+  const [canvasSize,   setCanvasSize]   = useState({
+    width:  window.innerWidth  - SIDEBAR_W,
+    height: window.innerHeight - TOPBAR_H - MAPTOOLBAR_H,
+  })
+
+  // ── Reset canvas state when a new map is opened ────────────────────
+  function openMap(map) {
+    setActiveMap(map)
+    setStageScale(1.0)
+    setStagePos({ x: 0, y: 0 })
+    setActiveTool('pan')
+    setCurrentGridSize(map.grid_size || 50)
+  }
+
+  // ── Data loading ───────────────────────────────────────────────────
   const load = useCallback(async () => {
     if (!activeCampaign?.id) return
     setLoading(true)
@@ -42,6 +69,7 @@ export default function MapEngine() {
 
   useEffect(() => { load() }, [load])
 
+  // ── Modal helpers ──────────────────────────────────────────────────
   function openCreate() {
     setForm({ name: '', location_id: null, grid_size: 50 })
     setChosenImagePath(null)
@@ -63,7 +91,6 @@ export default function MapEngine() {
     const sourcePath = await window.electronAPI.file.openImageDialog()
     if (!sourcePath) return
     setChosenImagePath(sourcePath)
-    // Show a preview immediately from the source path
     const base64 = await window.electronAPI.file.readImageAsBase64(sourcePath)
     setImagePreview(base64)
   }
@@ -93,32 +120,48 @@ export default function MapEngine() {
 
   async function handleDelete(map) {
     await window.electronAPI.db.maps.delete(map.id)
+    if (activeMap?.id === map.id) setActiveMap(null)
     load()
   }
 
-  // ── View B placeholder ─────────────────────────────────────────
+  // ── View B — Canvas ────────────────────────────────────────────────
   if (activeMap) {
     return (
-      <div style={s.page}>
-        <div style={s.viewBHeader}>
-          <button style={s.backBtn} onClick={() => setActiveMap(null)}>← Back to Maps</button>
-          <h1 style={s.title}>{activeMap.name}</h1>
-          {activeMap.location_name && (
-            <span style={s.locBadge}>{activeMap.location_name}</span>
-          )}
-        </div>
-        <div style={s.canvasPlaceholder}>
-          <p style={s.placeholderText}>Canvas renders in Prompt 02</p>
-          <p style={s.placeholderSub}>
-            Grid size: {activeMap.grid_size}px &nbsp;|&nbsp;
-            Image: {activeMap.image_path ? '✅ imported' : 'none'}
-          </p>
-        </div>
+      <div style={s.viewB}>
+        <MapToolbar
+          activeTool={activeTool}
+          onToolChange={setActiveTool}
+          gridSize={currentGridSize}
+          onGridSizeChange={setCurrentGridSize}
+          mapName={activeMap.name}
+          onBack={() => { setActiveMap(null); load() }}
+          stageScale={stageScale}
+          onResetView={() => { setStageScale(1.0); setStagePos({ x: 0, y: 0 }) }}
+          onSaveGridSize={(gs) => {
+            // Reflect saved grid size back into the activeMap record
+            setActiveMap(prev => ({ ...prev, grid_size: gs }))
+          }}
+          map={activeMap}
+        />
+        <MapCanvas
+          map={activeMap}
+          mode="dm"
+          onFogChange={null}
+          onTokensChange={null}
+          stageScale={stageScale}
+          stagePos={stagePos}
+          setStageScale={setStageScale}
+          setStagePos={setStagePos}
+          activeTool={activeTool}
+          gridSize={currentGridSize}
+          canvasSize={canvasSize}
+          setCanvasSize={setCanvasSize}
+        />
       </div>
     )
   }
 
-  // ── View A — Map List ──────────────────────────────────────────
+  // ── View A — Map List ──────────────────────────────────────────────
   return (
     <div style={s.page}>
       <div style={s.header}>
@@ -146,7 +189,6 @@ export default function MapEngine() {
 
             return (
               <div key={map.id} style={s.card}>
-                {/* Thumbnail */}
                 <div style={s.thumbWrap}>
                   {thumb
                     ? <img src={thumb} alt={map.name} style={s.thumb} />
@@ -172,7 +214,7 @@ export default function MapEngine() {
                   </div>
 
                   <div style={s.cardActions}>
-                    <button style={s.btnPrimary} onClick={() => setActiveMap(map)}>Open Map</button>
+                    <button style={s.btnPrimary} onClick={() => openMap(map)}>Open Map</button>
                     <DeleteBtn onConfirm={() => handleDelete(map)} name={map.name} />
                   </div>
                 </div>
@@ -228,9 +270,8 @@ export default function MapEngine() {
   )
 }
 
-// ── Sub-components ─────────────────────────────────────────────────
+// ── Sub-components ──────────────────────────────────────────────────
 
-// Loads a live thumbnail from image_path if no pre-generated thumb exists
 function ImageThumb({ imagePath }) {
   const [src, setSrc] = useState(null)
   useEffect(() => {
@@ -258,6 +299,17 @@ const db = {
 }
 
 const s = {
+  // View B — escape main-content's 2rem padding so canvas fills edge-to-edge
+  viewB: {
+    margin: '-2rem',                       // cancel main-content padding: 2rem
+    height: 'calc(100vh - 56px)',          // fill from below topbar to window bottom
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    background: '#0d0a05',
+  },
+
+  // View A
   page:        { padding: '2rem', maxWidth: 900 },
   header:      { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' },
   title:       { color: '#c9a84c', fontSize: '1.6rem', margin: 0, fontFamily: 'Georgia, serif' },
@@ -265,7 +317,6 @@ const s = {
   empty:       { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 220, gap: '1rem' },
   emptyText:   { color: '#6b5a3a', fontSize: '1rem' },
 
-  // Map grid
   grid:        { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '1rem' },
   card:        { background: '#0d0a05', border: '1px solid #2a1c08', borderRadius: 8, overflow: 'hidden' },
   thumbWrap:   { height: 120, background: '#0a0805', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
@@ -280,14 +331,7 @@ const s = {
   metaDate:    { color: '#4a3a1a', fontSize: '0.72rem', marginLeft: 'auto' },
   cardActions: { display: 'flex', gap: '0.5rem', alignItems: 'center' },
 
-  // View B
-  viewBHeader: { display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '2rem', flexWrap: 'wrap' },
-  backBtn:     { background: 'none', border: '1px solid #3a2a10', color: '#a89060', padding: '0.4rem 0.85rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.85rem' },
-  canvasPlaceholder: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 400, border: '2px dashed #3a2a10', borderRadius: 8, gap: '0.5rem' },
-  placeholderText: { color: '#c9a84c', fontSize: '1.1rem' },
-  placeholderSub:  { color: '#6b5a3a', fontSize: '0.85rem' },
-
-  // Modal form
+  // Modal
   label:       { display: 'block', color: '#a89060', fontSize: '0.82rem', marginBottom: '0.35rem' },
   input:       { display: 'block', width: '100%', background: '#0d0a05', border: '1px solid #3a2a10', borderRadius: 4, color: '#e8e0d0', padding: '0.45rem 0.7rem', fontSize: '0.9rem', marginBottom: '0.9rem', outline: 'none', boxSizing: 'border-box' },
   imageRow:    { display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' },
