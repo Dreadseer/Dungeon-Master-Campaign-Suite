@@ -1,0 +1,226 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/components/world/NPCQuickView.jsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=eaa9c5cf"; const Fragment = __vite__cjsImport0_react_jsxDevRuntime["Fragment"]; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=eaa9c5cf"; const useState = __vite__cjsImport3_react["useState"]; const useEffect = __vite__cjsImport3_react["useEffect"];
+export default function NPCQuickView({ npc, onClose, onEdit }) {
+  _s();
+  const [secretsRevealed, setSecretsRevealed] = useState(false);
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  useEffect(() => {
+    setSecretsRevealed(false);
+  }, [npc?.id]);
+  if (!npc) return null;
+  const subtitle = [npc.race, npc.role || npc.class].filter(Boolean).join(" ");
+  return /* @__PURE__ */ jsxDEV(Fragment, { children: [
+    /* @__PURE__ */ jsxDEV("div", { style: s.backdrop, onClick: onClose }, void 0, false, {
+      fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+      lineNumber: 42,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { style: s.panel, children: [
+      /* @__PURE__ */ jsxDEV("div", { style: s.header, children: [
+        /* @__PURE__ */ jsxDEV("div", { children: [
+          /* @__PURE__ */ jsxDEV("h2", { style: s.name, children: [
+            npc.is_alive ? "🟢" : "💀",
+            " ",
+            npc.name
+          ] }, void 0, true, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+            lineNumber: 47,
+            columnNumber: 13
+          }, this),
+          subtitle && /* @__PURE__ */ jsxDEV("p", { style: s.subtitle, children: subtitle }, void 0, false, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+            lineNumber: 48,
+            columnNumber: 26
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+          lineNumber: 46,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("button", { style: s.closeBtn, onClick: onClose, children: "✕" }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+          lineNumber: 50,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+        lineNumber: 45,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { style: s.body, children: [
+        npc.location_name && /* @__PURE__ */ jsxDEV("div", { style: s.field, children: [
+          /* @__PURE__ */ jsxDEV("span", { style: s.fieldLabel, children: "Location" }, void 0, false, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+            lineNumber: 56,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV("span", { style: s.fieldValue, children: npc.location_name }, void 0, false, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+            lineNumber: 57,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+          lineNumber: 55,
+          columnNumber: 11
+        }, this),
+        npc.faction_name && /* @__PURE__ */ jsxDEV("div", { style: s.field, children: [
+          /* @__PURE__ */ jsxDEV("span", { style: s.fieldLabel, children: "Faction" }, void 0, false, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+            lineNumber: 62,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV("span", { style: s.fieldValue, children: npc.faction_name }, void 0, false, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+            lineNumber: 63,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+          lineNumber: 61,
+          columnNumber: 11
+        }, this),
+        npc.motivation && /* @__PURE__ */ jsxDEV("div", { style: s.section, children: [
+          /* @__PURE__ */ jsxDEV("div", { style: s.sectionLabel, children: "Motivation" }, void 0, false, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+            lineNumber: 68,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV("p", { style: s.sectionText, children: npc.motivation }, void 0, false, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+            lineNumber: 69,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+          lineNumber: 67,
+          columnNumber: 11
+        }, this),
+        npc.notes && /* @__PURE__ */ jsxDEV("div", { style: s.section, children: [
+          /* @__PURE__ */ jsxDEV("div", { style: s.sectionLabel, children: "DM Notes" }, void 0, false, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+            lineNumber: 74,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV("p", { style: s.sectionText, children: npc.notes }, void 0, false, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+            lineNumber: 75,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+          lineNumber: 73,
+          columnNumber: 11
+        }, this),
+        npc.secrets && /* @__PURE__ */ jsxDEV("div", { style: { ...s.section, ...s.secretsSection }, children: [
+          /* @__PURE__ */ jsxDEV("div", { style: s.sectionLabel, children: [
+            "🔒 Secrets",
+            /* @__PURE__ */ jsxDEV("button", { style: s.revealBtn, onClick: () => setSecretsRevealed((r) => !r), children: secretsRevealed ? "Hide" : "Reveal 🔒" }, void 0, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+              lineNumber: 82,
+              columnNumber: 17
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+            lineNumber: 80,
+            columnNumber: 15
+          }, this),
+          secretsRevealed && /* @__PURE__ */ jsxDEV("p", { style: { ...s.sectionText, color: "#c07070" }, children: npc.secrets }, void 0, false, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+            lineNumber: 86,
+            columnNumber: 35
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+          lineNumber: 79,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+        lineNumber: 53,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { style: s.footer, children: /* @__PURE__ */ jsxDEV("button", { style: s.btnPrimary, onClick: () => {
+        onEdit(npc);
+        onClose();
+      }, children: "Edit Full Profile" }, void 0, false, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+        lineNumber: 92,
+        columnNumber: 11
+      }, this) }, void 0, false, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+        lineNumber: 91,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+      lineNumber: 44,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx",
+    lineNumber: 40,
+    columnNumber: 5
+  }, this);
+}
+_s(NPCQuickView, "aMxcjDbz2V59/hBRgDSBBmVOpE8=");
+_c = NPCQuickView;
+const s = {
+  backdrop: { position: "fixed", inset: 0, zIndex: 199 },
+  panel: { position: "fixed", top: 0, right: 0, bottom: 0, width: 360, background: "#1a1208", borderLeft: "1px solid #3a2a10", zIndex: 200, display: "flex", flexDirection: "column", boxShadow: "-4px 0 24px rgba(0,0,0,0.6)" },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "1.25rem 1.25rem 1rem", borderBottom: "1px solid #2a1c08" },
+  name: { color: "#c9a84c", fontSize: "1.2rem", margin: 0, fontFamily: "Georgia, serif" },
+  subtitle: { color: "#a89060", fontSize: "0.82rem", margin: "0.25rem 0 0" },
+  closeBtn: { background: "none", border: "none", color: "#6b5a3a", cursor: "pointer", fontSize: "1rem", padding: "0.1rem 0.2rem", lineHeight: 1 },
+  body: { flex: 1, overflowY: "auto", padding: "1rem 1.25rem", display: "flex", flexDirection: "column", gap: "0.9rem" },
+  field: { display: "flex", justifyContent: "space-between", alignItems: "center" },
+  fieldLabel: { color: "#6b5a3a", fontSize: "0.78rem" },
+  fieldValue: { color: "#e8e0d0", fontSize: "0.88rem" },
+  section: { display: "flex", flexDirection: "column", gap: "0.3rem" },
+  sectionLabel: { color: "#7a6035", fontSize: "0.72rem", fontWeight: "bold", letterSpacing: "0.08em", textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "space-between" },
+  sectionText: { color: "#c8bfa8", fontSize: "0.88rem", lineHeight: 1.6, margin: 0 },
+  secretsSection: { background: "#120808", border: "1px solid #3a1a1a", borderRadius: 4, padding: "0.6rem 0.75rem" },
+  revealBtn: { background: "none", border: "1px solid #6a2020", color: "#c06060", borderRadius: 3, padding: "0.1rem 0.4rem", cursor: "pointer", fontSize: "0.72rem" },
+  footer: { padding: "1rem 1.25rem", borderTop: "1px solid #2a1c08" },
+  btnPrimary: { width: "100%", background: "#c9a84c", color: "#0d0a05", border: "none", padding: "0.6rem", borderRadius: 4, cursor: "pointer", fontWeight: "bold", fontSize: "0.88rem" }
+};
+var _c;
+$RefreshReg$(_c, "NPCQuickView");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCQuickView.jsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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QVdtQixVQUFVLFVBQVU7QUFBQSxFQUN2RDlCLFlBQWUsRUFBRVcsT0FBTyxXQUFXbUIsVUFBVSxVQUFVO0FBQUEsRUFDdkQzQixTQUFlLEVBQUVvQixTQUFTLFFBQVFDLGVBQWUsVUFBVWMsS0FBSyxTQUFTO0FBQUEsRUFDekVsQyxjQUFlLEVBQUVPLE9BQU8sV0FBV21CLFVBQVUsV0FBV1MsWUFBWSxRQUFRQyxlQUFlLFVBQVVDLGVBQWUsYUFBYWxCLFNBQVMsUUFBUUksWUFBWSxVQUFVRCxnQkFBZ0IsZ0JBQWdCO0FBQUEsRUFDeE1yQixhQUFlLEVBQUVNLE9BQU8sV0FBV21CLFVBQVUsV0FBV0ssWUFBWSxLQUFLSixRQUFRLEVBQUU7QUFBQSxFQUNuRnZCLGdCQUFlLEVBQUVhLFlBQVksV0FBV1ksUUFBUSxxQkFBcUJTLGNBQWMsR0FBR2QsU0FBUyxpQkFBaUI7QUFBQSxFQUNoSG5CLFdBQWUsRUFBRVksWUFBWSxRQUFRWSxRQUFRLHFCQUFxQnRCLE9BQU8sV0FBVytCLGNBQWMsR0FBR2QsU0FBUyxpQkFBaUJNLFFBQVEsV0FBV0osVUFBVSxVQUFVO0FBQUEsRUFDdEtsQixRQUFlLEVBQUVnQixTQUFTLGdCQUFnQmUsV0FBVyxvQkFBb0I7QUFBQSxFQUN6RTlCLFlBQWUsRUFBRU8sT0FBTyxRQUFRQyxZQUFZLFdBQVdWLE9BQU8sV0FBV3NCLFFBQVEsUUFBUUwsU0FBUyxVQUFVYyxjQUFjLEdBQUdSLFFBQVEsV0FBV0ssWUFBWSxRQUFRVCxVQUFVLFVBQVU7QUFDMUw7QUFBQyxJQUFBYztBQUFBLGFBQUFBLElBQUEiLCJuYW1lcyI6WyJ1c2VTdGF0ZSIsInVzZUVmZmVjdCIsIk5QQ1F1aWNrVmlldyIsIm5wYyIsIm9uQ2xvc2UiLCJvbkVkaXQiLCJfcyIsInNlY3JldHNSZXZlYWxlZCIsInNldFNlY3JldHNSZXZlYWxlZCIsIm9uS2V5IiwiZSIsImtleSIsImRvY3VtZW50IiwiYWRkRXZlbnRMaXN0ZW5lciIsInJlbW92ZUV2ZW50TGlzdGVuZXIiLCJpZCIsInN1YnRpdGxlIiwicmFjZSIsInJvbGUiLCJjbGFzcyIsImZpbHRlciIsIkJvb2xlYW4iLCJqb2luIiwicyIsImJhY2tkcm9wIiwicGFuZWwiLCJoZWFkZXIiLCJuYW1lIiwiaXNfYWxpdmUiLCJjbG9zZUJ0biIsImJvZHkiLCJsb2NhdGlvbl9uYW1lIiwiZmllbGQiLCJmaWVsZExhYmVsIiwiZmllbGRWYWx1ZSIsImZhY3Rpb25fbmFtZSIsIm1vdGl2YXRpb24iLCJzZWN0aW9uIiwic2VjdGlvbkxhYmVsIiwic2VjdGlvblRleHQiLCJub3RlcyIsInNlY3JldHMiLCJzZWNyZXRzU2VjdGlvbiIsInJldmVhbEJ0biIsInIiLCJjb2xvciIsImZvb3RlciIsImJ0blByaW1hcnkiLCJwb3NpdGlvbiIsImluc2V0IiwiekluZGV4IiwidG9wIiwicmlnaHQiLCJib3R0b20iLCJ3aWR0aCIsImJhY2tncm91bmQiLCJib3JkZXJMZWZ0IiwiZGlzcGxheSIsImZsZXhEaXJlY3Rpb24iLCJib3hTaGFkb3ciLCJqdXN0aWZ5Q29udGVudCIsImFsaWduSXRlbXMiLCJwYWRkaW5nIiwiYm9yZGVyQm90dG9tIiwiZm9udFNpemUiLCJtYXJnaW4iLCJmb250RmFtaWx5IiwiYm9yZGVyIiwiY3Vyc29yIiwibGluZUhlaWdodCIsImZsZXgiLCJvdmVyZmxvd1kiLCJnYXAiLCJmb250V2VpZ2h0IiwibGV0dGVyU3BhY2luZyIsInRleHRUcmFuc2Zvcm0iLCJib3JkZXJSYWRpdXMiLCJib3JkZXJUb3AiLCJfYyJdLCJpZ25vcmVMaXN0IjpbXSwic291cmNlcyI6WyJOUENRdWlja1ZpZXcuanN4Il0sInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7IHVzZVN0YXRlLCB1c2VFZmZlY3QgfSBmcm9tICdyZWFjdCdcblxuZXhwb3J0IGRlZmF1bHQgZnVuY3Rpb24gTlBDUXVpY2tWaWV3KHsgbnBjLCBvbkNsb3NlLCBvbkVkaXQgfSkge1xuICBjb25zdCBbc2VjcmV0c1JldmVhbGVkLCBzZXRTZWNyZXRzUmV2ZWFsZWRdID0gdXNlU3RhdGUoZmFsc2UpXG5cbiAgLy8gQ2xvc2Ugb24gRXNjYXBlXG4gIHVzZUVmZmVjdCgoKSA9PiB7XG4gICAgZnVuY3Rpb24gb25LZXkoZSkgeyBpZiAoZS5rZXkgPT09ICdFc2NhcGUnKSBvbkNsb3NlKCkgfVxuICAgIGRvY3VtZW50LmFkZEV2ZW50TGlzdGVuZXIoJ2tleWRvd24nLCBvbktleSlcbiAgICByZXR1cm4gKCkgPT4gZG9jdW1lbnQucmVtb3ZlRXZlbnRMaXN0ZW5lcigna2V5ZG93bicsIG9uS2V5KVxuICB9LCBbb25DbG9zZV0pXG5cbiAgLy8gUmVzZXQgc2VjcmV0cyBvbiBOUEMgY2hhbmdlXG4gIHVzZUVmZmVjdCgoKSA9PiB7IHNldFNlY3JldHNSZXZlYWxlZChmYWxzZSkgfSwgW25wYz8uaWRdKVxuXG4gIGlmICghbnBjKSByZXR1cm4gbnVsbFxuXG4gIGNvbnN0IHN1YnRpdGxlID0gW25wYy5yYWNlLCBucGMucm9sZSB8fCBucGMuY2xhc3NdLmZpbHRlcihCb29sZWFuKS5qb2luKCcgJylcblxuICByZXR1cm4gKFxuICAgIDw+XG4gICAgICB7LyogQ2xpY2stb3V0c2lkZSBiYWNrZHJvcCAqL31cbiAgICAgIDxkaXYgc3R5bGU9e3MuYmFja2Ryb3B9IG9uQ2xpY2s9e29uQ2xvc2V9IC8+XG5cbiAgICAgIDxkaXYgc3R5bGU9e3MucGFuZWx9PlxuICAgICAgICA8ZGl2IHN0eWxlPXtzLmhlYWRlcn0+XG4gICAgICAgICAgPGRpdj5cbiAgICAgICAgICAgIDxoMiBzdHlsZT17cy5uYW1lfT57bnBjLmlzX2FsaXZlID8gJ/Cfn6InIDogJ/CfkoAnfSB7bnBjLm5hbWV9PC9oMj5cbiAgICAgICAgICAgIHtzdWJ0aXRsZSAmJiA8cCBzdHlsZT17cy5zdWJ0aXRsZX0+e3N1YnRpdGxlfTwvcD59XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgPGJ1dHRvbiBzdHlsZT17cy5jbG9zZUJ0bn0gb25DbGljaz17b25DbG9zZX0+4pyVPC9idXR0b24+XG4gICAgICAgIDwvZGl2PlxuXG4gICAgICAgIDxkaXYgc3R5bGU9e3MuYm9keX0+XG4gICAgICAgICAge25wYy5sb2NhdGlvbl9uYW1lICYmIChcbiAgICAgICAgICAgIDxkaXYgc3R5bGU9e3MuZmllbGR9PlxuICAgICAgICAgICAgICA8c3BhbiBzdHlsZT17cy5maWVsZExhYmVsfT5Mb2NhdGlvbjwvc3Bhbj5cbiAgICAgICAgICAgICAgPHNwYW4gc3R5bGU9e3MuZmllbGRWYWx1ZX0+e25wYy5sb2NhdGlvbl9uYW1lfTwvc3Bhbj5cbiAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICl9XG4gICAgICAgICAge25wYy5mYWN0aW9uX25hbWUgJiYgKFxuICAgICAgICAgICAgPGRpdiBzdHlsZT17cy5maWVsZH0+XG4gICAgICAgICAgICAgIDxzcGFuIHN0eWxlPXtzLmZpZWxkTGFiZWx9PkZhY3Rpb248L3NwYW4+XG4gICAgICAgICAgICAgIDxzcGFuIHN0eWxlPXtzLmZpZWxkVmFsdWV9PntucGMuZmFjdGlvbl9uYW1lfTwvc3Bhbj5cbiAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICl9XG4gICAgICAgICAge25wYy5tb3RpdmF0aW9uICYmIChcbiAgICAgICAgICAgIDxkaXYgc3R5bGU9e3Muc2VjdGlvbn0+XG4gICAgICAgICAgICAgIDxkaXYgc3R5bGU9e3Muc2VjdGlvbkxhYmVsfT5Nb3RpdmF0aW9uPC9kaXY+XG4gICAgICAgICAgICAgIDxwIHN0eWxlPXtzLnNlY3Rpb25UZXh0fT57bnBjLm1vdGl2YXRpb259PC9wPlxuICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgKX1cbiAgICAgICAgICB7bnBjLm5vdGVzICYmIChcbiAgICAgICAgICAgIDxkaXYgc3R5bGU9e3Muc2VjdGlvbn0+XG4gICAgICAgICAgICAgIDxkaXYgc3R5bGU9e3Muc2VjdGlvbkxhYmVsfT5ETSBOb3RlczwvZGl2PlxuICAgICAgICAgICAgICA8cCBzdHlsZT17cy5zZWN0aW9uVGV4dH0+e25wYy5ub3Rlc308L3A+XG4gICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICApfVxuICAgICAgICAgIHtucGMuc2VjcmV0cyAmJiAoXG4gICAgICAgICAgICA8ZGl2IHN0eWxlPXt7IC4uLnMuc2VjdGlvbiwgLi4ucy5zZWNyZXRzU2VjdGlvbiB9fT5cbiAgICAgICAgICAgICAgPGRpdiBzdHlsZT17cy5zZWN0aW9uTGFiZWx9PlxuICAgICAgICAgICAgICAgIPCflJIgU2VjcmV0c1xuICAgICAgICAgICAgICAgIDxidXR0b24gc3R5bGU9e3MucmV2ZWFsQnRufSBvbkNsaWNrPXsoKSA9PiBzZXRTZWNyZXRzUmV2ZWFsZWQociA9PiAhcil9PlxuICAgICAgICAgICAgICAgICAge3NlY3JldHNSZXZlYWxlZCA/ICdIaWRlJyA6ICdSZXZlYWwg8J+Ukid9XG4gICAgICAgICAgICAgICAgPC9idXR0b24+XG4gICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgICB7c2VjcmV0c1JldmVhbGVkICYmIDxwIHN0eWxlPXt7IC4uLnMuc2VjdGlvblRleHQsIGNvbG9yOiAnI2MwNzA3MCcgfX0+e25wYy5zZWNyZXRzfTwvcD59XG4gICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICApfVxuICAgICAgICA8L2Rpdj5cblxuICAgICAgICA8ZGl2IHN0eWxlPXtzLmZvb3Rlcn0+XG4gICAgICAgICAgPGJ1dHRvbiBzdHlsZT17cy5idG5QcmltYXJ5fSBvbkNsaWNrPXsoKSA9PiB7IG9uRWRpdChucGMpOyBvbkNsb3NlKCkgfX0+XG4gICAgICAgICAgICBFZGl0IEZ1bGwgUHJvZmlsZVxuICAgICAgICAgIDwvYnV0dG9uPlxuICAgICAgICA8L2Rpdj5cbiAgICAgIDwvZGl2PlxuICAgIDwvPlxuICApXG59XG5cbmNvbnN0IHMgPSB7XG4gIGJhY2tkcm9wOiAgICAgIHsgcG9zaXRpb246ICdmaXhlZCcsIGluc2V0OiAwLCB6SW5kZXg6IDE5OSB9LFxuICBwYW5lbDogICAgICAgICB7IHBvc2l0aW9uOiAnZml4ZWQnLCB0b3A6IDAsIHJpZ2h0OiAwLCBib3R0b206IDAsIHdpZHRoOiAzNjAsIGJhY2tncm91bmQ6ICcjMWExMjA4JywgYm9yZGVyTGVmdDogJzFweCBzb2xpZCAjM2EyYTEwJywgekluZGV4OiAyMDAsIGRpc3BsYXk6ICdmbGV4JywgZmxleERpcmVjdGlvbjogJ2NvbHVtbicsIGJveFNoYWRvdzogJy00cHggMCAyNHB4IHJnYmEoMCwwLDAsMC42KScgfSxcbiAgaGVhZGVyOiAgICAgICAgeyBkaXNwbGF5OiAnZmxleCcsIGp1c3RpZnlDb250ZW50OiAnc3BhY2UtYmV0d2VlbicsIGFsaWduSXRlbXM6ICdmbGV4LXN0YXJ0JywgcGFkZGluZzogJzEuMjVyZW0gMS4yNXJlbSAxcmVtJywgYm9yZGVyQm90dG9tOiAnMXB4IHNvbGlkICMyYTFjMDgnIH0sXG4gIG5hbWU6ICAgICAgICAgIHsgY29sb3I6ICcjYzlhODRjJywgZm9udFNpemU6ICcxLjJyZW0nLCBtYXJnaW46IDAsIGZvbnRGYW1pbHk6ICdHZW9yZ2lhLCBzZXJpZicgfSxcbiAgc3VidGl0bGU6ICAgICAgeyBjb2xvcjogJyNhODkwNjAnLCBmb250U2l6ZTogJzAuODJyZW0nLCBtYXJnaW46ICcwLjI1cmVtIDAgMCcgfSxcbiAgY2xvc2VCdG46ICAgICAgeyBiYWNrZ3JvdW5kOiAnbm9uZScsIGJvcmRlcjogJ25vbmUnLCBjb2xvcjogJyM2YjVhM2EnLCBjdXJzb3I6ICdwb2ludGVyJywgZm9udFNpemU6ICcxcmVtJywgcGFkZGluZzogJzAuMXJlbSAwLjJyZW0nLCBsaW5lSGVpZ2h0OiAxIH0sXG4gIGJvZHk6ICAgICAgICAgIHsgZmxleDogMSwgb3ZlcmZsb3dZOiAnYXV0bycsIHBhZGRpbmc6ICcxcmVtIDEuMjVyZW0nLCBkaXNwbGF5OiAnZmxleCcsIGZsZXhEaXJlY3Rpb246ICdjb2x1bW4nLCBnYXA6ICcwLjlyZW0nIH0sXG4gIGZpZWxkOiAgICAgICAgIHsgZGlzcGxheTogJ2ZsZXgnLCBqdXN0aWZ5Q29udGVudDogJ3NwYWNlLWJldHdlZW4nLCBhbGlnbkl0ZW1zOiAnY2VudGVyJyB9LFxuICBmaWVsZExhYmVsOiAgICB7IGNvbG9yOiAnIzZiNWEzYScsIGZvbnRTaXplOiAnMC43OHJlbScgfSxcbiAgZmllbGRWYWx1ZTogICAgeyBjb2xvcjogJyNlOGUwZDAnLCBmb250U2l6ZTogJzAuODhyZW0nIH0sXG4gIHNlY3Rpb246ICAgICAgIHsgZGlzcGxheTogJ2ZsZXgnLCBmbGV4RGlyZWN0aW9uOiAnY29sdW1uJywgZ2FwOiAnMC4zcmVtJyB9LFxuICBzZWN0aW9uTGFiZWw6ICB7IGNvbG9yOiAnIzdhNjAzNScsIGZvbnRTaXplOiAnMC43MnJlbScsIGZvbnRXZWlnaHQ6ICdib2xkJywgbGV0dGVyU3BhY2luZzogJzAuMDhlbScsIHRleHRUcmFuc2Zvcm06ICd1cHBlcmNhc2UnLCBkaXNwbGF5OiAnZmxleCcsIGFsaWduSXRlbXM6ICdjZW50ZXInLCBqdXN0aWZ5Q29udGVudDogJ3NwYWNlLWJldHdlZW4nIH0sXG4gIHNlY3Rpb25UZXh0OiAgIHsgY29sb3I6ICcjYzhiZmE4JywgZm9udFNpemU6ICcwLjg4cmVtJywgbGluZUhlaWdodDogMS42LCBtYXJnaW46IDAgfSxcbiAgc2VjcmV0c1NlY3Rpb246eyBiYWNrZ3JvdW5kOiAnIzEyMDgwOCcsIGJvcmRlcjogJzFweCBzb2xpZCAjM2ExYTFhJywgYm9yZGVyUmFkaXVzOiA0LCBwYWRkaW5nOiAnMC42cmVtIDAuNzVyZW0nIH0sXG4gIHJldmVhbEJ0bjogICAgIHsgYmFja2dyb3VuZDogJ25vbmUnLCBib3JkZXI6ICcxcHggc29saWQgIzZhMjAyMCcsIGNvbG9yOiAnI2MwNjA2MCcsIGJvcmRlclJhZGl1czogMywgcGFkZGluZzogJzAuMXJlbSAwLjRyZW0nLCBjdXJzb3I6ICdwb2ludGVyJywgZm9udFNpemU6ICcwLjcycmVtJyB9LFxuICBmb290ZXI6ICAgICAgICB7IHBhZGRpbmc6ICcxcmVtIDEuMjVyZW0nLCBib3JkZXJUb3A6ICcxcHggc29saWQgIzJhMWMwOCcgfSxcbiAgYnRuUHJpbWFyeTogICAgeyB3aWR0aDogJzEwMCUnLCBiYWNrZ3JvdW5kOiAnI2M5YTg0YycsIGNvbG9yOiAnIzBkMGEwNScsIGJvcmRlcjogJ25vbmUnLCBwYWRkaW5nOiAnMC42cmVtJywgYm9yZGVyUmFkaXVzOiA0LCBjdXJzb3I6ICdwb2ludGVyJywgZm9udFdlaWdodDogJ2JvbGQnLCBmb250U2l6ZTogJzAuODhyZW0nIH0sXG59XG4iXSwiZmlsZSI6IkM6L1VzZXJzL2NocmlzL0Rlc2t0b3AvRHVuZ2VvbiBNYXN0ZXIgQ2FtcGFpZ24gU3VpdGUvc3JjL2NvbXBvbmVudHMvd29ybGQvTlBDUXVpY2tWaWV3LmpzeCJ9
