@@ -47,6 +47,28 @@ export default function MapEngine() {
     fogControlsRef.current = controls
   }, [])
 
+  // ── View mode (DM vs Player) ───────────────────────────────────────
+  const [viewMode, setViewMode] = useState('dm')
+
+  // ── Thumbnail generation ───────────────────────────────────────────
+  const thumbnailGenRef = useRef(null)   // holds generateThumbnail fn from MapCanvas
+
+  const registerThumbnailGen = useCallback((fn) => {
+    thumbnailGenRef.current = fn
+  }, [])
+
+  async function handleUpdateThumbnail() {
+    await thumbnailGenRef.current?.()
+    // Refresh thumbnail display for this map
+    if (activeMap) {
+      const thumb = await window.electronAPI.file.readThumbnail(activeMap.id)
+      setThumbnails(prev => ({ ...prev, [activeMap.id]: thumb }))
+    }
+  }
+
+  // ── Map list search ────────────────────────────────────────────────
+  const [searchQuery, setSearchQuery] = useState('')
+
   // ── Reset canvas state when a new map is opened ────────────────────
   function openMap(map) {
     setActiveMap(map)
@@ -55,7 +77,9 @@ export default function MapEngine() {
     setActiveTool('pan')
     setCurrentGridSize(map.grid_size || 50)
     setFogBrushSize(1)
-    fogControlsRef.current = null
+    setViewMode('dm')
+    fogControlsRef.current    = null
+    thumbnailGenRef.current   = null
   }
 
   // ── Data loading ───────────────────────────────────────────────────
@@ -134,6 +158,24 @@ export default function MapEngine() {
     load()
   }
 
+  async function handleDuplicate(map) {
+    const result = await window.electronAPI.db.maps.create({
+      campaign_id: activeCampaign.id,
+      name:        `${map.name} (Copy)`,
+      location_id: map.location_id || null,
+      grid_size:   map.grid_size   || 50,
+      image_path:  map.image_path  || null,
+    })
+    // Copy fog and token data to the new map
+    const newId = result.lastInsertRowid
+    if (newId) {
+      const src = await window.electronAPI.db.maps.getById(map.id)
+      if (src?.fog_data)  await window.electronAPI.db.maps.updateFog(newId,    JSON.parse(src.fog_data))
+      if (src?.tokens)    await window.electronAPI.db.maps.updateTokens(newId, JSON.parse(src.tokens))
+    }
+    load()
+  }
+
   // ── View B — Canvas ────────────────────────────────────────────────
   if (activeMap) {
     return (
@@ -148,7 +190,6 @@ export default function MapEngine() {
           stageScale={stageScale}
           onResetView={() => { setStageScale(1.0); setStagePos({ x: 0, y: 0 }) }}
           onSaveGridSize={(gs) => {
-            // Reflect saved grid size back into the activeMap record
             setActiveMap(prev => ({ ...prev, grid_size: gs }))
           }}
           map={activeMap}
@@ -156,10 +197,13 @@ export default function MapEngine() {
           onFogBrushSizeChange={setFogBrushSize}
           onRevealAll={() => fogControlsRef.current?.revealAll()}
           onHideAll={() => fogControlsRef.current?.hideAll()}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          onUpdateThumbnail={handleUpdateThumbnail}
         />
         <MapCanvas
           map={activeMap}
-          mode="dm"
+          mode={viewMode}
           campaignId={activeCampaign.id}
           onFogChange={null}
           onTokensChange={null}
@@ -173,6 +217,7 @@ export default function MapEngine() {
           canvasSize={canvasSize}
           setCanvasSize={setCanvasSize}
           registerFogControls={registerFogControls}
+          registerThumbnailGen={registerThumbnailGen}
         />
       </div>
     )
@@ -186,7 +231,15 @@ export default function MapEngine() {
           <h1 style={s.title}>Maps</h1>
           <p style={s.count}>{maps.length} map{maps.length !== 1 ? 's' : ''}</p>
         </div>
-        <button style={s.btnPrimary} onClick={openCreate}>+ New Map</button>
+        <div style={s.headerRight}>
+          <input
+            style={s.searchInput}
+            placeholder="Search maps…"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+          <button style={s.btnPrimary} onClick={openCreate}>+ New Map</button>
+        </div>
       </div>
 
       {loading ? (
@@ -198,7 +251,7 @@ export default function MapEngine() {
         </div>
       ) : (
         <div style={s.grid}>
-          {maps.map(map => {
+          {maps.filter(m => m.name.toLowerCase().includes(searchQuery.toLowerCase())).map(map => {
             const thumb = thumbnails[map.id]
             const tokenCount = (() => { try { return JSON.parse(map.tokens || '[]').length } catch { return 0 } })()
             const fogArr     = (() => { try { return JSON.parse(map.fog_data || '[]') } catch { return [] } })()
@@ -232,6 +285,7 @@ export default function MapEngine() {
 
                   <div style={s.cardActions}>
                     <button style={s.btnPrimary} onClick={() => openMap(map)}>Open Map</button>
+                    <button style={s.btnDuplicate} onClick={() => handleDuplicate(map)} title="Duplicate this map">⧉ Dupe</button>
                     <DeleteBtn onConfirm={() => handleDelete(map)} name={map.name} />
                   </div>
                 </div>
@@ -325,6 +379,8 @@ const s = {
   // View A
   page:        { padding: '2rem', maxWidth: 900 },
   header:      { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' },
+  headerRight: { display: 'flex', alignItems: 'center', gap: '0.6rem' },
+  searchInput: { background: '#0d0a05', border: '1px solid #3a2a10', borderRadius: 4, color: '#e8e0d0', padding: '0.4rem 0.7rem', fontSize: '0.85rem', outline: 'none', width: 180 },
   title:       { color: '#c9a84c', fontSize: '1.6rem', margin: 0, fontFamily: 'Georgia, serif' },
   count:       { color: '#6b5a3a', fontSize: '0.8rem', margin: '0.2rem 0 0' },
   empty:       { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 220, gap: '1rem' },
@@ -352,6 +408,7 @@ const s = {
   imagePreview:{ display: 'block', width: '100%', maxHeight: 140, objectFit: 'contain', borderRadius: 4, marginBottom: '0.9rem', border: '1px solid #3a2a10' },
   footer:      { display: 'flex', gap: '0.6rem', justifyContent: 'flex-end', paddingTop: '0.75rem', borderTop: '1px solid #2a1c08', marginTop: '0.5rem' },
   err:         { color: '#e05050', fontSize: '0.82rem', marginTop: '-0.6rem', marginBottom: '0.75rem' },
-  btnPrimary:  { background: '#c9a84c', color: '#0d0a05', border: 'none', padding: '0.5rem 1.2rem', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: '0.88rem' },
-  btnSecondary:{ background: 'transparent', color: '#a89060', border: '1px solid #a89060', padding: '0.5rem 1.2rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.88rem' },
+  btnPrimary:   { background: '#c9a84c', color: '#0d0a05', border: 'none', padding: '0.5rem 1.2rem', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: '0.88rem' },
+  btnSecondary: { background: 'transparent', color: '#a89060', border: '1px solid #a89060', padding: '0.5rem 1.2rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.88rem' },
+  btnDuplicate: { background: 'transparent', color: '#a89060', border: '1px solid #3a2a10', borderRadius: 3, padding: '0.2rem 0.6rem', cursor: 'pointer', fontSize: '0.78rem' },
 }

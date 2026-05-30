@@ -69,7 +69,7 @@ export default function AddTokenModal({ isOpen, onClose, onAdd, cell, campaignId
             <button
               key={t.value}
               type="button"
-              style={type === t.value ? { ...s.typeBtn, ...s.typeBtnActive, borderColor: TOKEN_COLORS[t.value] } : s.typeBtn}
+              style={type === t.value ? { ...s.typeBtn, ...s.typeBtnActive, border: `1px solid ${TOKEN_COLORS[t.value]}` } : s.typeBtn}
               onClick={() => { setType(t.value); setEntityId('') }}
             >
               <span style={{ ...s.typeDot, background: TOKEN_COLORS[t.value] }} />

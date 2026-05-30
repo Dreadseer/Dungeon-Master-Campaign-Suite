@@ -3,7 +3,7 @@ import { TOKEN_COLORS } from '../../utils/tokenUtils'
 
 const TYPE_LABELS = { player: 'Player', npc: 'NPC', monster: 'Monster', object: 'Object' }
 
-export default function TokenInspector({ token, onDelete, onDeselect }) {
+export default function TokenInspector({ token, onDelete, onDeselect, mode = 'dm' }) {
   const [npc,        setNpc]        = useState(null)
   const [showNpc,    setShowNpc]    = useState(false)
   const [loadingNpc, setLoadingNpc] = useState(false)
@@ -45,15 +45,15 @@ export default function TokenInspector({ token, onDelete, onDeselect }) {
       {/* Position */}
       <p style={s.pos}>Col {token.col}, Row {token.row}</p>
 
-      {/* NPC link */}
-      {token.entity_type === 'npc' && token.entity_id && (
+      {/* NPC link — DM only */}
+      {mode === 'dm' && token.entity_type === 'npc' && token.entity_id && (
         <button style={s.viewBtn} onClick={handleViewNpc} disabled={loadingNpc}>
           {loadingNpc ? '…' : showNpc ? '▲ Hide NPC' : '▼ View NPC'}
         </button>
       )}
 
-      {/* Character link placeholder */}
-      {token.entity_type === 'character' && (
+      {/* Character link placeholder — DM only */}
+      {mode === 'dm' && token.entity_type === 'character' && (
         <p style={s.ph}>Character sheet — Phase 4</p>
       )}
 
@@ -69,8 +69,10 @@ export default function TokenInspector({ token, onDelete, onDeselect }) {
         </div>
       )}
 
-      {/* Delete */}
-      <button style={s.deleteBtn} onClick={onDelete}>🗑 Delete Token</button>
+      {/* Delete — DM only */}
+      {mode === 'dm' && (
+        <button style={s.deleteBtn} onClick={onDelete}>🗑 Delete Token</button>
+      )}
     </div>
   )
 }

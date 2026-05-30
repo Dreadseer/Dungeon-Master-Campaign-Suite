@@ -16,8 +16,13 @@ export default function MapToolbar({
   onFogBrushSizeChange,
   onRevealAll,
   onHideAll,
+  // View mode
+  viewMode,
+  onViewModeChange,
+  onUpdateThumbnail,
 }) {
-  const [savingGrid, setSavingGrid] = useState(false)
+  const [savingGrid,  setSavingGrid]  = useState(false)
+  const [savingThumb, setSavingThumb] = useState(false)
 
   async function handleSaveGridSize() {
     setSavingGrid(true)
@@ -30,51 +35,78 @@ export default function MapToolbar({
     onSaveGridSize?.(gridSize)
   }
 
+  async function handleUpdateThumbnail() {
+    setSavingThumb(true)
+    await onUpdateThumbnail?.()
+    setSavingThumb(false)
+  }
+
   const isFogTool = activeTool === 'fog-reveal' || activeTool === 'fog-hide'
+  const isDm      = viewMode === 'dm'
 
   return (
     <div style={s.toolbar}>
-      {/* ── Left: Tool buttons ─────────────────────────── */}
+      {/* ── DM / Player mode toggle ────────────────────── */}
       <div style={s.section}>
         <button
-          style={activeTool === 'pan' ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn}
-          onClick={() => onToolChange('pan')}
-          title="Pan / Navigate"
+          style={isDm ? { ...s.modeBtn, ...s.modeBtnDm } : s.modeBtn}
+          onClick={() => onViewModeChange?.('dm')}
+          title="DM mode — full editing access"
         >
-          🤚 Pan
+          🎲 DM
         </button>
         <button
-          style={activeTool === 'fog-reveal' ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn}
-          onClick={() => onToolChange('fog-reveal')}
-          title="Fog Reveal — paint to uncover"
+          style={!isDm ? { ...s.modeBtn, ...s.modeBtnPlayer } : s.modeBtn}
+          onClick={() => onViewModeChange?.('player')}
+          title="Player view — restricted, fog fully opaque"
         >
-          🌟 Reveal
-        </button>
-        <button
-          style={activeTool === 'fog-hide' ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn}
-          onClick={() => onToolChange('fog-hide')}
-          title="Fog Hide — paint to cover"
-        >
-          🌫️ Hide
-        </button>
-        <button
-          style={activeTool === 'token' ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn}
-          onClick={() => onToolChange('token')}
-          title="Token tool — double-click to place, drag to move"
-        >
-          🪙 Token
+          👁 Player
         </button>
       </div>
 
-      {/* Token tool hint */}
-      {activeTool === 'token' && (
+      {/* ── Left: Tool buttons (DM only) ──────────────── */}
+      {isDm && (
+        <div style={s.section}>
+          <button
+            style={activeTool === 'pan' ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn}
+            onClick={() => onToolChange('pan')}
+            title="Pan / Navigate"
+          >
+            🤚 Pan
+          </button>
+          <button
+            style={activeTool === 'fog-reveal' ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn}
+            onClick={() => onToolChange('fog-reveal')}
+            title="Fog Reveal — paint to uncover"
+          >
+            🌟 Reveal
+          </button>
+          <button
+            style={activeTool === 'fog-hide' ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn}
+            onClick={() => onToolChange('fog-hide')}
+            title="Fog Hide — paint to cover"
+          >
+            🌫️ Hide
+          </button>
+          <button
+            style={activeTool === 'token' ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn}
+            onClick={() => onToolChange('token')}
+            title="Token tool — double-click to place, drag to move"
+          >
+            🪙 Token
+          </button>
+        </div>
+      )}
+
+      {/* Token tool hint (DM only) */}
+      {isDm && activeTool === 'token' && (
         <div style={s.section}>
           <span style={s.hint}>Double-click to place · Click to select · Drag to move</span>
         </div>
       )}
 
-      {/* ── Fog controls (visible when a fog tool is active) ── */}
-      {isFogTool && (
+      {/* ── Fog controls (DM only, visible when a fog tool is active) ── */}
+      {isDm && isFogTool && (
         <div style={s.section}>
           <span style={s.label}>Brush</span>
           {[1, 3, 5].map(size => (
@@ -98,22 +130,34 @@ export default function MapToolbar({
         </div>
       )}
 
-      {/* ── Center: Grid size control ──────────────────── */}
-      <div style={s.section}>
-        <span style={s.label}>Grid</span>
-        <button style={s.nudgeBtn}
-          onClick={() => onGridSizeChange(Math.max(20, gridSize - 5))}
-          title="Decrease grid size"
-        >−</button>
-        <span style={s.gridVal}>{gridSize}px</span>
-        <button style={s.nudgeBtn}
-          onClick={() => onGridSizeChange(Math.min(100, gridSize + 5))}
-          title="Increase grid size"
-        >+</button>
-        <button style={s.saveBtn} onClick={handleSaveGridSize} disabled={savingGrid}>
-          {savingGrid ? '…' : 'Save'}
-        </button>
-      </div>
+      {/* ── Center: Grid size control (DM only) ───────── */}
+      {isDm && (
+        <div style={s.section}>
+          <span style={s.label}>Grid</span>
+          <button style={s.nudgeBtn}
+            onClick={() => onGridSizeChange(Math.max(20, gridSize - 5))}
+            title="Decrease grid size"
+          >−</button>
+          <span style={s.gridVal}>{gridSize}px</span>
+          <button style={s.nudgeBtn}
+            onClick={() => onGridSizeChange(Math.min(100, gridSize + 5))}
+            title="Increase grid size"
+          >+</button>
+          <button style={s.saveBtn} onClick={handleSaveGridSize} disabled={savingGrid}>
+            {savingGrid ? '…' : 'Save'}
+          </button>
+        </div>
+      )}
+
+      {/* ── Thumbnail (DM only) ────────────────────────── */}
+      {isDm && (
+        <div style={s.section}>
+          <button style={s.thumbBtn} onClick={handleUpdateThumbnail} disabled={savingThumb}
+            title="Capture current view as map thumbnail">
+            {savingThumb ? '…' : '📷 Thumbnail'}
+          </button>
+        </div>
+      )}
 
       {/* ── Center-right: Zoom control ─────────────────── */}
       <div style={s.section}>
@@ -126,6 +170,7 @@ export default function MapToolbar({
 
       {/* ── Right: Map name + back button ─────────────── */}
       <div style={{ ...s.section, marginLeft: 'auto' }}>
+        {!isDm && <span style={s.playerBadge}>👁 Player View</span>}
         {map?.location_name && (
           <span style={s.locBadge}>{map.location_name}</span>
         )}
@@ -268,6 +313,47 @@ const s = {
     fontSize:  '0.72rem',
     fontStyle: 'italic',
     whiteSpace: 'nowrap',
+  },
+  modeBtn: {
+    background:  'transparent',
+    border:      '1px solid #3a2a10',
+    color:       '#a89060',
+    borderRadius: 4,
+    padding:     '0.25rem 0.55rem',
+    cursor:      'pointer',
+    fontSize:    '0.78rem',
+    whiteSpace:  'nowrap',
+  },
+  modeBtnDm: {
+    background:  '#1a1208',
+    border:      '1px solid #c9a84c',
+    color:       '#c9a84c',
+    fontWeight:  'bold',
+  },
+  modeBtnPlayer: {
+    background:  '#0a1a0a',
+    border:      '1px solid #5a9a5a',
+    color:       '#5a9a5a',
+    fontWeight:  'bold',
+  },
+  thumbBtn: {
+    background:  'transparent',
+    border:      '1px solid #3a2a10',
+    color:       '#a89060',
+    borderRadius: 3,
+    padding:     '0.18rem 0.5rem',
+    cursor:      'pointer',
+    fontSize:    '0.72rem',
+    whiteSpace:  'nowrap',
+  },
+  playerBadge: {
+    background:  '#0a1a0a',
+    border:      '1px solid #5a9a5a',
+    color:       '#5a9a5a',
+    fontSize:    '0.72rem',
+    padding:     '0.1rem 0.4rem',
+    borderRadius: 3,
+    fontWeight:  'bold',
   },
   backBtn: {
     background: 'none',
