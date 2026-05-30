@@ -31,7 +31,8 @@ export default function MapCanvas({
   // Imperative handles for Reveal All / Hide All from toolbar
   onRevealAll,
   onHideAll,
-  registerFogControls,  // callback to expose revealAll/hideAll up to MapEngine
+  registerFogControls,    // callback to expose revealAll/hideAll up to MapEngine
+  registerThumbnailGen,   // callback to expose generateThumbnail up to MapEngine
 }) {
   const stageRef = useRef(null)
 
@@ -182,6 +183,18 @@ export default function MapCanvas({
   useEffect(() => {
     registerFogControls?.({ revealAll, hideAll })
   }, [registerFogControls, revealAll, hideAll])
+
+  // ── Thumbnail generation (exposed to toolbar via registerThumbnailGen) ──
+  const generateThumbnail = useCallback(async () => {
+    if (!stageRef.current) return
+    const dataUrl = stageRef.current.toDataURL({ pixelRatio: 0.2 })
+    const base64  = dataUrl.split(',')[1]
+    await window.electronAPI.file.saveThumbnail(map.id, base64)
+  }, [map.id])
+
+  useEffect(() => {
+    registerThumbnailGen?.(generateThumbnail)
+  }, [registerThumbnailGen, generateThumbnail])
 
   // ── Fog brush helpers ──────────────────────────────────────────────
   const pointerToStage = useCallback((e) => {
@@ -428,6 +441,7 @@ export default function MapCanvas({
           token={selectedToken}
           onDelete={deleteSelectedToken}
           onDeselect={() => setSelectedToken(null)}
+          mode={mode}
         />
       )}
 
