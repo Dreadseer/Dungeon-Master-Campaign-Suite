@@ -2,6 +2,7 @@ import { useState } from 'react'
 import MonsterBrowser   from '../components/compendium/MonsterBrowser'
 import SpellBrowser     from '../components/compendium/SpellBrowser'
 import EquipmentBrowser from '../components/compendium/EquipmentBrowser'
+import CustomBrowser    from '../components/compendium/CustomBrowser'
 
 const TABS = [
   { key: 'monsters',  label: '🐉 Monsters'  },
@@ -36,13 +37,7 @@ export default function Compendium() {
         {activeTab === 'monsters'  && <MonsterBrowser />}
         {activeTab === 'spells'    && <SpellBrowser />}
         {activeTab === 'equipment' && <EquipmentBrowser />}
-        {activeTab === 'custom'    && (
-          <div style={s.placeholder}>
-            <p style={s.phIcon}>📜</p>
-            <p style={s.phTitle}>Custom Compendium</p>
-            <p style={s.phText}>Create homebrew items, spells, equipment, and monsters. Coming in Phase 4 Prompt 02.</p>
-          </div>
-        )}
+        {activeTab === 'custom'    && <CustomBrowser />}
       </div>
     </div>
   )
@@ -69,8 +64,4 @@ const s = {
     borderBottom: '1px solid #1a1208', color: '#c9a84c', fontWeight: 600,
   },
   content:     { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' },
-  placeholder: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: '0.5rem' },
-  phIcon:  { fontSize: '3rem', margin: 0 },
-  phTitle: { color: '#c9a84c', fontFamily: 'Georgia, serif', fontSize: '1.2rem', margin: 0 },
-  phText:  { color: '#6b5a3a', fontSize: '0.88rem', fontStyle: 'italic', margin: 0 },
 }

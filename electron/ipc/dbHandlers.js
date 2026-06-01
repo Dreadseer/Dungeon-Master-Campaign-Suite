@@ -256,6 +256,143 @@ function registerDbHandlers(db) {
 
   ipcMain.handle('db:maps:delete', (_, id) =>
     db.run('DELETE FROM maps WHERE id=?', [id]))
+
+  // ── Custom Compendium (items, spells, equipment, monsters) ──────────
+  // Note: type='lore' entries are managed separately via db:lore:* handlers.
+  // getAll with no type arg returns everything EXCEPT lore entries.
+  ipcMain.handle('db:compendium:getAll', (_, campaignId, type) => {
+    const query  = type
+      ? 'SELECT * FROM compendium_custom WHERE campaign_id = ? AND type = ? ORDER BY name ASC'
+      : 'SELECT * FROM compendium_custom WHERE campaign_id = ? AND type != ? ORDER BY name ASC'
+    const params = type ? [campaignId, type] : [campaignId, 'lore']
+    return db.all(query, params)
+  })
+
+  ipcMain.handle('db:compendium:getById', (_, id) =>
+    db.get('SELECT * FROM compendium_custom WHERE id = ?', [id]))
+
+  ipcMain.handle('db:compendium:create', (_, data) =>
+    db.run(`
+      INSERT INTO compendium_custom (campaign_id, type, name, data, source, created_at)
+      VALUES (?, ?, ?, ?, 'custom', datetime('now'))`,
+      [data.campaign_id, data.type, data.name, JSON.stringify(data.data)]))
+
+  ipcMain.handle('db:compendium:update', (_, id, data) =>
+    db.run('UPDATE compendium_custom SET name=?, data=? WHERE id=?',
+      [data.name, JSON.stringify(data.data), id]))
+
+  ipcMain.handle('db:compendium:delete', (_, id) =>
+    db.run('DELETE FROM compendium_custom WHERE id=?', [id]))
+
+  ipcMain.handle('db:compendium:search', (_, campaignId, query) => {
+    const q = `%${query}%`
+    return db.all(`
+      SELECT * FROM compendium_custom
+      WHERE campaign_id = ? AND type != 'lore' AND name LIKE ?
+      ORDER BY type ASC, name ASC`,
+      [campaignId, q])
+  })
+
+  // ── Characters ────────────────────────────────────────────────────────────
+  ipcMain.handle('db:characters:getAll', (_, campaignId) =>
+    db.all('SELECT * FROM characters WHERE campaign_id = ? ORDER BY character_name ASC', [campaignId]))
+
+  ipcMain.handle('db:characters:getById', (_, id) =>
+    db.get('SELECT * FROM characters WHERE id = ?', [id]))
+
+  ipcMain.handle('db:characters:create', (_, data) =>
+    db.run(`
+      INSERT INTO characters
+        (campaign_id, player_name, character_name, class, race, level,
+         stats, hp_current, hp_max, inventory, spell_slots, notes, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`,
+      [data.campaign_id, data.player_name, data.character_name,
+       data.class, data.race, data.level ?? 1,
+       JSON.stringify(data.stats ?? { str:10, dex:10, con:10, int:10, wis:10, cha:10 }),
+       data.hp_current ?? 0, data.hp_max ?? 0,
+       JSON.stringify(data.inventory ?? []),
+       JSON.stringify(data.spell_slots ?? {}),
+       data.notes ?? '']))
+
+  ipcMain.handle('db:characters:update', (_, id, data) =>
+    db.run(`
+      UPDATE characters
+      SET player_name=?, character_name=?, class=?, race=?, level=?,
+          stats=?, hp_current=?, hp_max=?, inventory=?, spell_slots=?, notes=?
+      WHERE id=?`,
+      [data.player_name, data.character_name, data.class, data.race, data.level,
+       JSON.stringify(data.stats), data.hp_current, data.hp_max,
+       JSON.stringify(data.inventory), JSON.stringify(data.spell_slots),
+       data.notes, id]))
+
+  ipcMain.handle('db:characters:updateHP', (_, id, hpCurrent) =>
+    db.run('UPDATE characters SET hp_current=? WHERE id=?', [hpCurrent, id]))
+
+  ipcMain.handle('db:characters:updateStats', (_, id, stats) =>
+    db.run('UPDATE characters SET stats=? WHERE id=?', [JSON.stringify(stats), id]))
+
+  ipcMain.handle('db:characters:delete', (_, id) =>
+    db.run('DELETE FROM characters WHERE id=?', [id]))
+
+  // ── Character inventory ───────────────────────────────────────────────────
+  ipcMain.handle('db:characters:addItem', (_, charId, item) => {
+    const char = db.get('SELECT inventory FROM characters WHERE id=?', [charId])
+    const inv  = JSON.parse(char.inventory ?? '[]')
+    inv.push({ ...item, id: require('crypto').randomUUID() })
+    return db.run('UPDATE characters SET inventory=? WHERE id=?', [JSON.stringify(inv), charId])
+  })
+
+  ipcMain.handle('db:characters:removeItem', (_, charId, itemId) => {
+    const char = db.get('SELECT inventory FROM characters WHERE id=?', [charId])
+    const inv  = JSON.parse(char.inventory ?? '[]').filter(i => i.id !== itemId)
+    return db.run('UPDATE characters SET inventory=? WHERE id=?', [JSON.stringify(inv), charId])
+  })
+
+  ipcMain.handle('db:characters:updateItem', (_, charId, itemId, changes) => {
+    const char = db.get('SELECT inventory FROM characters WHERE id=?', [charId])
+    const inv  = JSON.parse(char.inventory ?? '[]').map(i => i.id === itemId ? { ...i, ...changes } : i)
+    return db.run('UPDATE characters SET inventory=? WHERE id=?', [JSON.stringify(inv), charId])
+  })
+
+  // ── Spell slots ───────────────────────────────────────────────────────────
+  ipcMain.handle('db:characters:useSlot', (_, charId, slotLevel) => {
+    const char  = db.get('SELECT spell_slots FROM characters WHERE id=?', [charId])
+    const slots = JSON.parse(char.spell_slots ?? '{}')
+    if (slots[slotLevel] && slots[slotLevel].used < slots[slotLevel].max) slots[slotLevel].used += 1
+    return db.run('UPDATE characters SET spell_slots=? WHERE id=?', [JSON.stringify(slots), charId])
+  })
+
+  ipcMain.handle('db:characters:restoreSlot', (_, charId, slotLevel) => {
+    const char  = db.get('SELECT spell_slots FROM characters WHERE id=?', [charId])
+    const slots = JSON.parse(char.spell_slots ?? '{}')
+    if (slots[slotLevel] && slots[slotLevel].used > 0) slots[slotLevel].used -= 1
+    return db.run('UPDATE characters SET spell_slots=? WHERE id=?', [JSON.stringify(slots), charId])
+  })
+
+  ipcMain.handle('db:characters:longRest', (_, charId) => {
+    const char  = db.get('SELECT hp_max, spell_slots FROM characters WHERE id=?', [charId])
+    const slots = JSON.parse(char.spell_slots ?? '{}')
+    Object.keys(slots).forEach(lvl => {
+      if (typeof slots[lvl] === 'object' && 'used' in slots[lvl]) slots[lvl].used = 0
+    })
+    return db.run('UPDATE characters SET hp_current=?, spell_slots=? WHERE id=?',
+      [char.hp_max, JSON.stringify(slots), charId])
+  })
+
+  ipcMain.handle('db:characters:addKnownSpell', (_, charId, spell) => {
+    const char  = db.get('SELECT spell_slots FROM characters WHERE id=?', [charId])
+    const slots = JSON.parse(char.spell_slots ?? '{}')
+    if (!Array.isArray(slots.known_spells)) slots.known_spells = []
+    if (!slots.known_spells.find(s => s.index === spell.index)) slots.known_spells.push(spell)
+    return db.run('UPDATE characters SET spell_slots=? WHERE id=?', [JSON.stringify(slots), charId])
+  })
+
+  ipcMain.handle('db:characters:removeKnownSpell', (_, charId, spellIndex) => {
+    const char  = db.get('SELECT spell_slots FROM characters WHERE id=?', [charId])
+    const slots = JSON.parse(char.spell_slots ?? '{}')
+    slots.known_spells = (slots.known_spells ?? []).filter(s => s.index !== spellIndex)
+    return db.run('UPDATE characters SET spell_slots=? WHERE id=?', [JSON.stringify(slots), charId])
+  })
 }
 
 module.exports = registerDbHandlers

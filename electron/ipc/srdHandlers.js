@@ -36,7 +36,7 @@ function registerSrdHandlers(db, srdService) {
     if (filters.classes)                                   results = results.filter(s => s.classes?.some(c => c.name.toLowerCase().includes(filters.classes.toLowerCase())))
     return results.map(s => ({
       name: s.name, index: s.index, level: s.level,
-      school: s.school?.name, casting_time: s.casting_time, range: s.range,
+      school: typeof s.school === 'object' ? s.school?.name : (s.school ?? ''), casting_time: s.casting_time, range: s.range,
     }))
   })
 
@@ -53,7 +53,7 @@ function registerSrdHandlers(db, srdService) {
     if (filters.category) results = results.filter(e => e.equipment_category?.name?.toLowerCase().includes(filters.category.toLowerCase()))
     return results.map(e => ({
       name: e.name, index: e.index,
-      equipment_category: e.equipment_category?.name, cost: e.cost, weight: e.weight,
+      equipment_category: typeof e.equipment_category === 'object' ? e.equipment_category?.name : (e.equipment_category ?? ''), cost: e.cost, weight: e.weight,
     }))
   })
 

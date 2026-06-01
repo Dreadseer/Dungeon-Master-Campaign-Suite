@@ -1,11 +1,20 @@
 import { useState, useEffect } from 'react'
+import useCampaignStore from '../../stores/campaignStore'
 
 const LEVEL_ORDINALS = ['Cantrip','1st','2nd','3rd','4th','5th','6th','7th','8th','9th']
 
 export default function SpellDetail({ index, onClose }) {
-  const [spell,   setSpell]   = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [toast,   setToast]   = useState('')
+  const activeCampaign = useCampaignStore(st => st.activeCampaign)
+
+  const [spell,      setSpell]      = useState(null)
+  const [loading,    setLoading]    = useState(true)
+  const [toast,      setToast]      = useState('')
+
+  // Add-to-character flow
+  const [addMode,    setAddMode]    = useState(false)
+  const [characters, setCharacters] = useState([])
+  const [selCharId,  setSelCharId]  = useState('')
+  const [adding,     setAdding]     = useState(false)
 
   useEffect(() => {
     setLoading(true)
@@ -18,6 +27,34 @@ export default function SpellDetail({ index, onClose }) {
   function showToast(msg) {
     setToast(msg)
     setTimeout(() => setToast(''), 2500)
+  }
+
+  async function openAddMode() {
+    setAddMode(true)
+    if (!activeCampaign) return
+    const chars = await window.electronAPI.db.characters.getAll(activeCampaign.id).catch(() => [])
+    setCharacters(chars)
+    if (chars.length > 0) setSelCharId(String(chars[0].id))
+  }
+
+  async function confirmAdd() {
+    if (!selCharId || !spell) return
+    setAdding(true)
+    try {
+      await window.electronAPI.db.characters.addKnownSpell(Number(selCharId), {
+        name:   spell.name,
+        index:  spell.index,
+        level:  spell.level,
+        school: spell.school?.name ?? spell.school ?? '',
+        source: 'srd',
+      })
+      const char = characters.find(c => c.id === Number(selCharId))
+      showToast(`✓ ${spell.name} added to ${char?.character_name ?? 'character'}'s spellbook.`)
+    } catch {
+      showToast('Failed to add spell.')
+    }
+    setAdding(false)
+    setAddMode(false)
   }
 
   if (loading) return (
@@ -120,9 +157,34 @@ export default function SpellDetail({ index, onClose }) {
 
       {/* Footer */}
       <div style={s.footer}>
-        <button style={s.actionBtn} onClick={() => showToast('📖 Open a character sheet to add spells — Phase 4 Prompt 04')}>
-          + Add to Character
-        </button>
+        {addMode ? (
+          <div style={s.addFlow}>
+            {!activeCampaign ? (
+              <p style={s.addMsg}>Select a campaign first to add spells to a character.</p>
+            ) : characters.length === 0 ? (
+              <p style={s.addMsg}>No characters in this campaign yet.</p>
+            ) : (
+              <select style={s.charSelect} value={selCharId}
+                onChange={e => setSelCharId(e.target.value)}>
+                {characters.map(c => (
+                  <option key={c.id} value={c.id}>{c.character_name}</option>
+                ))}
+              </select>
+            )}
+            <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.3rem' }}>
+              <button style={s.cancelAddBtn} onClick={() => setAddMode(false)}>Cancel</button>
+              {activeCampaign && characters.length > 0 && (
+                <button style={s.confirmAddBtn} onClick={confirmAdd} disabled={adding}>
+                  {adding ? 'Adding…' : 'Add to Spellbook'}
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <button style={s.actionBtn} onClick={openAddMode}>
+            + Add to Character
+          </button>
+        )}
       </div>
     </div>
   )
@@ -180,6 +242,11 @@ const s = {
   classLabel: { color: '#6b5a3a' },
   classValue: { color: '#a89060' },
 
-  footer:    { borderTop: '1px solid #2a1c08', padding: '0.45rem 0.85rem', flexShrink: 0 },
-  actionBtn: { width: '100%', background: 'transparent', border: '1px solid #3a2a10', color: '#a89060', borderRadius: 3, padding: '0.3rem 0.4rem', cursor: 'pointer', fontSize: '0.75rem' },
+  footer:       { borderTop: '1px solid #2a1c08', padding: '0.45rem 0.85rem', flexShrink: 0 },
+  actionBtn:    { width: '100%', background: 'transparent', border: '1px solid #3a2a10', color: '#a89060', borderRadius: 3, padding: '0.3rem 0.4rem', cursor: 'pointer', fontSize: '0.75rem' },
+  addFlow:      { display: 'flex', flexDirection: 'column', gap: '0.15rem' },
+  addMsg:       { color: '#6b5a3a', fontSize: '0.75rem', fontStyle: 'italic', margin: 0 },
+  charSelect:   { width: '100%', background: '#0d0a05', border: '1px solid #3a2a10', borderRadius: 3, color: '#e8e0d0', padding: '0.25rem 0.4rem', fontSize: '0.78rem', outline: 'none' },
+  cancelAddBtn: { background: 'transparent', border: '1px solid #2a1c08', color: '#6b5a3a', borderRadius: 3, padding: '0.25rem 0.5rem', cursor: 'pointer', fontSize: '0.72rem' },
+  confirmAddBtn:{ background: '#2a3a1a', border: '1px solid #4a7a2a', color: '#8ada6a', borderRadius: 3, padding: '0.25rem 0.6rem', cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600 },
 }

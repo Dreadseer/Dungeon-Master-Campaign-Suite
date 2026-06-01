@@ -1,8 +1,5 @@
 import { useState, useEffect } from 'react'
-
-// Local helpers — will be imported from src/utils/dnd5e.js once it's created in Prompt 03
-const abilityMod = (score) => Math.floor((score - 10) / 2)
-const modStr     = (score) => { const m = abilityMod(score); return m >= 0 ? `+${m}` : `${m}` }
+import { abilityMod, modStr } from '../../utils/dnd5e'
 
 const ABILITY_LABELS = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA']
 const ABILITY_KEYS   = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']

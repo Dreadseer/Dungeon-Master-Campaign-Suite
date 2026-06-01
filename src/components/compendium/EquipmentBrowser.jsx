@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import EquipmentDetail from './EquipmentDetail'
+import EquipmentDetail  from './EquipmentDetail'
+import HomebrewCard     from './HomebrewCard'
+import useCampaignStore from '../../stores/campaignStore'
 
 const CATEGORY_OPTIONS = [
   'Weapon','Armor','Adventuring Gear','Tools',
@@ -8,8 +10,11 @@ const CATEGORY_OPTIONS = [
 const PAGE_SIZE = 50
 
 export default function EquipmentBrowser() {
-  const [allEquipment, setAllEquipment]   = useState([])
-  const [loading, setLoading]             = useState(true)
+  const activeCampaign = useCampaignStore(st => st.activeCampaign)
+
+  const [allEquipment,     setAllEquipment]     = useState([])
+  const [homebrewEquipment,setHomebrewEquipment]= useState([])
+  const [loading, setLoading]                   = useState(true)
   const [nameInput, setNameInput]         = useState('')
   const [nameFilter, setNameFilter]       = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
@@ -17,7 +22,29 @@ export default function EquipmentBrowser() {
   const [selectedIndex, setSelectedIndex] = useState(null)
   const debounceRef = useRef(null)
 
-  // Load all equipment once — filter client-side
+  // Load homebrew equipment whenever campaign changes
+  useEffect(() => {
+    if (!activeCampaign) { setHomebrewEquipment([]); return }
+    window.electronAPI.db.compendium.getAll(activeCampaign.id, 'equipment')
+      .then(brew => {
+        setHomebrewEquipment(brew.map(e => {
+          let d = {}
+          try { d = JSON.parse(e.data ?? '{}') } catch { /* empty */ }
+          return {
+            name:              e.name,
+            index:             `custom-${e.id}`,
+            equipment_category:d.category ?? 'Custom',
+            cost:              d.cost ?? null,
+            weight:            d.weight ?? null,
+            isHomebrew:        true,
+            homebrew_entry:    { ...e, data_raw: e.data },
+          }
+        }))
+      })
+      .catch(() => setHomebrewEquipment([]))
+  }, [activeCampaign])
+
+  // Load all SRD equipment once — filter client-side
   useEffect(() => {
     window.electronAPI.srd.getEquipment({})
       .then(e => { setAllEquipment(e); setLoading(false) })
@@ -33,13 +60,16 @@ export default function EquipmentBrowser() {
     return () => clearTimeout(debounceRef.current)
   }, [nameInput])
 
-  // Client-side filter — name and category are in the projection
-  const filtered = allEquipment.filter(e => {
+  // Client-side filter — applied to both SRD and homebrew
+  function matchesFilters(e) {
     if (nameFilter     && !e.name.toLowerCase().includes(nameFilter.toLowerCase())) return false
-    if (categoryFilter && e.equipment_category?.toLowerCase() !== categoryFilter.toLowerCase()) return false
+    const eCatName = typeof e.equipment_category === 'object' ? e.equipment_category?.name : e.equipment_category
+    if (categoryFilter && eCatName?.toLowerCase() !== categoryFilter.toLowerCase()) return false
     return true
-  })
+  }
 
+  const filtered   = [...allEquipment.filter(matchesFilters), ...homebrewEquipment.filter(matchesFilters)]
+  const totalItems = allEquipment.length + homebrewEquipment.length
   const visible    = filtered.slice(0, visibleCount)
   const isFiltered = !!(nameFilter || categoryFilter)
 
@@ -73,8 +103,8 @@ export default function EquipmentBrowser() {
           {loading
             ? 'Loading…'
             : isFiltered
-              ? `${filtered.length} of ${allEquipment.length} items`
-              : `${allEquipment.length} items`
+              ? `${filtered.length} of ${totalItems} items`
+              : `${totalItems} items`
           }
         </span>
       </div>
@@ -102,8 +132,11 @@ export default function EquipmentBrowser() {
                   style={selectedIndex === e.index ? { ...s.row, ...s.rowSelected } : s.row}
                   onClick={() => setSelectedIndex(e.index)}
                 >
-                  <span style={s.eName}>{e.name}</span>
-                  <span style={s.eCat}>{e.equipment_category ?? '—'}</span>
+                  <span style={s.eName}>
+                    {e.name}
+                    {e.isHomebrew && <span style={s.brewDot} title="Homebrew"> ✦</span>}
+                  </span>
+                  <span style={s.eCat}>{typeof e.equipment_category === 'object' ? (e.equipment_category?.name ?? '—') : (e.equipment_category ?? '—')}</span>
                   <span style={s.eCost}>{formatCost(e.cost)}</span>
                   <span style={s.eWeight}>{formatWeight(e.weight)}</span>
                 </div>
@@ -119,9 +152,18 @@ export default function EquipmentBrowser() {
           )}
         </div>
 
-        {selectedIndex && (
-          <EquipmentDetail index={selectedIndex} onClose={() => setSelectedIndex(null)} />
-        )}
+        {selectedIndex && (() => {
+          const e = [...allEquipment, ...homebrewEquipment].find(x => x.index === selectedIndex)
+          if (e?.isHomebrew) {
+            return (
+              <HomebrewCard
+                entry={e.homebrew_entry}
+                onClose={() => setSelectedIndex(null)}
+              />
+            )
+          }
+          return <EquipmentDetail index={selectedIndex} onClose={() => setSelectedIndex(null)} />
+        })()}
       </div>
     </div>
   )
@@ -145,7 +187,8 @@ const s = {
   row:         { display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.42rem 0.6rem', borderBottom: '1px solid #1a1208', cursor: 'pointer', borderRadius: 3 },
   rowSelected: { background: '#1a1208', outline: '1px solid #3a2a10' },
 
-  eName:   { color: '#e8e0d0', fontWeight: 600, fontSize: '0.88rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  eName:   { color: '#e8e0d0', fontWeight: 600, fontSize: '0.88rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '0.2rem' },
+  brewDot: { color: '#aa7aca', fontSize: '0.65rem', flexShrink: 0 },
   eCat:    { color: '#a89060', fontSize: '0.78rem', width: 140, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   eCost:   { color: '#c9a84c', fontSize: '0.78rem', width: 70,  flexShrink: 0 },
   eWeight: { color: '#6b5a3a', fontSize: '0.75rem', width: 65,  textAlign: 'right', flexShrink: 0 },
