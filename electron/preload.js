@@ -80,12 +80,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   srd: {
-    seedAll:       ()        => ipcRenderer.invoke('srd:seedAll'),
-    getMonsters:   (filters) => ipcRenderer.invoke('srd:getMonsters', filters),
-    getSpells:     (filters) => ipcRenderer.invoke('srd:getSpells', filters),
-    getEquipment:  (filters) => ipcRenderer.invoke('srd:getEquipment', filters),
-    getCacheStats: ()        => ipcRenderer.invoke('srd:getCacheStats'),
-    onProgress:    (cb)      => ipcRenderer.on('srd:progress', (_event, data) => cb(data)),
+    seedAll:              ()        => ipcRenderer.invoke('srd:seedAll'),
+    getMonsters:          (filters) => ipcRenderer.invoke('srd:getMonsters',        filters),
+    getMonsterByIndex:    (index)   => ipcRenderer.invoke('srd:getMonsterByIndex',  index),
+    getSpells:            (filters) => ipcRenderer.invoke('srd:getSpells',          filters),
+    getSpellByIndex:      (index)   => ipcRenderer.invoke('srd:getSpellByIndex',    index),
+    getEquipment:         (filters) => ipcRenderer.invoke('srd:getEquipment',       filters),
+    getEquipmentByIndex:  (index)   => ipcRenderer.invoke('srd:getEquipmentByIndex',index),
+    getCacheStats:        ()        => ipcRenderer.invoke('srd:getCacheStats'),
+    onProgress:           (cb)      => ipcRenderer.on('srd:progress', (_event, data) => cb(data)),
   },
 
   ai: {
