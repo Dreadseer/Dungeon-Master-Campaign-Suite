@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import MonsterStatBlock from './MonsterStatBlock'
-import { crColor } from '../../utils/crColor'
+import HomebrewCard     from './HomebrewCard'
+import { crColor }      from '../../utils/crColor'
+import useCampaignStore from '../../stores/campaignStore'
 
 const CR_OPTIONS = [
   '0','1/8','1/4','1/2',
@@ -17,7 +19,10 @@ const SIZE_OPTIONS = ['Tiny','Small','Medium','Large','Huge','Gargantuan']
 const PAGE_SIZE    = 50
 
 export default function MonsterBrowser() {
+  const activeCampaign = useCampaignStore(st => st.activeCampaign)
+
   const [allMonsters, setAllMonsters]     = useState([])
+  const [loadError, setLoadError]         = useState('')
   const [loading, setLoading]             = useState(true)
   const [nameInput, setNameInput]         = useState('')
   const [nameFilter, setNameFilter]       = useState('')
@@ -28,12 +33,42 @@ export default function MonsterBrowser() {
   const [selectedIndex, setSelectedIndex] = useState(null)
   const debounceRef = useRef(null)
 
-  // Load all monsters once — we filter client-side
+  // Load SRD monsters + any homebrew monsters for the active campaign
   useEffect(() => {
-    window.electronAPI.srd.getMonsters({})
-      .then(m => { setAllMonsters(m); setLoading(false) })
-      .catch(() => setLoading(false))
-  }, [])
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      try {
+        const [srd, brew] = await Promise.all([
+          window.electronAPI.srd.getMonsters({}),
+          activeCampaign
+            ? window.electronAPI.db.compendium.getAll(activeCampaign.id, 'monster')
+            : Promise.resolve([]),
+        ])
+        if (cancelled) return
+        const brewMapped = brew.map(e => {
+          let d = {}
+          try { d = JSON.parse(e.data ?? '{}') } catch { /* empty */ }
+          return {
+            name:             e.name,
+            index:            `custom-${e.id}`,
+            challenge_rating: d.cr ?? '?',
+            type:             d.type ?? 'Custom',
+            size:             d.size ?? '—',
+            hit_points:       d.hit_points ?? '—',
+            isHomebrew:       true,
+            homebrew_entry:   { ...e, data_raw: e.data },
+          }
+        })
+        setAllMonsters([...srd, ...brewMapped])
+      } catch (err) {
+      if (!cancelled) setLoadError(err?.message ?? 'Failed to load monsters')
+    }
+    if (!cancelled) setLoading(false)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [activeCampaign])
 
   // Debounce name input → nameFilter (resets pagination)
   useEffect(() => {
@@ -98,6 +133,8 @@ export default function MonsterBrowser() {
         <div style={s.list}>
           {loading ? (
             <p style={s.msg}>Loading monsters…</p>
+          ) : loadError ? (
+            <p style={{ ...s.msg, color: '#e05050' }}>⚠ {loadError}</p>
           ) : filtered.length === 0 ? (
             <p style={s.msg}>No monsters match these filters.</p>
           ) : (
@@ -117,7 +154,10 @@ export default function MonsterBrowser() {
                   style={selectedIndex === m.index ? { ...s.row, ...s.rowSelected } : s.row}
                   onClick={() => setSelectedIndex(m.index)}
                 >
-                  <span style={s.mName}>{m.name}</span>
+                  <span style={s.mName}>
+                    {m.name}
+                    {m.isHomebrew && <span style={s.brewDot} title="Homebrew"> ✦</span>}
+                  </span>
                   <span style={{ ...s.crBadge, background: crColor(m.challenge_rating) }}>
                     {m.challenge_rating}
                   </span>
@@ -140,13 +180,24 @@ export default function MonsterBrowser() {
           )}
         </div>
 
-        {/* Stat block detail panel */}
-        {selectedIndex && (
-          <MonsterStatBlock
-            index={selectedIndex}
-            onClose={() => setSelectedIndex(null)}
-          />
-        )}
+        {/* Detail panel — homebrew shows HomebrewCard, SRD shows MonsterStatBlock */}
+        {selectedIndex && (() => {
+          const m = allMonsters.find(x => x.index === selectedIndex)
+          if (m?.isHomebrew) {
+            return (
+              <HomebrewCard
+                entry={m.homebrew_entry}
+                onClose={() => setSelectedIndex(null)}
+              />
+            )
+          }
+          return (
+            <MonsterStatBlock
+              index={selectedIndex}
+              onClose={() => setSelectedIndex(null)}
+            />
+          )
+        })()}
       </div>
     </div>
   )
@@ -176,7 +227,8 @@ const s = {
   },
   rowSelected: { background: '#1a1208', outline: '1px solid #3a2a10' },
 
-  mName:   { color: '#e8e0d0', fontWeight: 600, fontSize: '0.88rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  mName:   { color: '#e8e0d0', fontWeight: 600, fontSize: '0.88rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '0.2rem' },
+  brewDot: { color: '#aa7aca', fontSize: '0.65rem', flexShrink: 0 },
   crBadge: { color: '#fff', fontSize: '0.7rem', fontWeight: 'bold', padding: '0.1rem 0.35rem', borderRadius: 3, width: 40, textAlign: 'center', flexShrink: 0 },
   mType:   { color: '#a89060', fontSize: '0.78rem', width: 100, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   mSize:   { color: '#a89060', fontSize: '0.78rem', width: 80, flexShrink: 0 },

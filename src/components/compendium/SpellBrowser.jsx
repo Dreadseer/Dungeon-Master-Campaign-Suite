@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import SpellDetail from './SpellDetail'
+import SpellDetail      from './SpellDetail'
+import HomebrewCard     from './HomebrewCard'
+import useCampaignStore from '../../stores/campaignStore'
 
 const LEVEL_OPTIONS = [
   { value: '',  label: 'All Levels' },
@@ -30,7 +32,10 @@ const LEVEL_COLORS = [
 const PAGE_SIZE = 50
 
 export default function SpellBrowser() {
+  const activeCampaign = useCampaignStore(st => st.activeCampaign)
+
   const [allSpells, setAllSpells]         = useState([])
+  const [homebrewSpells, setHomebrewSpells] = useState([])
   const [loading, setLoading]             = useState(true)
   const [nameInput, setNameInput]         = useState('')
   const [nameFilter, setNameFilter]       = useState('')
@@ -43,7 +48,30 @@ export default function SpellBrowser() {
   const nameDebounce  = useRef(null)
   const classDebounce = useRef(null)
 
-  // Initial load — all spells, no filters
+  // Load homebrew spells whenever campaign changes
+  useEffect(() => {
+    if (!activeCampaign) { setHomebrewSpells([]); return }
+    window.electronAPI.db.compendium.getAll(activeCampaign.id, 'spell')
+      .then(brew => {
+        setHomebrewSpells(brew.map(e => {
+          let d = {}
+          try { d = JSON.parse(e.data ?? '{}') } catch { /* empty */ }
+          return {
+            name:          e.name,
+            index:         `custom-${e.id}`,
+            level:         d.level ?? 0,
+            school:        d.school ?? 'Custom',
+            casting_time:  d.casting_time ?? '—',
+            range:         d.range ?? '—',
+            isHomebrew:    true,
+            homebrew_entry:{ ...e, data_raw: e.data },
+          }
+        }))
+      })
+      .catch(() => setHomebrewSpells([]))
+  }, [activeCampaign])
+
+  // Initial load — all SRD spells, no filters
   useEffect(() => {
     window.electronAPI.srd.getSpells({})
       .then(s => { setAllSpells(s); setLoading(false) })
@@ -86,16 +114,24 @@ export default function SpellBrowser() {
     }
   }, [classFilter]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Client-side filter for name/level/school (all in projection)
-  const filtered = allSpells.filter(s => {
-    if (nameFilter   && !s.name.toLowerCase().includes(nameFilter.toLowerCase())) return false
-    if (levelFilter !== '' && s.level !== Number(levelFilter))                    return false
-    if (schoolFilter && s.school?.toLowerCase() !== schoolFilter.toLowerCase())   return false
+  // Shared filter function — applies to both SRD and homebrew rows
+  function matchesFilters(sp) {
+    if (nameFilter   && !sp.name.toLowerCase().includes(nameFilter.toLowerCase())) return false
+    if (levelFilter !== '' && sp.level !== Number(levelFilter))                    return false
+    const spSchoolName = typeof sp.school === 'object' ? sp.school?.name : sp.school
+    if (schoolFilter && spSchoolName?.toLowerCase() !== schoolFilter.toLowerCase()) return false
     return true
-  })
+  }
 
-  const visible    = filtered.slice(0, visibleCount)
-  const isFiltered = !!(nameFilter || levelFilter !== '' || schoolFilter || classFilter)
+  // Merge SRD + homebrew, then filter
+  const filtered = [
+    ...allSpells.filter(matchesFilters),
+    ...homebrewSpells.filter(matchesFilters),
+  ]
+
+  const visible      = filtered.slice(0, visibleCount)
+  const totalSpells  = allSpells.length + homebrewSpells.length
+  const isFiltered   = !!(nameFilter || levelFilter !== '' || schoolFilter || classFilter)
 
   return (
     <div style={s.wrapper}>
@@ -126,8 +162,8 @@ export default function SpellBrowser() {
           {loading
             ? 'Loading…'
             : isFiltered
-              ? `${filtered.length} of ${allSpells.length} spells`
-              : `${allSpells.length} spells`
+              ? `${filtered.length} of ${totalSpells} spells`
+              : `${totalSpells} spells`
           }
         </span>
       </div>
@@ -156,11 +192,14 @@ export default function SpellBrowser() {
                   style={selectedIndex === sp.index ? { ...s.row, ...s.rowSelected } : s.row}
                   onClick={() => setSelectedIndex(sp.index)}
                 >
-                  <span style={s.spName}>{sp.name}</span>
+                  <span style={s.spName}>
+                    {sp.name}
+                    {sp.isHomebrew && <span style={s.brewDot} title="Homebrew"> ✦</span>}
+                  </span>
                   <span style={{ ...s.lvlBadge, background: LEVEL_COLORS[sp.level] ?? '#5a5a5a' }}>
                     {LEVEL_LABELS[sp.level]}
                   </span>
-                  <span style={s.spSchool}>{sp.school}</span>
+                  <span style={s.spSchool}>{typeof sp.school === 'object' ? sp.school?.name : (sp.school ?? '—')}</span>
                   <span style={s.spCast}>{sp.casting_time}</span>
                   <span style={s.spRange}>{sp.range}</span>
                 </div>
@@ -176,9 +215,18 @@ export default function SpellBrowser() {
           )}
         </div>
 
-        {selectedIndex && (
-          <SpellDetail index={selectedIndex} onClose={() => setSelectedIndex(null)} />
-        )}
+        {selectedIndex && (() => {
+          const sp = [...allSpells, ...homebrewSpells].find(x => x.index === selectedIndex)
+          if (sp?.isHomebrew) {
+            return (
+              <HomebrewCard
+                entry={sp.homebrew_entry}
+                onClose={() => setSelectedIndex(null)}
+              />
+            )
+          }
+          return <SpellDetail index={selectedIndex} onClose={() => setSelectedIndex(null)} />
+        })()}
       </div>
     </div>
   )
@@ -203,7 +251,8 @@ const s = {
   row:         { display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.42rem 0.6rem', borderBottom: '1px solid #1a1208', cursor: 'pointer', borderRadius: 3 },
   rowSelected: { background: '#1a1208', outline: '1px solid #3a2a10' },
 
-  spName:   { color: '#e8e0d0', fontWeight: 600, fontSize: '0.88rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  spName:   { color: '#e8e0d0', fontWeight: 600, fontSize: '0.88rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '0.2rem' },
+  brewDot:  { color: '#aa7aca', fontSize: '0.65rem', flexShrink: 0 },
   lvlBadge: { color: '#fff', fontSize: '0.68rem', fontWeight: 'bold', padding: '0.1rem 0.35rem', borderRadius: 3, width: 60, textAlign: 'center', flexShrink: 0 },
   spSchool: { color: '#a89060', fontSize: '0.78rem', width: 100, flexShrink: 0 },
   spCast:   { color: '#a89060', fontSize: '0.75rem', width: 90, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
