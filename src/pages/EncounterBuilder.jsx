@@ -3,6 +3,7 @@ import useCampaignStore    from '../stores/campaignStore'
 import MonsterRoster       from '../components/encounter/MonsterRoster'
 import MonsterSearchPanel  from '../components/encounter/MonsterSearchPanel'
 import XPCalculator        from '../components/encounter/XPCalculator'
+import InitiativeTracker   from '../components/encounter/InitiativeTracker'
 
 const STATUS_TABS  = ['All', 'Planned', 'Active', 'Completed']
 
@@ -33,6 +34,7 @@ export default function EncounterBuilder() {
   const [monsters, setMonsters]               = useState([])
   const [recentlyUsed, setRecentlyUsed]       = useState([])
   const [currentDifficulty, setCurrentDifficulty] = useState('')
+  const [campaignChars, setCampaignChars]     = useState([])
 
   // ── Load encounters list ──────────────────────────────────────────────────
   const loadEncounters = useCallback(async () => {
@@ -109,6 +111,11 @@ export default function EncounterBuilder() {
     try { ms = JSON.parse(full.monsters ?? '[]') } catch { /* empty */ }
     setActiveEncounter(full)
     setMonsters(ms)
+    // If encounter is already active, pre-load characters for the tracker
+    if (full.status === 'active' && activeCampaign) {
+      const chars = await window.electronAPI.db.characters.getAll(activeCampaign.id)
+      setCampaignChars(chars)
+    }
     await loadRecentlyUsed()
   }
 
@@ -139,6 +146,30 @@ export default function EncounterBuilder() {
     })
   }
 
+  // ── Combat lifecycle ─────────────────────────────────────────────────────
+  const handleStartCombat = async () => {
+    if (!activeCampaign || !activeEncounter) return
+    try {
+      // Load characters for the tracker
+      const chars = await window.electronAPI.db.characters.getAll(activeCampaign.id)
+      setCampaignChars(chars)
+      // Persist status change
+      await window.electronAPI.db.encounters.updateStatus(activeEncounter.id, 'active')
+      setActiveEncounter(prev => ({ ...prev, status: 'active' }))
+    } catch (err) {
+      console.error('Failed to start combat:', err)
+    }
+  }
+
+  const handleEndCombat = async () => {
+    if (!activeEncounter) return
+    try {
+      await window.electronAPI.db.encounters.updateStatus(activeEncounter.id, 'completed')
+    } catch { /* non-critical — still navigate back */ }
+    setActiveEncounter(null)
+    await loadEncounters()
+  }
+
   // ── Filtered encounter list ───────────────────────────────────────────────
   const filtered = encounters.filter(e =>
     statusTab === 'All' || e.status === statusTab.toLowerCase()
@@ -157,48 +188,123 @@ export default function EncounterBuilder() {
   // VIEW B — Encounter Editor
   // ════════════════════════════════════════════════════════════════════════════
   if (activeEncounter) {
-    const sc = STATUS_COLORS[activeEncounter.status] ?? STATUS_COLORS.planned
-    return (
-      <div style={s.page}>
-        {/* Editor header */}
-        <div style={s.editorHeader}>
-          <button style={s.backBtn} onClick={() => { setActiveEncounter(null); loadEncounters() }}>
-            ← Encounters
-          </button>
-          <h2 style={s.editorTitle}>{activeEncounter.name}</h2>
-          <span style={{ ...s.statusBadge, background: sc.bg, color: sc.color }}>
-            {sc.label}
-          </span>
-          {activeEncounter.location_name && (
-            <span style={s.locationBadge}>📍 {activeEncounter.location_name}</span>
-          )}
-        </div>
+    const sc     = STATUS_COLORS[activeEncounter.status] ?? STATUS_COLORS.planned
+    const status = activeEncounter.status
 
-        {/* Two-column layout */}
-        <div style={s.editorBody}>
-          {/* Left — Monster Roster (60%) + XP Calculator below */}
-          <div style={s.rosterCol}>
-            <div style={currentDifficulty === 'Deadly' ? s.deadlyBorder : {}}>
-              <MonsterRoster
-                encounterId={activeEncounter.id}
+    // Shared editor header (shown in all sub-views)
+    const editorHeader = (
+      <div style={s.editorHeader}>
+        <button style={s.backBtn} onClick={() => { setActiveEncounter(null); loadEncounters() }}>
+          ← Encounters
+        </button>
+        <h2 style={s.editorTitle}>{activeEncounter.name}</h2>
+        <span style={{ ...s.statusBadge, background: sc.bg, color: sc.color }}>
+          {sc.label}
+        </span>
+        {activeEncounter.location_name && (
+          <span style={s.locationBadge}>📍 {activeEncounter.location_name}</span>
+        )}
+      </div>
+    )
+
+    // ── VIEW B-1: PLANNED — roster editor + Start Combat ─────────────────
+    if (status === 'planned') {
+      return (
+        <div style={s.page}>
+          {editorHeader}
+
+          {/* Two-column layout */}
+          <div style={s.editorBody}>
+            {/* Left — Monster Roster (60%) + XP Calculator below */}
+            <div style={s.rosterCol}>
+              <div style={currentDifficulty === 'Deadly' ? s.deadlyBorder : {}}>
+                <MonsterRoster
+                  encounterId={activeEncounter.id}
+                  monsters={monsters}
+                  onChange={handleRosterChange}
+                />
+              </div>
+              <XPCalculator
+                encounter={activeEncounter}
                 monsters={monsters}
-                onChange={handleRosterChange}
+                onDifficultyChange={setCurrentDifficulty}
+              />
+              <div style={s.startCombatRow}>
+                <button style={s.startCombatBtn} onClick={handleStartCombat} disabled={monsters.length === 0}>
+                  ⚔ Start Combat
+                </button>
+                {monsters.length === 0 && (
+                  <span style={s.startCombatHint}>Add monsters to the roster to start combat</span>
+                )}
+              </div>
+            </div>
+
+            {/* Right — Monster Search (40%) */}
+            <div style={s.searchCol}>
+              <MonsterSearchPanel
+                rosterMonsters={monsters}
+                onAdd={handleAddMonster}
+                recentlyUsed={recentlyUsed}
               />
             </div>
-            <XPCalculator
+          </div>
+        </div>
+      )
+    }
+
+    // ── VIEW B-2: ACTIVE — Initiative Tracker ─────────────────────────────
+    if (status === 'active') {
+      return (
+        <div style={s.page}>
+          {editorHeader}
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <InitiativeTracker
               encounter={activeEncounter}
-              monsters={monsters}
-              onDifficultyChange={setCurrentDifficulty}
+              characters={campaignChars}
+              campaignId={activeCampaign.id}
+              onEndCombat={handleEndCombat}
             />
           </div>
+        </div>
+      )
+    }
 
-          {/* Right — Monster Search (40%) */}
-          <div style={s.searchCol}>
-            <MonsterSearchPanel
-              rosterMonsters={monsters}
-              onAdd={handleAddMonster}
-              recentlyUsed={recentlyUsed}
-            />
+    // ── VIEW B-3: COMPLETED — Read-only history ───────────────────────────
+    let completedMonsters = []
+    try { completedMonsters = JSON.parse(activeEncounter.monsters ?? '[]') } catch { /* empty */ }
+    const rawTotalXP   = completedMonsters.reduce((s, m) => s + (m.xp ?? 0) * m.count, 0)
+
+    return (
+      <div style={s.page}>
+        {editorHeader}
+        <div style={s.historyBody}>
+          <div style={s.historyPanel}>
+            <div style={s.historySection}>
+              <div style={s.historySectionLabel}>Monster Outcomes</div>
+              {completedMonsters.length === 0
+                ? <p style={s.historyEmpty}>No monsters were recorded for this encounter.</p>
+                : completedMonsters.map(m => (
+                  <div key={m.id ?? m.name} style={s.historyMonsterRow}>
+                    <span style={s.historyMonsterName}>{m.custom_name || m.name}</span>
+                    <span style={s.historyMonsterCount}>×{m.count}</span>
+                    <span style={s.historyMonsterXP}>{((m.xp ?? 0) * m.count).toLocaleString()} XP</span>
+                  </div>
+                ))
+              }
+            </div>
+
+            <div style={s.historySection}>
+              <div style={s.historySectionLabel}>XP Earned</div>
+              <div style={s.historyXPRow}>
+                <span style={s.historyXPLabel}>Total Raw XP</span>
+                <span style={s.historyXPVal}>{rawTotalXP.toLocaleString()}</span>
+              </div>
+            </div>
+
+            <div style={s.historySection}>
+              <div style={s.historySectionLabel}>Notes</div>
+              <p style={s.historyNotes}>{activeEncounter.notes || '—'}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -440,6 +546,32 @@ const s = {
   rosterCol: { flex: 60, minWidth: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto' },
   deadlyBorder: { borderRadius: 8, outline: '2px solid rgba(139,0,0,0.6)', outlineOffset: 2 },
   searchCol: { flex: 40, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 },
+  startCombatRow: { display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, padding: '0 2px' },
+  startCombatBtn: {
+    padding: '9px 22px', background: '#3a1a1a', color: '#e05050',
+    border: '1px solid #8a2a2a', borderRadius: 6, cursor: 'pointer',
+    fontSize: 14, fontWeight: 600,
+  },
+  startCombatHint: { color: '#555', fontSize: 12, fontStyle: 'italic' },
+
+  // History view
+  historyBody: { display: 'flex', flex: 1, minHeight: 0, overflowY: 'auto' },
+  historyPanel: {
+    display: 'flex', flexDirection: 'column', gap: 0,
+    background: '#1a1a1a', border: '1px solid #333', borderRadius: 8,
+    overflow: 'hidden', maxWidth: 600, width: '100%',
+  },
+  historySection: { padding: '12px 16px', borderBottom: '1px solid #222' },
+  historySectionLabel: { color: '#666', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
+  historyEmpty: { color: '#555', fontSize: 13, margin: 0 },
+  historyMonsterRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' },
+  historyMonsterName: { color: '#e0d5c0', fontSize: 13, flex: 1 },
+  historyMonsterCount: { color: '#888', fontSize: 12 },
+  historyMonsterXP: { color: '#c9a84c', fontSize: 12 },
+  historyXPRow: { display: 'flex', justifyContent: 'space-between' },
+  historyXPLabel: { color: '#888', fontSize: 13 },
+  historyXPVal: { color: '#c9a84c', fontSize: 13, fontWeight: 600 },
+  historyNotes: { color: '#888', fontSize: 13, margin: 0, whiteSpace: 'pre-wrap' },
 
   // Create modal
   overlay: {
