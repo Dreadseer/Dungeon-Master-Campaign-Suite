@@ -393,6 +393,47 @@ function registerDbHandlers(db) {
     slots.known_spells = (slots.known_spells ?? []).filter(s => s.index !== spellIndex)
     return db.run('UPDATE characters SET spell_slots=? WHERE id=?', [JSON.stringify(slots), charId])
   })
+
+  // ── Encounters — Phase 5 ─────────────────────────────────────────────────
+  ipcMain.handle('db:encounters:getAll', (_, campaignId) =>
+    db.all(`
+      SELECT e.*, l.name as location_name
+      FROM encounters e
+      LEFT JOIN locations l ON e.location_id = l.id
+      WHERE e.campaign_id = ?
+      ORDER BY e.created_at DESC`,
+      [campaignId]))
+
+  ipcMain.handle('db:encounters:getById', (_, id) =>
+    db.get('SELECT * FROM encounters WHERE id = ?', [id]))
+
+  ipcMain.handle('db:encounters:create', (_, data) =>
+    db.run(`
+      INSERT INTO encounters
+        (campaign_id, name, location_id, monsters, status, xp_total, notes, created_at)
+      VALUES (?,?,?,?,'planned',?,?,datetime('now'))`,
+      [data.campaign_id, data.name, data.location_id ?? null,
+       JSON.stringify(data.monsters ?? []),
+       data.xp_total ?? 0, data.notes ?? '']))
+
+  ipcMain.handle('db:encounters:update', (_, id, data) =>
+    db.run(`
+      UPDATE encounters
+      SET name=?, location_id=?, monsters=?, status=?, xp_total=?, notes=?
+      WHERE id=?`,
+      [data.name, data.location_id ?? null,
+       JSON.stringify(data.monsters), data.status,
+       data.xp_total, data.notes, id]))
+
+  ipcMain.handle('db:encounters:updateStatus', (_, id, status) =>
+    db.run('UPDATE encounters SET status=? WHERE id=?', [status, id]))
+
+  ipcMain.handle('db:encounters:updateMonsters', (_, id, monsters, xpTotal) =>
+    db.run('UPDATE encounters SET monsters=?, xp_total=? WHERE id=?',
+      [JSON.stringify(monsters), xpTotal, id]))
+
+  ipcMain.handle('db:encounters:delete', (_, id) =>
+    db.run('DELETE FROM encounters WHERE id=?', [id]))
 }
 
 module.exports = registerDbHandlers
