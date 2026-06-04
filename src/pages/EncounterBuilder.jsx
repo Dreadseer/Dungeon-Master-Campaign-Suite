@@ -4,6 +4,7 @@ import MonsterRoster       from '../components/encounter/MonsterRoster'
 import MonsterSearchPanel  from '../components/encounter/MonsterSearchPanel'
 import XPCalculator        from '../components/encounter/XPCalculator'
 import InitiativeTracker   from '../components/encounter/InitiativeTracker'
+import { partyThresholds, difficultyRating, adjustedXP } from '../utils/encounterUtils'
 
 const STATUS_TABS  = ['All', 'Planned', 'Active', 'Completed']
 
@@ -13,12 +14,16 @@ const STATUS_COLORS = {
   completed: { bg: '#2a2a1a', color: '#c9a84c', label: 'Completed' },
 }
 
+// Sort order: Active → Planned → Completed
+const STATUS_ORDER = { active: 0, planned: 1, completed: 2 }
+
 export default function EncounterBuilder() {
   const activeCampaign = useCampaignStore(st => st.activeCampaign)
 
   // ── List view state ──────────────────────────────────────────────────────
   const [encounters, setEncounters]   = useState([])
   const [statusTab, setStatusTab]     = useState('All')
+  const [searchQuery, setSearchQuery] = useState('')
   const [loadError, setLoadError]     = useState('')
   const [showCreate, setShowCreate]   = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(null)   // encounter id
@@ -30,7 +35,7 @@ export default function EncounterBuilder() {
   const [creating, setCreating]       = useState(false)
 
   // ── Editor view state ────────────────────────────────────────────────────
-  const [activeEncounter, setActiveEncounter] = useState(null)   // full encounter object
+  const [activeEncounter, setActiveEncounter] = useState(null)
   const [monsters, setMonsters]               = useState([])
   const [recentlyUsed, setRecentlyUsed]       = useState([])
   const [currentDifficulty, setCurrentDifficulty] = useState('')
@@ -48,6 +53,13 @@ export default function EncounterBuilder() {
   }, [activeCampaign])
 
   useEffect(() => { loadEncounters() }, [loadEncounters])
+
+  // Load campaign characters on mount (needed for difficulty badges + tracker)
+  useEffect(() => {
+    if (!activeCampaign) return
+    window.electronAPI.db.characters.getAll(activeCampaign.id)
+      .then(setCampaignChars).catch(() => {})
+  }, [activeCampaign])
 
   // Load locations for the create modal
   useEffect(() => {
@@ -111,11 +123,6 @@ export default function EncounterBuilder() {
     try { ms = JSON.parse(full.monsters ?? '[]') } catch { /* empty */ }
     setActiveEncounter(full)
     setMonsters(ms)
-    // If encounter is already active, pre-load characters for the tracker
-    if (full.status === 'active' && activeCampaign) {
-      const chars = await window.electronAPI.db.characters.getAll(activeCampaign.id)
-      setCampaignChars(chars)
-    }
     await loadRecentlyUsed()
   }
 
@@ -131,10 +138,28 @@ export default function EncounterBuilder() {
     }
   }
 
+  // ── Duplicate encounter ───────────────────────────────────────────────────
+  const handleDuplicate = async (enc) => {
+    let ms = []
+    try { ms = JSON.parse(enc.monsters ?? '[]') } catch { /* empty */ }
+    try {
+      await window.electronAPI.db.encounters.create({
+        campaign_id: activeCampaign.id,
+        name:        enc.name + ' (Copy)',
+        location_id: enc.location_id ?? null,
+        notes:       enc.notes ?? '',
+        monsters:    ms,
+        xp_total:    enc.xp_total ?? 0,
+      })
+      await loadEncounters()
+    } catch (err) {
+      setLoadError(err?.message ?? 'Duplicate failed')
+    }
+  }
+
   // ── Monster roster callbacks ──────────────────────────────────────────────
   const handleRosterChange = (newMonsters) => {
     setMonsters(newMonsters)
-    // Mirror into activeEncounter so subtotal stays accurate
     setActiveEncounter(prev => prev ? { ...prev, monsters: JSON.stringify(newMonsters) } : prev)
   }
 
@@ -150,10 +175,6 @@ export default function EncounterBuilder() {
   const handleStartCombat = async () => {
     if (!activeCampaign || !activeEncounter) return
     try {
-      // Load characters for the tracker
-      const chars = await window.electronAPI.db.characters.getAll(activeCampaign.id)
-      setCampaignChars(chars)
-      // Persist status change
       await window.electronAPI.db.encounters.updateStatus(activeEncounter.id, 'active')
       setActiveEncounter(prev => ({ ...prev, status: 'active' }))
     } catch (err) {
@@ -165,15 +186,42 @@ export default function EncounterBuilder() {
     if (!activeEncounter) return
     try {
       await window.electronAPI.db.encounters.updateStatus(activeEncounter.id, 'completed')
-    } catch { /* non-critical — still navigate back */ }
-    setActiveEncounter(null)
+      // Re-fetch to get updated encounter (notes may have been saved during combat)
+      const updated = await window.electronAPI.db.encounters.getById(activeEncounter.id)
+      setActiveEncounter(updated)
+      // Reload characters to get the HP values synced back by InitiativeTracker
+      const chars = await window.electronAPI.db.characters.getAll(activeCampaign.id)
+      setCampaignChars(chars)
+    } catch { /* non-critical */ }
     await loadEncounters()
   }
 
-  // ── Filtered encounter list ───────────────────────────────────────────────
-  const filtered = encounters.filter(e =>
-    statusTab === 'All' || e.status === statusTab.toLowerCase()
-  )
+  // ── Reuse completed encounter as new planned ──────────────────────────────
+  const handleReuseAsNew = async () => {
+    if (!activeEncounter) return
+    let ms = []
+    try { ms = JSON.parse(activeEncounter.monsters ?? '[]') } catch { /* empty */ }
+    try {
+      await window.electronAPI.db.encounters.create({
+        campaign_id: activeCampaign.id,
+        name:        activeEncounter.name + ' (Reuse)',
+        location_id: activeEncounter.location_id ?? null,
+        notes:       '',
+        monsters:    ms,
+        xp_total:    activeEncounter.xp_total ?? 0,
+      })
+      await loadEncounters()
+      setActiveEncounter(null)
+    } catch (err) {
+      setLoadError(err?.message ?? 'Reuse failed')
+    }
+  }
+
+  // ── Filtered + sorted encounter list ──────────────────────────────────────
+  const filtered = encounters
+    .filter(e => statusTab === 'All' || e.status === statusTab.toLowerCase())
+    .filter(e => !searchQuery || e.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => (STATUS_ORDER[a.status] ?? 3) - (STATUS_ORDER[b.status] ?? 3))
 
   // ── Guard: no active campaign ─────────────────────────────────────────────
   if (!activeCampaign) {
@@ -191,7 +239,7 @@ export default function EncounterBuilder() {
     const sc     = STATUS_COLORS[activeEncounter.status] ?? STATUS_COLORS.planned
     const status = activeEncounter.status
 
-    // Shared editor header (shown in all sub-views)
+    // Shared editor header
     const editorHeader = (
       <div style={s.editorHeader}>
         <button style={s.backBtn} onClick={() => { setActiveEncounter(null); loadEncounters() }}>
@@ -212,10 +260,7 @@ export default function EncounterBuilder() {
       return (
         <div style={s.page}>
           {editorHeader}
-
-          {/* Two-column layout */}
           <div style={s.editorBody}>
-            {/* Left — Monster Roster (60%) + XP Calculator below */}
             <div style={s.rosterCol}>
               <div style={currentDifficulty === 'Deadly' ? s.deadlyBorder : {}}>
                 <MonsterRoster
@@ -238,8 +283,6 @@ export default function EncounterBuilder() {
                 )}
               </div>
             </div>
-
-            {/* Right — Monster Search (40%) */}
             <div style={s.searchCol}>
               <MonsterSearchPanel
                 rosterMonsters={monsters}
@@ -272,13 +315,20 @@ export default function EncounterBuilder() {
     // ── VIEW B-3: COMPLETED — Read-only history ───────────────────────────
     let completedMonsters = []
     try { completedMonsters = JSON.parse(activeEncounter.monsters ?? '[]') } catch { /* empty */ }
-    const rawTotalXP   = completedMonsters.reduce((s, m) => s + (m.xp ?? 0) * m.count, 0)
+
+    const rawTotalXP = completedMonsters.reduce((sum, m) => sum + (m.xp ?? 0) * m.count, 0)
+    const adjXP      = adjustedXP(completedMonsters)
+    const xpPerPlayer = campaignChars.length > 0
+      ? Math.round(rawTotalXP / campaignChars.length)
+      : null
 
     return (
       <div style={s.page}>
         {editorHeader}
         <div style={s.historyBody}>
           <div style={s.historyPanel}>
+
+            {/* Monster outcomes */}
             <div style={s.historySection}>
               <div style={s.historySectionLabel}>Monster Outcomes</div>
               {completedMonsters.length === 0
@@ -293,18 +343,50 @@ export default function EncounterBuilder() {
               }
             </div>
 
+            {/* XP summary */}
             <div style={s.historySection}>
               <div style={s.historySectionLabel}>XP Earned</div>
               <div style={s.historyXPRow}>
-                <span style={s.historyXPLabel}>Total Raw XP</span>
+                <span style={s.historyXPLabel}>Raw XP</span>
                 <span style={s.historyXPVal}>{rawTotalXP.toLocaleString()}</span>
               </div>
+              {adjXP !== rawTotalXP && (
+                <div style={s.historyXPRow}>
+                  <span style={s.historyXPLabel}>Adjusted XP (multiplier)</span>
+                  <span style={s.historyXPVal}>{adjXP.toLocaleString()}</span>
+                </div>
+              )}
+              {xpPerPlayer !== null && (
+                <div style={{ ...s.historyXPRow, marginTop: 6 }}>
+                  <span style={s.historyXPLabel}>
+                    Per Player ({campaignChars.length} characters)
+                  </span>
+                  <span style={{ ...s.historyXPVal, color: '#7fc272' }}>
+                    {xpPerPlayer.toLocaleString()} XP
+                  </span>
+                </div>
+              )}
             </div>
 
+            {/* Notes */}
             <div style={s.historySection}>
               <div style={s.historySectionLabel}>Notes</div>
               <p style={s.historyNotes}>{activeEncounter.notes || '—'}</p>
             </div>
+
+            {/* Actions */}
+            <div style={{ ...s.historySection, flexDirection: 'row', gap: 8, display: 'flex' }}>
+              <button style={s.reuseBtn} onClick={handleReuseAsNew}>
+                ♻ Reuse as New Encounter
+              </button>
+              <button
+                style={s.historyDupBtn}
+                onClick={() => { handleDuplicate(activeEncounter); setActiveEncounter(null) }}
+              >
+                Duplicate
+              </button>
+            </div>
+
           </div>
         </div>
       </div>
@@ -314,6 +396,11 @@ export default function EncounterBuilder() {
   // ════════════════════════════════════════════════════════════════════════════
   // VIEW A — Encounter List
   // ════════════════════════════════════════════════════════════════════════════
+
+  // Pre-compute party thresholds for difficulty badges
+  const thresholds = partyThresholds(campaignChars)
+  const showDiffBadge = campaignChars.length > 0
+
   return (
     <div style={s.page}>
       {/* Page header */}
@@ -324,37 +411,61 @@ export default function EncounterBuilder() {
 
       {loadError && <p style={s.errorMsg}>⚠ {loadError}</p>}
 
-      {/* Status filter tabs */}
-      <div style={s.tabs}>
-        {STATUS_TABS.map(tab => (
-          <button
-            key={tab}
-            style={{ ...s.tab, ...(statusTab === tab ? s.tabActive : {}) }}
-            onClick={() => setStatusTab(tab)}
-          >
-            {tab}
-            <span style={s.tabCount}>
-              {tab === 'All'
-                ? encounters.length
-                : encounters.filter(e => e.status === tab.toLowerCase()).length}
-            </span>
-          </button>
-        ))}
+      {/* Status filter tabs + search */}
+      <div style={s.listControls}>
+        <div style={s.tabs}>
+          {STATUS_TABS.map(tab => (
+            <button
+              key={tab}
+              style={{ ...s.tab, ...(statusTab === tab ? s.tabActive : {}) }}
+              onClick={() => setStatusTab(tab)}
+            >
+              {tab}
+              <span style={s.tabCount}>
+                {tab === 'All'
+                  ? encounters.length
+                  : encounters.filter(e => e.status === tab.toLowerCase()).length}
+              </span>
+            </button>
+          ))}
+        </div>
+        <input
+          style={s.searchInput}
+          placeholder="Search encounters…"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+        />
       </div>
 
       {/* Encounter cards */}
       {filtered.length === 0 ? (
         <div style={s.emptyState}>
-          <p style={s.emptyTitle}>No encounters yet.</p>
-          <p style={s.emptyDesc}>Build your first combat encounter.</p>
-          <button style={s.newBtn} onClick={() => setShowCreate(true)}>+ New Encounter</button>
+          {searchQuery ? (
+            <p style={s.emptyTitle}>No encounters match "{searchQuery}".</p>
+          ) : (
+            <>
+              <p style={s.emptyTitle}>No encounters yet.</p>
+              <p style={s.emptyDesc}>Build your first combat encounter.</p>
+              <button style={s.newBtn} onClick={() => setShowCreate(true)}>+ New Encounter</button>
+            </>
+          )}
         </div>
       ) : (
         <div style={s.cardGrid}>
           {filtered.map(enc => {
-            let monsterCount = 0
-            try { monsterCount = JSON.parse(enc.monsters ?? '[]').length } catch { /* empty */ }
+            let monsterList = []
+            try { monsterList = JSON.parse(enc.monsters ?? '[]') } catch { /* empty */ }
+            const monsterCount = monsterList.length
             const sc = STATUS_COLORS[enc.status] ?? STATUS_COLORS.planned
+
+            // Difficulty badge: compute adjusted XP from monsters JSON
+            let diffBadge = null
+            if (showDiffBadge && monsterList.length > 0) {
+              const adj  = adjustedXP(monsterList)
+              const diff = difficultyRating(adj, thresholds)
+              diffBadge  = diff
+            }
+
             return (
               <div key={enc.id} style={s.card}>
                 <div style={s.cardTop}>
@@ -372,10 +483,16 @@ export default function EncounterBuilder() {
                   {enc.xp_total > 0 && (
                     <span style={s.cardXP}>{enc.xp_total.toLocaleString()} XP</span>
                   )}
+                  {diffBadge && (
+                    <span style={{ ...s.diffBadge, color: diffBadge.color, borderColor: diffBadge.color }}>
+                      {diffBadge.label}
+                    </span>
+                  )}
                 </div>
 
                 <div style={s.cardActions}>
                   <button style={s.openBtn} onClick={() => openEncounter(enc)}>Open</button>
+                  <button style={s.dupBtn} onClick={() => handleDuplicate(enc)}>Duplicate</button>
                   {deleteConfirm === enc.id ? (
                     <>
                       <span style={s.confirmText}>Delete?</span>
@@ -465,17 +582,23 @@ const s = {
   },
   errorMsg: { color: '#e05050', fontSize: 13, margin: 0 },
 
-  // Tabs
+  // List controls (tabs + search row)
+  listControls: { display: 'flex', alignItems: 'center', gap: 10 },
   tabs: { display: 'flex', gap: 4 },
   tab: {
     padding: '6px 14px', background: '#1a1a1a', border: '1px solid #333',
     borderRadius: 6, color: '#888', cursor: 'pointer', fontSize: 13,
     display: 'flex', alignItems: 'center', gap: 6,
   },
-  tabActive: { background: '#2a2010', borderColor: '#c9a84c', color: '#c9a84c' },
+  tabActive: { background: '#2a2010', border: '1px solid #c9a84c', color: '#c9a84c' },
   tabCount: {
     fontSize: 11, background: '#333', color: '#666',
     borderRadius: 8, padding: '0 5px', minWidth: 16, textAlign: 'center',
+  },
+  searchInput: {
+    marginLeft: 'auto', padding: '6px 12px', background: '#111',
+    border: '1px solid #444', borderRadius: 6, color: '#e0d5c0',
+    fontSize: 13, outline: 'none', width: 200,
   },
 
   // Cards
@@ -489,14 +612,22 @@ const s = {
   },
   cardTop: { display: 'flex', alignItems: 'flex-start', gap: 8 },
   cardName: { color: '#e0d5c0', fontSize: 15, fontWeight: 600, flex: 1 },
-  cardMeta: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' },
+  cardMeta: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' },
   cardLocation: { color: '#8a7a5a', fontSize: 12 },
   cardStat:     { color: '#666', fontSize: 12 },
   cardXP:       { color: '#c9a84c', fontSize: 12 },
-  cardActions:  { display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 },
+  diffBadge: {
+    fontSize: 11, fontWeight: 600, padding: '1px 6px',
+    borderRadius: 8, border: '1px solid', background: 'transparent',
+  },
+  cardActions:  { display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 },
   openBtn: {
     padding: '5px 14px', background: '#2a3a5a', color: '#7ab0ff',
     border: '1px solid #3a5a8a', borderRadius: 4, cursor: 'pointer', fontSize: 12,
+  },
+  dupBtn: {
+    padding: '5px 10px', background: 'none', color: '#777',
+    border: '1px solid #444', borderRadius: 4, cursor: 'pointer', fontSize: 12,
   },
   deleteBtn: {
     padding: '5px 10px', background: 'none', color: '#555',
@@ -561,17 +692,25 @@ const s = {
     background: '#1a1a1a', border: '1px solid #333', borderRadius: 8,
     overflow: 'hidden', maxWidth: 600, width: '100%',
   },
-  historySection: { padding: '12px 16px', borderBottom: '1px solid #222' },
+  historySection:      { padding: '12px 16px', borderBottom: '1px solid #222' },
   historySectionLabel: { color: '#666', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
-  historyEmpty: { color: '#555', fontSize: 13, margin: 0 },
-  historyMonsterRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' },
-  historyMonsterName: { color: '#e0d5c0', fontSize: 13, flex: 1 },
+  historyEmpty:        { color: '#555', fontSize: 13, margin: 0 },
+  historyMonsterRow:   { display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' },
+  historyMonsterName:  { color: '#e0d5c0', fontSize: 13, flex: 1 },
   historyMonsterCount: { color: '#888', fontSize: 12 },
-  historyMonsterXP: { color: '#c9a84c', fontSize: 12 },
-  historyXPRow: { display: 'flex', justifyContent: 'space-between' },
+  historyMonsterXP:    { color: '#c9a84c', fontSize: 12 },
+  historyXPRow:   { display: 'flex', justifyContent: 'space-between', padding: '2px 0' },
   historyXPLabel: { color: '#888', fontSize: 13 },
-  historyXPVal: { color: '#c9a84c', fontSize: 13, fontWeight: 600 },
-  historyNotes: { color: '#888', fontSize: 13, margin: 0, whiteSpace: 'pre-wrap' },
+  historyXPVal:   { color: '#c9a84c', fontSize: 13, fontWeight: 600 },
+  historyNotes:   { color: '#888', fontSize: 13, margin: 0, whiteSpace: 'pre-wrap' },
+  reuseBtn: {
+    padding: '7px 16px', background: '#1a2a3a', color: '#7ab0ff',
+    border: '1px solid #2a4a6a', borderRadius: 5, cursor: 'pointer', fontSize: 13,
+  },
+  historyDupBtn: {
+    padding: '7px 14px', background: '#2a2a2a', color: '#888',
+    border: '1px solid #444', borderRadius: 5, cursor: 'pointer', fontSize: 13,
+  },
 
   // Create modal
   overlay: {

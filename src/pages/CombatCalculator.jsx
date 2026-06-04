@@ -325,7 +325,7 @@ const s = {
     padding: '4px 10px', background: '#222', border: '1px solid #444',
     color: '#666', cursor: 'pointer', fontSize: 12,
   },
-  modeBtnActive: { background: '#2a2010', borderColor: '#c9a84c', color: '#c9a84c' },
+  modeBtnActive: { background: '#2a2010', border: '1px solid #c9a84c', color: '#c9a84c' },
   indivGrid: {
     display: 'flex', flexWrap: 'wrap', gap: 8,
     padding: '0 14px 10px',

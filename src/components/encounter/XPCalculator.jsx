@@ -291,7 +291,7 @@ const s = {
     background: '#1a1a1a', border: '1px solid #333', borderRadius: 8,
     overflow: 'hidden', marginTop: 12,
   },
-  panelDeadly: { borderColor: '#8B0000' },
+  panelDeadly: { border: '1px solid #8B0000' },
   panelHeader: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     padding: '10px 14px', background: '#222', borderBottom: '1px solid #333',

@@ -86,6 +86,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       create:           (data)                   => ipcRenderer.invoke('db:characters:create',           data),
       update:           (id, data)               => ipcRenderer.invoke('db:characters:update',           id, data),
       updateHP:         (id, hpCurrent)          => ipcRenderer.invoke('db:characters:updateHP',         id, hpCurrent),
+      bulkUpdateHP:     (updates)               => ipcRenderer.invoke('db:characters:bulkUpdateHP',     updates),
       updateStats:      (id, stats)              => ipcRenderer.invoke('db:characters:updateStats',      id, stats),
       delete:           (id)                     => ipcRenderer.invoke('db:characters:delete',           id),
       addItem:          (charId, item)            => ipcRenderer.invoke('db:characters:addItem',         charId, item),

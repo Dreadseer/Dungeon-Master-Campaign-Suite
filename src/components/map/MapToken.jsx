@@ -1,4 +1,4 @@
-import { Group, Circle, Text } from 'react-konva'
+import { Group, Circle, Text, Line } from 'react-konva'
 import { tokenToPixel, snapToGrid } from '../../utils/tokenUtils'
 
 export default function MapToken({ token, gridSize, isSelected, onSelect, onDragEnd, mode }) {
@@ -59,6 +59,19 @@ export default function MapToken({ token, gridSize, isSelected, onSelect, onDrag
         y={radius + 5}
         listening={false}
       />
+      {/* Defeated: red X overlay */}
+      {token.defeated && (
+        <>
+          <Line
+            points={[-radius * 0.6, -radius * 0.6, radius * 0.6, radius * 0.6]}
+            stroke="#e05050" strokeWidth={3} lineCap="round" listening={false}
+          />
+          <Line
+            points={[radius * 0.6, -radius * 0.6, -radius * 0.6, radius * 0.6]}
+            stroke="#e05050" strokeWidth={3} lineCap="round" listening={false}
+          />
+        </>
+      )}
     </Group>
   )
 }

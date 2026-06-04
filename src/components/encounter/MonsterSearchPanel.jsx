@@ -250,7 +250,7 @@ const s = {
     padding: '4px 8px', background: '#222', border: '1px solid #444',
     borderRadius: 3, color: '#888', cursor: 'pointer', fontSize: 11,
   },
-  srcBtnActive: { background: '#3a3020', borderColor: '#c9a84c', color: '#c9a84c' },
+  srcBtnActive: { background: '#3a3020', border: '1px solid #c9a84c', color: '#c9a84c' },
   recentSection: { padding: '6px 12px 0' },
   sectionLabel:  { color: '#666', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
   recentRow: {
@@ -284,6 +284,6 @@ const s = {
     fontSize: 12, flexShrink: 0,
   },
   addBtnAgain: {
-    background: '#2a2a1a', color: '#c9a84c', borderColor: '#5a4a1a',
+    background: '#2a2a1a', color: '#c9a84c', border: '1px solid #5a4a1a',
   },
 }
