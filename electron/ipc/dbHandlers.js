@@ -369,6 +369,13 @@ function registerDbHandlers(db) {
     return db.run('UPDATE characters SET spell_slots=? WHERE id=?', [JSON.stringify(slots), charId])
   })
 
+  ipcMain.handle('db:characters:bulkUpdateHP', (_, updates) => {
+    // updates: [{ id, hp_current }]
+    for (const u of (updates ?? [])) {
+      db.run('UPDATE characters SET hp_current=? WHERE id=?', [u.hp_current, u.id])
+    }
+  })
+
   ipcMain.handle('db:characters:longRest', (_, charId) => {
     const char  = db.get('SELECT hp_max, spell_slots FROM characters WHERE id=?', [charId])
     const slots = JSON.parse(char.spell_slots ?? '{}')

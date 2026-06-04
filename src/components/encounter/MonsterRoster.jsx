@@ -3,9 +3,10 @@ import { crColor } from '../../utils/crColor'
 
 export default function MonsterRoster({ encounterId, monsters, onChange }) {
   // inline-edit state: { monsterId, field }
-  const [editing, setEditing]   = useState(null)
-  const [editVal, setEditVal]   = useState('')
-  const [saving, setSaving]     = useState(false)
+  const [editing, setEditing]       = useState(null)
+  const [editVal, setEditVal]       = useState('')
+  const [saving, setSaving]         = useState(false)
+  const [clearConfirm, setClearConfirm] = useState(false)
   const debounceRef = useRef(null)
 
   // Debounced auto-save after any mutation
@@ -69,6 +70,11 @@ export default function MonsterRoster({ encounterId, monsters, onChange }) {
     }
   }
 
+  const clearRoster = () => {
+    mutate(() => [])
+    setClearConfirm(false)
+  }
+
   const totalCount = monsters.reduce((s, m) => s + m.count, 0)
   const totalXP    = monsters.reduce((s, m) => s + (m.xp ?? 0) * m.count, 0)
 
@@ -77,7 +83,23 @@ export default function MonsterRoster({ encounterId, monsters, onChange }) {
       {/* Header */}
       <div style={s.header}>
         <span style={s.headerTitle}>Monster Roster</span>
+        {monsters.length > 0 && (
+          <span style={s.countBadge}>{monsters.length} type{monsters.length !== 1 ? 's' : ''}</span>
+        )}
         <span style={s.savingBadge}>{saving ? 'Saving…' : ''}</span>
+        {clearConfirm ? (
+          <>
+            <span style={s.clearConfirmText}>Clear all?</span>
+            <button style={s.clearYesBtn} onClick={clearRoster}>Yes</button>
+            <button style={s.clearNoBtn}  onClick={() => setClearConfirm(false)}>No</button>
+          </>
+        ) : (
+          monsters.length > 0 && (
+            <button style={s.clearBtn} onClick={() => setClearConfirm(true)} title="Remove all monsters">
+              Clear
+            </button>
+          )
+        )}
         <button style={s.saveBtn} onClick={saveRosterNow}>Save Roster</button>
       </div>
 
@@ -184,7 +206,24 @@ const s = {
     padding: '10px 14px', background: '#222', borderBottom: '1px solid #333',
   },
   headerTitle: { color: '#c9a84c', fontWeight: 600, fontSize: 14, flex: 1 },
+  countBadge: {
+    fontSize: 11, background: '#2a2a2a', color: '#888',
+    borderRadius: 8, padding: '1px 7px', border: '1px solid #444',
+  },
   savingBadge: { color: '#666', fontSize: 12, fontStyle: 'italic' },
+  clearBtn: {
+    padding: '4px 10px', background: 'none', color: '#666',
+    border: '1px solid #444', borderRadius: 4, cursor: 'pointer', fontSize: 12,
+  },
+  clearConfirmText: { color: '#e05050', fontSize: 12 },
+  clearYesBtn: {
+    padding: '3px 8px', background: '#5a1a1a', color: '#e05050',
+    border: '1px solid #8a2a2a', borderRadius: 3, cursor: 'pointer', fontSize: 12,
+  },
+  clearNoBtn: {
+    padding: '3px 8px', background: '#2a2a2a', color: '#888',
+    border: '1px solid #444', borderRadius: 3, cursor: 'pointer', fontSize: 12,
+  },
   saveBtn: {
     padding: '4px 12px', background: '#2d5a27', color: '#7fc272',
     border: '1px solid #3d7a37', borderRadius: 4, cursor: 'pointer', fontSize: 12,
