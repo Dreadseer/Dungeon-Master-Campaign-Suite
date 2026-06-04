@@ -1,0 +1,592 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/components/world/NPCModal.jsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=eaa9c5cf"; const Fragment = __vite__cjsImport0_react_jsxDevRuntime["Fragment"]; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=eaa9c5cf"; const useState = __vite__cjsImport3_react["useState"]; const useEffect = __vite__cjsImport3_react["useEffect"]; const useCallback = __vite__cjsImport3_react["useCallback"];
+import EntityModal from "/src/components/world/EntityModal.jsx";
+import useCampaignStore from "/src/stores/campaignStore.js";
+const RACES = ["Human", "Elf", "Dwarf", "Halfling", "Gnome", "Half-Elf", "Half-Orc", "Tiefling", "Dragonborn", "Other"];
+const EMPTY_FORM = { name: "", race: "", class: "", role: "", location_id: null, faction_id: null, is_alive: 1, motivation: "", notes: "", secrets: "" };
+export default function NPCModal({ isOpen, npc, onClose, onSaved }) {
+  _s();
+  const activeCampaign = useCampaignStore((s2) => s2.activeCampaign);
+  const [tab, setTab] = useState(0);
+  const [connections, setConnections] = useState([]);
+  const [entityMap, setEntityMap] = useState({});
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [locations, setLocations] = useState([]);
+  const [factions, setFactions] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!isOpen || !activeCampaign?.id) return;
+    setTab(0);
+    setError("");
+    setForm(npc ? {
+      name: npc.name || "",
+      race: npc.race || "",
+      class: npc.class || "",
+      role: npc.role || "",
+      location_id: npc.location_id ?? null,
+      faction_id: npc.faction_id ?? null,
+      is_alive: npc.is_alive ?? 1,
+      motivation: npc.motivation || "",
+      notes: npc.notes || "",
+      secrets: npc.secrets || ""
+    } : EMPTY_FORM);
+    Promise.all(
+      [
+        window.electronAPI.db.locations.getAll(activeCampaign.id),
+        window.electronAPI.db.factions.getAll(activeCampaign.id)
+      ]
+    ).then(([locs, facs]) => {
+      setLocations(locs);
+      setFactions(facs);
+    });
+  }, [isOpen, npc?.id]);
+  useEffect(() => {
+    if (tab !== 2 || !npc?.id) return;
+    Promise.all(
+      [
+        window.electronAPI.db.connections.getForEntity("npc", npc.id),
+        window.electronAPI.db.npcs.getAll(activeCampaign.id),
+        window.electronAPI.db.locations.getAll(activeCampaign.id),
+        window.electronAPI.db.factions.getAll(activeCampaign.id)
+      ]
+    ).then(([conns, npcs, locs, facs]) => {
+      setConnections(conns);
+      const map = {};
+      npcs.forEach((e) => {
+        map[`npc:${e.id}`] = e.name;
+      });
+      locs.forEach((e) => {
+        map[`location:${e.id}`] = e.name;
+      });
+      facs.forEach((e) => {
+        map[`faction:${e.id}`] = e.name;
+      });
+      setEntityMap(map);
+    });
+  }, [tab, npc?.id]);
+  function setField(k, v) {
+    setForm((f) => ({ ...f, [k]: v }));
+  }
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.name.trim()) {
+      setError("NPC name is required.");
+      setTab(0);
+      return;
+    }
+    setSaving(true);
+    const payload = {
+      ...form,
+      campaign_id: activeCampaign.id,
+      location_id: form.location_id || null,
+      faction_id: form.faction_id || null
+    };
+    if (npc) {
+      await window.electronAPI.db.npcs.update(npc.id, payload);
+    } else {
+      await window.electronAPI.db.npcs.create(payload);
+    }
+    setSaving(false);
+    onSaved();
+    onClose();
+  }
+  return /* @__PURE__ */ jsxDEV(
+    EntityModal,
+    {
+      title: npc ? `Edit: ${npc.name}` : "New NPC",
+      isOpen,
+      onClose,
+      children: [
+        /* @__PURE__ */ jsxDEV("div", { style: s.tabs, children: ["Identity", "Details", ...npc ? ["Connections"] : []].map(
+          (label, i) => /* @__PURE__ */ jsxDEV(
+            "button",
+            {
+              style: { ...s.tab, ...tab === i ? s.tabActive : {} },
+              type: "button",
+              onClick: () => setTab(i),
+              children: label
+            },
+            i,
+            false,
+            {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 108,
+              columnNumber: 9
+            },
+            this
+          )
+        ) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+          lineNumber: 106,
+          columnNumber: 7
+        }, this),
+        /* @__PURE__ */ jsxDEV("form", { onSubmit: handleSubmit, children: [
+          tab === 0 && /* @__PURE__ */ jsxDEV("div", { children: [
+            /* @__PURE__ */ jsxDEV("label", { style: s.label, children: "Name *" }, void 0, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 119,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "input",
+              {
+                style: s.input,
+                value: form.name,
+                onChange: (e) => setField("name", e.target.value),
+                placeholder: "Mira Ashveil",
+                autoFocus: true
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 120,
+                columnNumber: 13
+              },
+              this
+            ),
+            error && /* @__PURE__ */ jsxDEV("p", { style: s.err, children: error }, void 0, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 122,
+              columnNumber: 23
+            }, this),
+            /* @__PURE__ */ jsxDEV("label", { style: s.label, children: "Race" }, void 0, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 124,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "input",
+              {
+                style: s.input,
+                list: "race-list",
+                value: form.race,
+                onChange: (e) => setField("race", e.target.value),
+                placeholder: "Human"
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 125,
+                columnNumber: 13
+              },
+              this
+            ),
+            /* @__PURE__ */ jsxDEV("datalist", { id: "race-list", children: RACES.map((r) => /* @__PURE__ */ jsxDEV("option", { value: r }, r, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 127,
+              columnNumber: 56
+            }, this)) }, void 0, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 127,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV("label", { style: s.label, children: "Class / Role" }, void 0, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 129,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "input",
+              {
+                style: s.input,
+                value: form.class || form.role,
+                onChange: (e) => {
+                  setField("class", e.target.value);
+                  setField("role", e.target.value);
+                },
+                placeholder: "Innkeeper, Spy, Noble, Fighter…"
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 130,
+                columnNumber: 13
+              },
+              this
+            ),
+            /* @__PURE__ */ jsxDEV("label", { style: s.label, children: "Currently located in…" }, void 0, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 134,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "select",
+              {
+                style: s.input,
+                value: form.location_id ?? "",
+                onChange: (e) => setField("location_id", e.target.value ? Number(e.target.value) : null),
+                children: [
+                  /* @__PURE__ */ jsxDEV("option", { value: "", children: "Unknown location" }, void 0, false, {
+                    fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                    lineNumber: 137,
+                    columnNumber: 15
+                  }, this),
+                  locations.map((l) => /* @__PURE__ */ jsxDEV("option", { value: l.id, children: l.name }, l.id, false, {
+                    fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                    lineNumber: 138,
+                    columnNumber: 37
+                  }, this))
+                ]
+              },
+              void 0,
+              true,
+              {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 135,
+                columnNumber: 13
+              },
+              this
+            ),
+            /* @__PURE__ */ jsxDEV("label", { style: s.label, children: "Faction affiliation" }, void 0, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 141,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "select",
+              {
+                style: s.input,
+                value: form.faction_id ?? "",
+                onChange: (e) => setField("faction_id", e.target.value ? Number(e.target.value) : null),
+                children: [
+                  /* @__PURE__ */ jsxDEV("option", { value: "", children: "No faction affiliation" }, void 0, false, {
+                    fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                    lineNumber: 144,
+                    columnNumber: 15
+                  }, this),
+                  factions.map((f) => /* @__PURE__ */ jsxDEV("option", { value: f.id, children: f.name }, f.id, false, {
+                    fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                    lineNumber: 145,
+                    columnNumber: 36
+                  }, this))
+                ]
+              },
+              void 0,
+              true,
+              {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 142,
+                columnNumber: 13
+              },
+              this
+            ),
+            /* @__PURE__ */ jsxDEV("label", { style: s.label, children: "Status" }, void 0, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 148,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV("div", { style: s.radioRow, children: [{ val: 1, label: "🟢 Alive" }, { val: 0, label: "💀 Dead" }].map(
+              (opt) => /* @__PURE__ */ jsxDEV("label", { style: s.radioLabel, children: [
+                /* @__PURE__ */ jsxDEV(
+                  "input",
+                  {
+                    type: "radio",
+                    name: "is_alive",
+                    value: opt.val,
+                    checked: form.is_alive === opt.val,
+                    onChange: () => setField("is_alive", opt.val)
+                  },
+                  void 0,
+                  false,
+                  {
+                    fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                    lineNumber: 152,
+                    columnNumber: 19
+                  },
+                  this
+                ),
+                " ",
+                opt.label
+              ] }, opt.val, true, {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 151,
+                columnNumber: 13
+              }, this)
+            ) }, void 0, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 149,
+              columnNumber: 13
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+            lineNumber: 118,
+            columnNumber: 9
+          }, this),
+          tab === 1 && /* @__PURE__ */ jsxDEV("div", { children: [
+            /* @__PURE__ */ jsxDEV("label", { style: s.label, children: "What does this NPC want?" }, void 0, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 165,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "textarea",
+              {
+                style: { ...s.input, height: 72, resize: "vertical" },
+                value: form.motivation,
+                onChange: (e) => setField("motivation", e.target.value),
+                placeholder: "Their core drive, goal, or need…"
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 166,
+                columnNumber: 13
+              },
+              this
+            ),
+            /* @__PURE__ */ jsxDEV("label", { style: s.label, children: "DM Notes" }, void 0, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 170,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "textarea",
+              {
+                style: { ...s.input, height: 100, resize: "vertical" },
+                value: form.notes,
+                onChange: (e) => setField("notes", e.target.value),
+                placeholder: "Personality, appearance, voice, history…"
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 171,
+                columnNumber: 13
+              },
+              this
+            ),
+            /* @__PURE__ */ jsxDEV("label", { style: s.label, children: "Secrets (DM Only)" }, void 0, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 175,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "textarea",
+              {
+                style: { ...s.input, ...s.secretsInput, height: 72, resize: "vertical" },
+                value: form.secrets,
+                onChange: (e) => setField("secrets", e.target.value),
+                placeholder: "What they're hiding from the party…"
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 176,
+                columnNumber: 13
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+            lineNumber: 164,
+            columnNumber: 9
+          }, this),
+          tab === 2 && npc && /* @__PURE__ */ jsxDEV("div", { style: connS.panel, children: [
+            connections.length === 0 ? /* @__PURE__ */ jsxDEV("p", { style: connS.empty, children: "No connections for this NPC yet." }, void 0, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 186,
+              columnNumber: 11
+            }, this) : /* @__PURE__ */ jsxDEV("div", { style: connS.list, children: connections.map((conn) => {
+              const isA = conn.entity_a_type === "npc" && conn.entity_a_id === npc.id;
+              const otherType = isA ? conn.entity_b_type : conn.entity_a_type;
+              const otherId = isA ? conn.entity_b_id : conn.entity_a_id;
+              const otherName = entityMap[`${otherType}:${otherId}`] || `Unknown ${otherType}`;
+              return /* @__PURE__ */ jsxDEV("div", { style: connS.row, children: [
+                /* @__PURE__ */ jsxDEV("span", { style: connS.rel, children: conn.relationship }, void 0, false, {
+                  fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                  lineNumber: 196,
+                  columnNumber: 23
+                }, this),
+                " with ",
+                /* @__PURE__ */ jsxDEV("span", { style: connS.name, children: otherName }, void 0, false, {
+                  fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                  lineNumber: 198,
+                  columnNumber: 23
+                }, this),
+                /* @__PURE__ */ jsxDEV("span", { style: connS.type, children: otherType }, void 0, false, {
+                  fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                  lineNumber: 199,
+                  columnNumber: 23
+                }, this),
+                conn.notes && /* @__PURE__ */ jsxDEV("p", { style: connS.notes, children: conn.notes }, void 0, false, {
+                  fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                  lineNumber: 200,
+                  columnNumber: 38
+                }, this)
+              ] }, conn.id, true, {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 195,
+                columnNumber: 17
+              }, this);
+            }) }, void 0, false, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 188,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "button",
+              {
+                style: s.btnSecondary,
+                type: "button",
+                onClick: () => {
+                  onClose();
+                  window.location.href = `/world/connections`;
+                },
+                children: "+ Manage Connections"
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 206,
+                columnNumber: 13
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+            lineNumber: 184,
+            columnNumber: 9
+          }, this),
+          /* @__PURE__ */ jsxDEV("div", { style: s.footer, children: [
+            /* @__PURE__ */ jsxDEV("div", { style: s.tabNav, children: [
+              tab === 0 && /* @__PURE__ */ jsxDEV("button", { style: s.btnSecondary, type: "button", onClick: () => setTab(1), children: "Details →" }, void 0, false, {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 215,
+                columnNumber: 27
+              }, this),
+              tab === 1 && /* @__PURE__ */ jsxDEV(Fragment, { children: [
+                /* @__PURE__ */ jsxDEV("button", { style: s.btnSecondary, type: "button", onClick: () => setTab(0), children: "← Identity" }, void 0, false, {
+                  fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                  lineNumber: 218,
+                  columnNumber: 17
+                }, this),
+                npc && /* @__PURE__ */ jsxDEV("button", { style: { ...s.btnSecondary, marginLeft: "0.4rem" }, type: "button", onClick: () => setTab(2), children: "Connections →" }, void 0, false, {
+                  fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                  lineNumber: 219,
+                  columnNumber: 25
+                }, this)
+              ] }, void 0, true, {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 217,
+                columnNumber: 13
+              }, this),
+              tab === 2 && /* @__PURE__ */ jsxDEV("button", { style: s.btnSecondary, type: "button", onClick: () => setTab(1), children: "← Details" }, void 0, false, {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 222,
+                columnNumber: 27
+              }, this)
+            ] }, void 0, true, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 214,
+              columnNumber: 11
+            }, this),
+            /* @__PURE__ */ jsxDEV("div", { style: s.actions, children: [
+              tab !== 2 && /* @__PURE__ */ jsxDEV("button", { style: s.btnPrimary, type: "submit", disabled: saving, children: saving ? "Saving…" : npc ? "Save Changes" : "Create NPC" }, void 0, false, {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 226,
+                columnNumber: 13
+              }, this),
+              /* @__PURE__ */ jsxDEV("button", { style: s.btnSecondary, type: "button", onClick: onClose, children: "Cancel" }, void 0, false, {
+                fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+                lineNumber: 230,
+                columnNumber: 13
+              }, this)
+            ] }, void 0, true, {
+              fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+              lineNumber: 224,
+              columnNumber: 11
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+            lineNumber: 213,
+            columnNumber: 9
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+          lineNumber: 115,
+          columnNumber: 7
+        }, this)
+      ]
+    },
+    void 0,
+    true,
+    {
+      fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx",
+      lineNumber: 100,
+      columnNumber: 5
+    },
+    this
+  );
+}
+_s(NPCModal, "7htkhuWSSktBUjngZXij25TXHlc=", false, function() {
+  return [useCampaignStore];
+});
+_c = NPCModal;
+const connS = {
+  panel: { padding: "0.5rem 0 1rem" },
+  empty: { color: "#6b5a3a", fontSize: "0.9rem", marginBottom: "1rem" },
+  list: { display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "1rem" },
+  row: { background: "#0d0a05", border: "1px solid #2a1c08", borderRadius: 4, padding: "0.6rem 0.8rem", fontSize: "0.85rem", color: "#e8e0d0" },
+  rel: { color: "#c9a84c", fontStyle: "italic" },
+  name: { fontWeight: 500, marginLeft: "0.25rem" },
+  type: { color: "#6b5a3a", fontSize: "0.75rem", marginLeft: "0.4rem" },
+  notes: { color: "#6b5a3a", fontSize: "0.78rem", margin: "0.3rem 0 0", fontStyle: "italic" }
+};
+const s = {
+  tabs: { display: "flex", gap: "0.25rem", marginBottom: "1.25rem" },
+  tab: { background: "transparent", border: "1px solid #3a2a10", color: "#a89060", padding: "0.35rem 1rem", borderRadius: 4, cursor: "pointer", fontSize: "0.85rem" },
+  tabActive: { background: "#2d1f0a", border: "1px solid #c9a84c", color: "#c9a84c" },
+  label: { display: "block", color: "#a89060", fontSize: "0.82rem", marginBottom: "0.35rem" },
+  input: { display: "block", width: "100%", background: "#0d0a05", border: "1px solid #3a2a10", borderRadius: 4, color: "#e8e0d0", padding: "0.45rem 0.7rem", fontSize: "0.9rem", marginBottom: "0.9rem", outline: "none", boxSizing: "border-box" },
+  secretsInput: { border: "1px solid #6a2020", background: "#120808" },
+  radioRow: { display: "flex", gap: "1.5rem", marginBottom: "0.9rem" },
+  radioLabel: { color: "#e8e0d0", fontSize: "0.9rem", cursor: "pointer" },
+  footer: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.75rem", paddingTop: "0.75rem", borderTop: "1px solid #2a1c08" },
+  tabNav: { display: "flex" },
+  actions: { display: "flex", gap: "0.6rem" },
+  err: { color: "#e05050", fontSize: "0.82rem", marginTop: "-0.6rem", marginBottom: "0.75rem" },
+  btnPrimary: { background: "#c9a84c", color: "#0d0a05", border: "none", padding: "0.5rem 1.2rem", borderRadius: 4, cursor: "pointer", fontWeight: "bold", fontSize: "0.88rem" },
+  btnSecondary: { background: "transparent", color: "#a89060", border: "1px solid #a89060", padding: "0.5rem 1.2rem", borderRadius: 4, cursor: "pointer", fontSize: "0.88rem" }
+};
+var _c;
+$RefreshReg$(_c, "NPCModal");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/world/NPCModal.jsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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QVEsVUFBVTtBQUFBLEVBQ3ZFbEIsUUFBYSxFQUFFUyxTQUFTLFFBQVFhLGdCQUFnQixpQkFBaUJDLFlBQVksVUFBVUMsV0FBVyxXQUFXQyxZQUFZLFdBQVdDLFdBQVcsb0JBQW9CO0FBQUEsRUFDbkt6QixRQUFhLEVBQUVRLFNBQVMsT0FBTztBQUFBLEVBQy9CTixTQUFhLEVBQUVNLFNBQVMsUUFBUUUsS0FBSyxTQUFTO0FBQUEsRUFDOUMzQyxLQUFhLEVBQUVzQyxPQUFPLFdBQVdDLFVBQVUsV0FBV2lCLFdBQVcsV0FBV2hCLGNBQWMsVUFBVTtBQUFBLEVBQ3BHSixZQUFhLEVBQUVRLFlBQVksV0FBV04sT0FBTyxXQUFXTyxRQUFRLFFBQVFSLFNBQVMsaUJBQWlCUyxjQUFjLEdBQUdJLFFBQVEsV0FBV0YsWUFBWSxRQUFRVCxVQUFVLFVBQVU7QUFBQSxFQUM5S1YsY0FBYSxFQUFFZSxZQUFZLGVBQWVOLE9BQU8sV0FBV08sUUFBUSxxQkFBcUJSLFNBQVMsaUJBQWlCUyxjQUFjLEdBQUdJLFFBQVEsV0FBV1gsVUFBVSxVQUFVO0FBQzdLO0FBQUMsSUFBQW9CO0FBQUEsYUFBQUEsSUFBQSIsIm5hbWVzIjpbInVzZVN0YXRlIiwidXNlRWZmZWN0IiwidXNlQ2FsbGJhY2siLCJFbnRpdHlNb2RhbCIsInVzZUNhbXBhaWduU3RvcmUiLCJSQUNFUyIsIkVNUFRZX0ZPUk0iLCJuYW1lIiwicmFjZSIsImNsYXNzIiwicm9sZSIsImxvY2F0aW9uX2lkIiwiZmFjdGlvbl9pZCIsImlzX2FsaXZlIiwibW90aXZhdGlvbiIsIm5vdGVzIiwic2VjcmV0cyIsIk5QQ01vZGFsIiwiaXNPcGVuIiwibnBjIiwib25DbG9zZSIsIm9uU2F2ZWQiLCJfcyIsImFjdGl2ZUNhbXBhaWduIiwicyIsInRhYiIsInNldFRhYiIsImNvbm5lY3Rpb25zIiwic2V0Q29ubmVjdGlvbnMiLCJlbnRpdHlNYXAiLCJzZXRFbnRpdHlNYXAiLCJmb3JtIiwic2V0Rm9ybSIsImxvY2F0aW9ucyIsInNldExvY2F0aW9ucyIsImZhY3Rpb25zIiwic2V0RmFjdGlvbnMiLCJzYXZpbmciLCJzZXRTYXZpbmciLCJlcnJvciIsInNldEVycm9yIiwiaWQiLCJQcm9taXNlIiwiYWxsIiwid2luZG93IiwiZWxlY3Ryb25BUEkiLCJkYiIsImdldEFsbCIsInRoZW4iLCJsb2NzIiwiZmFjcyIsImdldEZvckVudGl0eSIsIm5wY3MiLCJjb25ucyIsIm1hcCIsImZvckVhY2giLCJlIiwic2V0RmllbGQiLCJrIiwidiIsImYiLCJoYW5kbGVTdWJtaXQiLCJwcmV2ZW50RGVmYXVsdCIsInRyaW0iLCJwYXlsb2FkIiwiY2FtcGFpZ25faWQiLCJ1cGRhdGUiLCJjcmVhdGUiLCJ0YWJzIiwibGFiZWwiLCJpIiwidGFiQWN0aXZlIiwiaW5wdXQiLCJ0YXJnZXQiLCJ2YWx1ZSIsImVyciIsInIiLCJOdW1iZXIiLCJsIiwicmFkaW9Sb3ciLCJ2YWwiLCJvcHQiLCJyYWRpb0xhYmVsIiwiaGVpZ2h0IiwicmVzaXplIiwic2VjcmV0c0lucHV0IiwiY29ublMiLCJwYW5lbCIsImxlbmd0aCIsImVtcHR5IiwibGlzdCIsImNvbm4iLCJpc0EiLCJlbnRpdHlfYV90eXBlIiwiZW50aXR5X2FfaWQiLCJvdGhlclR5cGUiLCJlbnRpdHlfYl90eXBlIiwib3RoZXJJZCIsImVudGl0eV9iX2lkIiwib3RoZXJOYW1lIiwicm93IiwicmVsIiwicmVsYXRpb25zaGlwIiwidHlwZSIsImJ0blNlY29uZGFyeSIsImxvY2F0aW9uIiwiaHJlZiIsImZvb3RlciIsInRhYk5hdiIsIm1hcmdpbkxlZnQiLCJhY3Rpb25zIiwiYnRuUHJpbWFyeSIsInBhZGRpbmciLCJjb2xvciIsImZvbnRTaXplIiwibWFyZ2luQm90dG9tIiwiZGlzcGxheSIsImZsZXhEaXJlY3Rpb24iLCJnYXAiLCJiYWNrZ3JvdW5kIiwiYm9yZGVyIiwiYm9yZGVyUmFkaXVzIiwiZm9udFN0eWxlIiwiZm9udFdlaWdodCIsIm1hcmdpbiIsImN1cnNvciIsIndpZHRoIiwib3V0bGluZSIsImJveFNpemluZyIsImp1c3RpZnlDb250ZW50IiwiYWxpZ25JdGVtcyIsIm1hcmdpblRvcCIsInBhZGRpbmdUb3AiLCJib3JkZXJUb3AiLCJfYyJdLCJpZ25vcmVMaXN0IjpbXSwic291cmNlcyI6WyJOUENNb2RhbC5qc3giXSwic291cmNlc0NvbnRlbnQiOlsiaW1wb3J0IHsgdXNlU3RhdGUsIHVzZUVmZmVjdCwgdXNlQ2FsbGJhY2sgfSBmcm9tICdyZWFjdCdcbmltcG9ydCBFbnRpdHlNb2RhbCBmcm9tICcuL0VudGl0eU1vZGFsJ1xuaW1wb3J0IHVzZUNhbXBhaWduU3RvcmUgZnJvbSAnLi4vLi4vc3RvcmVzL2NhbXBhaWduU3RvcmUnXG5cbmNvbnN0IFJBQ0VTID0gWydIdW1hbicsICdFbGYnLCAnRHdhcmYnLCAnSGFsZmxpbmcnLCAnR25vbWUnLCAnSGFsZi1FbGYnLCAnSGFsZi1PcmMnLCAnVGllZmxpbmcnLCAnRHJhZ29uYm9ybicsICdPdGhlciddXG5jb25zdCBFTVBUWV9GT1JNID0geyBuYW1lOiAnJywgcmFjZTogJycsIGNsYXNzOiAnJywgcm9sZTogJycsIGxvY2F0aW9uX2lkOiBudWxsLCBmYWN0aW9uX2lkOiBudWxsLCBpc19hbGl2ZTogMSwgbW90aXZhdGlvbjogJycsIG5vdGVzOiAnJywgc2VjcmV0czogJycgfVxuXG5leHBvcnQgZGVmYXVsdCBmdW5jdGlvbiBOUENNb2RhbCh7IGlzT3BlbiwgbnBjLCBvbkNsb3NlLCBvblNhdmVkIH0pIHtcbiAgY29uc3QgYWN0aXZlQ2FtcGFpZ24gPSB1c2VDYW1wYWlnblN0b3JlKHMgPT4gcy5hY3RpdmVDYW1wYWlnbilcbiAgY29uc3QgW3RhYiwgc2V0VGFiXSAgICAgICAgICAgICA9IHVzZVN0YXRlKDApXG4gIGNvbnN0IFtjb25uZWN0aW9ucywgc2V0Q29ubmVjdGlvbnNdID0gdXNlU3RhdGUoW10pXG4gIGNvbnN0IFtlbnRpdHlNYXAsIHNldEVudGl0eU1hcF0gICAgID0gdXNlU3RhdGUoe30pXG4gIGNvbnN0IFtmb3JtLCBzZXRGb3JtXSAgICAgICAgID0gdXNlU3RhdGUoRU1QVFlfRk9STSlcbiAgY29uc3QgW2xvY2F0aW9ucywgc2V0TG9jYXRpb25zXSA9IHVzZVN0YXRlKFtdKVxuICBjb25zdCBbZmFjdGlvbnMsIHNldEZhY3Rpb25zXSAgID0gdXNlU3RhdGUoW10pXG4gIGNvbnN0IFtzYXZpbmcsIHNldFNhdmluZ10gICAgICAgPSB1c2VTdGF0ZShmYWxzZSlcbiAgY29uc3QgW2Vycm9yLCBzZXRFcnJvcl0gICAgICAgICA9IHVzZVN0YXRlKCcnKVxuXG4gIC8vIExvYWQgZHJvcGRvd25zIGFuZCBwcmUtZmlsbCBmb3JtIHdoZW4gbW9kYWwgb3BlbnNcbiAgdXNlRWZmZWN0KCgpID0+IHtcbiAgICBpZiAoIWlzT3BlbiB8fCAhYWN0aXZlQ2FtcGFpZ24/LmlkKSByZXR1cm5cbiAgICBzZXRUYWIoMClcbiAgICBzZXRFcnJvcignJylcbiAgICBzZXRGb3JtKG5wYyA/IHtcbiAgICAgIG5hbWU6ICAgICAgICBucGMubmFtZSAgICAgICAgfHwgJycsXG4gICAgICByYWNlOiAgICAgICAgbnBjLnJhY2UgICAgICAgIHx8ICcnLFxuICAgICAgY2xhc3M6ICAgICAgIG5wYy5jbGFzcyAgICAgICB8fCAnJyxcbiAgICAgIHJvbGU6ICAgICAgICBucGMucm9sZSAgICAgICAgfHwgJycsXG4gICAgICBsb2NhdGlvbl9pZDogbnBjLmxvY2F0aW9uX2lkID8/IG51bGwsXG4gICAgICBmYWN0aW9uX2lkOiAgbnBjLmZhY3Rpb25faWQgID8/IG51bGwsXG4gICAgICBpc19hbGl2ZTogICAgbnBjLmlzX2FsaXZlICAgID8/IDEsXG4gICAgICBtb3RpdmF0aW9uOiAgbnBjLm1vdGl2YXRpb24gIHx8ICcnLFxuICAgICAgbm90ZXM6ICAgICAgIG5wYy5ub3RlcyAgICAgICB8fCAnJyxcbiAgICAgIHNlY3JldHM6ICAgICBucGMuc2VjcmV0cyAgICAgfHwgJycsXG4gICAgfSA6IEVNUFRZX0ZPUk0pXG4gICAgUHJvbWlzZS5hbGwoW1xuICAgICAgd2luZG93LmVsZWN0cm9uQVBJLmRiLmxvY2F0aW9ucy5nZXRBbGwoYWN0aXZlQ2FtcGFpZ24uaWQpLFxuICAgICAgd2luZG93LmVsZWN0cm9uQVBJLmRiLmZhY3Rpb25zLmdldEFsbChhY3RpdmVDYW1wYWlnbi5pZCksXG4gICAgXSkudGhlbigoW2xvY3MsIGZhY3NdKSA9PiB7IHNldExvY2F0aW9ucyhsb2NzKTsgc2V0RmFjdGlvbnMoZmFjcykgfSlcbiAgfSwgW2lzT3BlbiwgbnBjPy5pZF0pIC8vIGVzbGludC1kaXNhYmxlLWxpbmVcblxuICAvLyBMb2FkIGNvbm5lY3Rpb25zIGZvciBUYWIgMyB3aGVuIE5QQyBleGlzdHMgYW5kIHRhYiBpcyBvcGVuXG4gIHVzZUVmZmVjdCgoKSA9PiB7XG4gICAgaWYgKHRhYiAhPT0gMiB8fCAhbnBjPy5pZCkgcmV0dXJuXG4gICAgUHJvbWlzZS5hbGwoW1xuICAgICAgd2luZG93LmVsZWN0cm9uQVBJLmRiLmNvbm5lY3Rpb25zLmdldEZvckVudGl0eSgnbnBjJywgbnBjLmlkKSxcbiAgICAgIHdpbmRvdy5lbGVjdHJvbkFQSS5kYi5ucGNzLmdldEFsbChhY3RpdmVDYW1wYWlnbi5pZCksXG4gICAgICB3aW5kb3cuZWxlY3Ryb25BUEkuZGIubG9jYXRpb25zLmdldEFsbChhY3RpdmVDYW1wYWlnbi5pZCksXG4gICAgICB3aW5kb3cuZWxlY3Ryb25BUEkuZGIuZmFjdGlvbnMuZ2V0QWxsKGFjdGl2ZUNhbXBhaWduLmlkKSxcbiAgICBdKS50aGVuKChbY29ubnMsIG5wY3MsIGxvY3MsIGZhY3NdKSA9PiB7XG4gICAgICBzZXRDb25uZWN0aW9ucyhjb25ucylcbiAgICAgIGNvbnN0IG1hcCA9IHt9XG4gICAgICBucGNzLmZvckVhY2goZSAgPT4geyBtYXBbYG5wYzoke2UuaWR9YF0gICAgICA9IGUubmFtZSB9KVxuICAgICAgbG9jcy5mb3JFYWNoKGUgID0+IHsgbWFwW2Bsb2NhdGlvbjoke2UuaWR9YF0gPSBlLm5hbWUgfSlcbiAgICAgIGZhY3MuZm9yRWFjaChlICA9PiB7IG1hcFtgZmFjdGlvbjoke2UuaWR9YF0gID0gZS5uYW1lIH0pXG4gICAgICBzZXRFbnRpdHlNYXAobWFwKVxuICAgIH0pXG4gIH0sIFt0YWIsIG5wYz8uaWRdKSAvLyBlc2xpbnQtZGlzYWJsZS1saW5lXG5cbiAgZnVuY3Rpb24gc2V0RmllbGQoaywgdikgeyBzZXRGb3JtKGYgPT4gKHsgLi4uZiwgW2tdOiB2IH0pKSB9XG5cbiAgYXN5bmMgZnVuY3Rpb24gaGFuZGxlU3VibWl0KGUpIHtcbiAgICBlLnByZXZlbnREZWZhdWx0KClcbiAgICBpZiAoIWZvcm0ubmFtZS50cmltKCkpIHsgc2V0RXJyb3IoJ05QQyBuYW1lIGlzIHJlcXVpcmVkLicpOyBzZXRUYWIoMCk7IHJldHVybiB9XG4gICAgc2V0U2F2aW5nKHRydWUpXG4gICAgY29uc3QgcGF5bG9hZCA9IHsgLi4uZm9ybSwgY2FtcGFpZ25faWQ6IGFjdGl2ZUNhbXBhaWduLmlkLFxuICAgICAgbG9jYXRpb25faWQ6IGZvcm0ubG9jYXRpb25faWQgfHwgbnVsbCxcbiAgICAgIGZhY3Rpb25faWQ6ICBmb3JtLmZhY3Rpb25faWQgIHx8IG51bGwsXG4gICAgfVxuICAgIGlmIChucGMpIHtcbiAgICAgIGF3YWl0IHdpbmRvdy5lbGVjdHJvbkFQSS5kYi5ucGNzLnVwZGF0ZShucGMuaWQsIHBheWxvYWQpXG4gICAgfSBlbHNlIHtcbiAgICAgIGF3YWl0IHdpbmRvdy5lbGVjdHJvbkFQSS5kYi5ucGNzLmNyZWF0ZShwYXlsb2FkKVxuICAgIH1cbiAgICBzZXRTYXZpbmcoZmFsc2UpXG4gICAgb25TYXZlZCgpXG4gICAgb25DbG9zZSgpXG4gIH1cblxuICByZXR1cm4gKFxuICAgIDxFbnRpdHlNb2RhbFxuICAgICAgdGl0bGU9e25wYyA/IGBFZGl0OiAke25wYy5uYW1lfWAgOiAnTmV3IE5QQyd9XG4gICAgICBpc09wZW49e2lzT3Blbn1cbiAgICAgIG9uQ2xvc2U9e29uQ2xvc2V9XG4gICAgPlxuICAgICAgey8qIFRhYiBiYXIgKi99XG4gICAgICA8ZGl2IHN0eWxlPXtzLnRhYnN9PlxuICAgICAgICB7WydJZGVudGl0eScsICdEZXRhaWxzJywgLi4uKG5wYyA/IFsnQ29ubmVjdGlvbnMnXSA6IFtdKV0ubWFwKChsYWJlbCwgaSkgPT4gKFxuICAgICAgICAgIDxidXR0b24ga2V5PXtpfSBzdHlsZT17eyAuLi5zLnRhYiwgLi4uKHRhYiA9PT0gaSA/IHMudGFiQWN0aXZlIDoge30pIH19XG4gICAgICAgICAgICB0eXBlPVwiYnV0dG9uXCIgb25DbGljaz17KCkgPT4gc2V0VGFiKGkpfT5cbiAgICAgICAgICAgIHtsYWJlbH1cbiAgICAgICAgICA8L2J1dHRvbj5cbiAgICAgICAgKSl9XG4gICAgICA8L2Rpdj5cblxuICAgICAgPGZvcm0gb25TdWJtaXQ9e2hhbmRsZVN1Ym1pdH0+XG4gICAgICAgIHsvKiBUYWIgMCDigJQgSWRlbnRpdHkgKi99XG4gICAgICAgIHt0YWIgPT09IDAgJiYgKFxuICAgICAgICAgIDxkaXY+XG4gICAgICAgICAgICA8bGFiZWwgc3R5bGU9e3MubGFiZWx9Pk5hbWUgKjwvbGFiZWw+XG4gICAgICAgICAgICA8aW5wdXQgc3R5bGU9e3MuaW5wdXR9IHZhbHVlPXtmb3JtLm5hbWV9IG9uQ2hhbmdlPXtlID0+IHNldEZpZWxkKCduYW1lJywgZS50YXJnZXQudmFsdWUpfVxuICAgICAgICAgICAgICBwbGFjZWhvbGRlcj1cIk1pcmEgQXNodmVpbFwiIGF1dG9Gb2N1cyAvPlxuICAgICAgICAgICAge2Vycm9yICYmIDxwIHN0eWxlPXtzLmVycn0+e2Vycm9yfTwvcD59XG5cbiAgICAgICAgICAgIDxsYWJlbCBzdHlsZT17cy5sYWJlbH0+UmFjZTwvbGFiZWw+XG4gICAgICAgICAgICA8aW5wdXQgc3R5bGU9e3MuaW5wdXR9IGxpc3Q9XCJyYWNlLWxpc3RcIiB2YWx1ZT17Zm9ybS5yYWNlfVxuICAgICAgICAgICAgICBvbkNoYW5nZT17ZSA9PiBzZXRGaWVsZCgncmFjZScsIGUudGFyZ2V0LnZhbHVlKX0gcGxhY2Vob2xkZXI9XCJIdW1hblwiIC8+XG4gICAgICAgICAgICA8ZGF0YWxpc3QgaWQ9XCJyYWNlLWxpc3RcIj57UkFDRVMubWFwKHIgPT4gPG9wdGlvbiBrZXk9e3J9IHZhbHVlPXtyfSAvPil9PC9kYXRhbGlzdD5cblxuICAgICAgICAgICAgPGxhYmVsIHN0eWxlPXtzLmxhYmVsfT5DbGFzcyAvIFJvbGU8L2xhYmVsPlxuICAgICAgICAgICAgPGlucHV0IHN0eWxlPXtzLmlucHV0fSB2YWx1ZT17Zm9ybS5jbGFzcyB8fCBmb3JtLnJvbGV9XG4gICAgICAgICAgICAgIG9uQ2hhbmdlPXtlID0+IHsgc2V0RmllbGQoJ2NsYXNzJywgZS50YXJnZXQudmFsdWUpOyBzZXRGaWVsZCgncm9sZScsIGUudGFyZ2V0LnZhbHVlKSB9fVxuICAgICAgICAgICAgICBwbGFjZWhvbGRlcj1cIklubmtlZXBlciwgU3B5LCBOb2JsZSwgRmlnaHRlcuKAplwiIC8+XG5cbiAgICAgICAgICAgIDxsYWJlbCBzdHlsZT17cy5sYWJlbH0+Q3VycmVudGx5IGxvY2F0ZWQgaW7igKY8L2xhYmVsPlxuICAgICAgICAgICAgPHNlbGVjdCBzdHlsZT17cy5pbnB1dH0gdmFsdWU9e2Zvcm0ubG9jYXRpb25faWQgPz8gJyd9XG4gICAgICAgICAgICAgIG9uQ2hhbmdlPXtlID0+IHNldEZpZWxkKCdsb2NhdGlvbl9pZCcsIGUudGFyZ2V0LnZhbHVlID8gTnVtYmVyKGUudGFyZ2V0LnZhbHVlKSA6IG51bGwpfT5cbiAgICAgICAgICAgICAgPG9wdGlvbiB2YWx1ZT1cIlwiPlVua25vd24gbG9jYXRpb248L29wdGlvbj5cbiAgICAgICAgICAgICAge2xvY2F0aW9ucy5tYXAobCA9PiA8b3B0aW9uIGtleT17bC5pZH0gdmFsdWU9e2wuaWR9PntsLm5hbWV9PC9vcHRpb24+KX1cbiAgICAgICAgICAgIDwvc2VsZWN0PlxuXG4gICAgICAgICAgICA8bGFiZWwgc3R5bGU9e3MubGFiZWx9PkZhY3Rpb24gYWZmaWxpYXRpb248L2xhYmVsPlxuICAgICAgICAgICAgPHNlbGVjdCBzdHlsZT17cy5pbnB1dH0gdmFsdWU9e2Zvcm0uZmFjdGlvbl9pZCA/PyAnJ31cbiAgICAgICAgICAgICAgb25DaGFuZ2U9e2UgPT4gc2V0RmllbGQoJ2ZhY3Rpb25faWQnLCBlLnRhcmdldC52YWx1ZSA/IE51bWJlcihlLnRhcmdldC52YWx1ZSkgOiBudWxsKX0+XG4gICAgICAgICAgICAgIDxvcHRpb24gdmFsdWU9XCJcIj5ObyBmYWN0aW9uIGFmZmlsaWF0aW9uPC9vcHRpb24+XG4gICAgICAgICAgICAgIHtmYWN0aW9ucy5tYXAoZiA9PiA8b3B0aW9uIGtleT17Zi5pZH0gdmFsdWU9e2YuaWR9PntmLm5hbWV9PC9vcHRpb24+KX1cbiAgICAgICAgICAgIDwvc2VsZWN0PlxuXG4gICAgICAgICAgICA8bGFiZWwgc3R5bGU9e3MubGFiZWx9PlN0YXR1czwvbGFiZWw+XG4gICAgICAgICAgICA8ZGl2IHN0eWxlPXtzLnJhZGlvUm93fT5cbiAgICAgICAgICAgICAge1t7IHZhbDogMSwgbGFiZWw6ICfwn5+iIEFsaXZlJyB9LCB7IHZhbDogMCwgbGFiZWw6ICfwn5KAIERlYWQnIH1dLm1hcChvcHQgPT4gKFxuICAgICAgICAgICAgICAgIDxsYWJlbCBrZXk9e29wdC52YWx9IHN0eWxlPXtzLnJhZGlvTGFiZWx9PlxuICAgICAgICAgICAgICAgICAgPGlucHV0IHR5cGU9XCJyYWRpb1wiIG5hbWU9XCJpc19hbGl2ZVwiIHZhbHVlPXtvcHQudmFsfVxuICAgICAgICAgICAgICAgICAgICBjaGVja2VkPXtmb3JtLmlzX2FsaXZlID09PSBvcHQudmFsfVxuICAgICAgICAgICAgICAgICAgICBvbkNoYW5nZT17KCkgPT4gc2V0RmllbGQoJ2lzX2FsaXZlJywgb3B0LnZhbCl9IC8+XG4gICAgICAgICAgICAgICAgICB7JyAnfXtvcHQubGFiZWx9XG4gICAgICAgICAgICAgICAgPC9sYWJlbD5cbiAgICAgICAgICAgICAgKSl9XG4gICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgKX1cblxuICAgICAgICB7LyogVGFiIDEg4oCUIERldGFpbHMgKi99XG4gICAgICAgIHt0YWIgPT09IDEgJiYgKFxuICAgICAgICAgIDxkaXY+XG4gICAgICAgICAgICA8bGFiZWwgc3R5bGU9e3MubGFiZWx9PldoYXQgZG9lcyB0aGlzIE5QQyB3YW50PzwvbGFiZWw+XG4gICAgICAgICAgICA8dGV4dGFyZWEgc3R5bGU9e3sgLi4ucy5pbnB1dCwgaGVpZ2h0OiA3MiwgcmVzaXplOiAndmVydGljYWwnIH19XG4gICAgICAgICAgICAgIHZhbHVlPXtmb3JtLm1vdGl2YXRpb259IG9uQ2hhbmdlPXtlID0+IHNldEZpZWxkKCdtb3RpdmF0aW9uJywgZS50YXJnZXQudmFsdWUpfVxuICAgICAgICAgICAgICBwbGFjZWhvbGRlcj1cIlRoZWlyIGNvcmUgZHJpdmUsIGdvYWwsIG9yIG5lZWTigKZcIiAvPlxuXG4gICAgICAgICAgICA8bGFiZWwgc3R5bGU9e3MubGFiZWx9PkRNIE5vdGVzPC9sYWJlbD5cbiAgICAgICAgICAgIDx0ZXh0YXJlYSBzdHlsZT17eyAuLi5zLmlucHV0LCBoZWlnaHQ6IDEwMCwgcmVzaXplOiAndmVydGljYWwnIH19XG4gICAgICAgICAgICAgIHZhbHVlPXtmb3JtLm5vdGVzfSBvbkNoYW5nZT17ZSA9PiBzZXRGaWVsZCgnbm90ZXMnLCBlLnRhcmdldC52YWx1ZSl9XG4gICAgICAgICAgICAgIHBsYWNlaG9sZGVyPVwiUGVyc29uYWxpdHksIGFwcGVhcmFuY2UsIHZvaWNlLCBoaXN0b3J54oCmXCIgLz5cblxuICAgICAgICAgICAgPGxhYmVsIHN0eWxlPXtzLmxhYmVsfT5TZWNyZXRzIChETSBPbmx5KTwvbGFiZWw+XG4gICAgICAgICAgICA8dGV4dGFyZWEgc3R5bGU9e3sgLi4ucy5pbnB1dCwgLi4ucy5zZWNyZXRzSW5wdXQsIGhlaWdodDogNzIsIHJlc2l6ZTogJ3ZlcnRpY2FsJyB9fVxuICAgICAgICAgICAgICB2YWx1ZT17Zm9ybS5zZWNyZXRzfSBvbkNoYW5nZT17ZSA9PiBzZXRGaWVsZCgnc2VjcmV0cycsIGUudGFyZ2V0LnZhbHVlKX1cbiAgICAgICAgICAgICAgcGxhY2Vob2xkZXI9XCJXaGF0IHRoZXkncmUgaGlkaW5nIGZyb20gdGhlIHBhcnR54oCmXCIgLz5cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgKX1cblxuICAgICAgICB7LyogVGFiIDIg4oCUIENvbm5lY3Rpb25zIChlZGl0IG1vZGUgb25seSkgKi99XG4gICAgICAgIHt0YWIgPT09IDIgJiYgbnBjICYmIChcbiAgICAgICAgICA8ZGl2IHN0eWxlPXtjb25uUy5wYW5lbH0+XG4gICAgICAgICAgICB7Y29ubmVjdGlvbnMubGVuZ3RoID09PSAwID8gKFxuICAgICAgICAgICAgICA8cCBzdHlsZT17Y29ublMuZW1wdHl9Pk5vIGNvbm5lY3Rpb25zIGZvciB0aGlzIE5QQyB5ZXQuPC9wPlxuICAgICAgICAgICAgKSA6IChcbiAgICAgICAgICAgICAgPGRpdiBzdHlsZT17Y29ublMubGlzdH0+XG4gICAgICAgICAgICAgICAge2Nvbm5lY3Rpb25zLm1hcChjb25uID0+IHtcbiAgICAgICAgICAgICAgICAgIGNvbnN0IGlzQSAgPSBjb25uLmVudGl0eV9hX3R5cGUgPT09ICducGMnICYmIGNvbm4uZW50aXR5X2FfaWQgPT09IG5wYy5pZFxuICAgICAgICAgICAgICAgICAgY29uc3Qgb3RoZXJUeXBlID0gaXNBID8gY29ubi5lbnRpdHlfYl90eXBlIDogY29ubi5lbnRpdHlfYV90eXBlXG4gICAgICAgICAgICAgICAgICBjb25zdCBvdGhlcklkICAgPSBpc0EgPyBjb25uLmVudGl0eV9iX2lkICAgOiBjb25uLmVudGl0eV9hX2lkXG4gICAgICAgICAgICAgICAgICBjb25zdCBvdGhlck5hbWUgPSBlbnRpdHlNYXBbYCR7b3RoZXJUeXBlfToke290aGVySWR9YF0gfHwgYFVua25vd24gJHtvdGhlclR5cGV9YFxuICAgICAgICAgICAgICAgICAgcmV0dXJuIChcbiAgICAgICAgICAgICAgICAgICAgPGRpdiBrZXk9e2Nvbm4uaWR9IHN0eWxlPXtjb25uUy5yb3d9PlxuICAgICAgICAgICAgICAgICAgICAgIDxzcGFuIHN0eWxlPXtjb25uUy5yZWx9Pntjb25uLnJlbGF0aW9uc2hpcH08L3NwYW4+XG4gICAgICAgICAgICAgICAgICAgICAgeycgd2l0aCAnfVxuICAgICAgICAgICAgICAgICAgICAgIDxzcGFuIHN0eWxlPXtjb25uUy5uYW1lfT57b3RoZXJOYW1lfTwvc3Bhbj5cbiAgICAgICAgICAgICAgICAgICAgICA8c3BhbiBzdHlsZT17Y29ublMudHlwZX0+e290aGVyVHlwZX08L3NwYW4+XG4gICAgICAgICAgICAgICAgICAgICAge2Nvbm4ubm90ZXMgJiYgPHAgc3R5bGU9e2Nvbm5TLm5vdGVzfT57Y29ubi5ub3Rlc308L3A+fVxuICAgICAgICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgICAgIClcbiAgICAgICAgICAgICAgICB9KX1cbiAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICApfVxuICAgICAgICAgICAgPGJ1dHRvbiBzdHlsZT17cy5idG5TZWNvbmRhcnl9IHR5cGU9XCJidXR0b25cIlxuICAgICAgICAgICAgICBvbkNsaWNrPXsoKSA9PiB7IG9uQ2xvc2UoKTsgd2luZG93LmxvY2F0aW9uLmhyZWYgPSBgL3dvcmxkL2Nvbm5lY3Rpb25zYCB9fT5cbiAgICAgICAgICAgICAgKyBNYW5hZ2UgQ29ubmVjdGlvbnNcbiAgICAgICAgICAgIDwvYnV0dG9uPlxuICAgICAgICAgIDwvZGl2PlxuICAgICAgICApfVxuXG4gICAgICAgIDxkaXYgc3R5bGU9e3MuZm9vdGVyfT5cbiAgICAgICAgICA8ZGl2IHN0eWxlPXtzLnRhYk5hdn0+XG4gICAgICAgICAgICB7dGFiID09PSAwICYmIDxidXR0b24gc3R5bGU9e3MuYnRuU2Vjb25kYXJ5fSB0eXBlPVwiYnV0dG9uXCIgb25DbGljaz17KCkgPT4gc2V0VGFiKDEpfT5EZXRhaWxzIOKGkjwvYnV0dG9uPn1cbiAgICAgICAgICAgIHt0YWIgPT09IDEgJiYgKFxuICAgICAgICAgICAgICA8PlxuICAgICAgICAgICAgICAgIDxidXR0b24gc3R5bGU9e3MuYnRuU2Vjb25kYXJ5fSB0eXBlPVwiYnV0dG9uXCIgb25DbGljaz17KCkgPT4gc2V0VGFiKDApfT7ihpAgSWRlbnRpdHk8L2J1dHRvbj5cbiAgICAgICAgICAgICAgICB7bnBjICYmIDxidXR0b24gc3R5bGU9e3sgLi4ucy5idG5TZWNvbmRhcnksIG1hcmdpbkxlZnQ6ICcwLjRyZW0nIH19IHR5cGU9XCJidXR0b25cIiBvbkNsaWNrPXsoKSA9PiBzZXRUYWIoMil9PkNvbm5lY3Rpb25zIOKGkjwvYnV0dG9uPn1cbiAgICAgICAgICAgICAgPC8+XG4gICAgICAgICAgICApfVxuICAgICAgICAgICAge3RhYiA9PT0gMiAmJiA8YnV0dG9uIHN0eWxlPXtzLmJ0blNlY29uZGFyeX0gdHlwZT1cImJ1dHRvblwiIG9uQ2xpY2s9eygpID0+IHNldFRhYigxKX0+4oaQIERldGFpbHM8L2J1dHRvbj59XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgPGRpdiBzdHlsZT17cy5hY3Rpb25zfT5cbiAgICAgICAgICAgIHt0YWIgIT09IDIgJiYgKFxuICAgICAgICAgICAgICA8YnV0dG9uIHN0eWxlPXtzLmJ0blByaW1hcnl9IHR5cGU9XCJzdWJtaXRcIiBkaXNhYmxlZD17c2F2aW5nfT5cbiAgICAgICAgICAgICAgICB7c2F2aW5nID8gJ1NhdmluZ+KApicgOiBucGMgPyAnU2F2ZSBDaGFuZ2VzJyA6ICdDcmVhdGUgTlBDJ31cbiAgICAgICAgICAgICAgPC9idXR0b24+XG4gICAgICAgICAgICApfVxuICAgICAgICAgICAgPGJ1dHRvbiBzdHlsZT17cy5idG5TZWNvbmRhcnl9IHR5cGU9XCJidXR0b25cIiBvbkNsaWNrPXtvbkNsb3NlfT5DYW5jZWw8L2J1dHRvbj5cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgPC9kaXY+XG4gICAgICA8L2Zvcm0+XG4gICAgPC9FbnRpdHlNb2RhbD5cbiAgKVxufVxuXG5jb25zdCBjb25uUyA9IHtcbiAgcGFuZWw6IHsgcGFkZGluZzogJzAuNXJlbSAwIDFyZW0nIH0sXG4gIGVtcHR5OiB7IGNvbG9yOiAnIzZiNWEzYScsIGZvbnRTaXplOiAnMC45cmVtJywgbWFyZ2luQm90dG9tOiAnMXJlbScgfSxcbiAgbGlzdDogIHsgZGlzcGxheTogJ2ZsZXgnLCBmbGV4RGlyZWN0aW9uOiAnY29sdW1uJywgZ2FwOiAnMC41cmVtJywgbWFyZ2luQm90dG9tOiAnMXJlbScgfSxcbiAgcm93OiAgIHsgYmFja2dyb3VuZDogJyMwZDBhMDUnLCBib3JkZXI6ICcxcHggc29saWQgIzJhMWMwOCcsIGJvcmRlclJhZGl1czogNCwgcGFkZGluZzogJzAuNnJlbSAwLjhyZW0nLCBmb250U2l6ZTogJzAuODVyZW0nLCBjb2xvcjogJyNlOGUwZDAnIH0sXG4gIHJlbDogICB7IGNvbG9yOiAnI2M5YTg0YycsIGZvbnRTdHlsZTogJ2l0YWxpYycgfSxcbiAgbmFtZTogIHsgZm9udFdlaWdodDogNTAwLCBtYXJnaW5MZWZ0OiAnMC4yNXJlbScgfSxcbiAgdHlwZTogIHsgY29sb3I6ICcjNmI1YTNhJywgZm9udFNpemU6ICcwLjc1cmVtJywgbWFyZ2luTGVmdDogJzAuNHJlbScgfSxcbiAgbm90ZXM6IHsgY29sb3I6ICcjNmI1YTNhJywgZm9udFNpemU6ICcwLjc4cmVtJywgbWFyZ2luOiAnMC4zcmVtIDAgMCcsIGZvbnRTdHlsZTogJ2l0YWxpYycgfSxcbn1cblxuY29uc3QgcyA9IHtcbiAgdGFiczogICAgICAgIHsgZGlzcGxheTogJ2ZsZXgnLCBnYXA6ICcwLjI1cmVtJywgbWFyZ2luQm90dG9tOiAnMS4yNXJlbScgfSxcbiAgdGFiOiAgICAgICAgIHsgYmFja2dyb3VuZDogJ3RyYW5zcGFyZW50JywgYm9yZGVyOiAnMXB4IHNvbGlkICMzYTJhMTAnLCBjb2xvcjogJyNhODkwNjAnLCBwYWRkaW5nOiAnMC4zNXJlbSAxcmVtJywgYm9yZGVyUmFkaXVzOiA0LCBjdXJzb3I6ICdwb2ludGVyJywgZm9udFNpemU6ICcwLjg1cmVtJyB9LFxuICB0YWJBY3RpdmU6ICAgeyBiYWNrZ3JvdW5kOiAnIzJkMWYwYScsIGJvcmRlcjogJzFweCBzb2xpZCAjYzlhODRjJywgY29sb3I6ICcjYzlhODRjJyB9LFxuICBsYWJlbDogICAgICAgeyBkaXNwbGF5OiAnYmxvY2snLCBjb2xvcjogJyNhODkwNjAnLCBmb250U2l6ZTogJzAuODJyZW0nLCBtYXJnaW5Cb3R0b206ICcwLjM1cmVtJyB9LFxuICBpbnB1dDogICAgICAgeyBkaXNwbGF5OiAnYmxvY2snLCB3aWR0aDogJzEwMCUnLCBiYWNrZ3JvdW5kOiAnIzBkMGEwNScsIGJvcmRlcjogJzFweCBzb2xpZCAjM2EyYTEwJywgYm9yZGVyUmFkaXVzOiA0LCBjb2xvcjogJyNlOGUwZDAnLCBwYWRkaW5nOiAnMC40NXJlbSAwLjdyZW0nLCBmb250U2l6ZTogJzAuOXJlbScsIG1hcmdpbkJvdHRvbTogJzAuOXJlbScsIG91dGxpbmU6ICdub25lJywgYm94U2l6aW5nOiAnYm9yZGVyLWJveCcgfSxcbiAgc2VjcmV0c0lucHV0OnsgYm9yZGVyOiAnMXB4IHNvbGlkICM2YTIwMjAnLCBiYWNrZ3JvdW5kOiAnIzEyMDgwOCcgfSxcbiAgcmFkaW9Sb3c6ICAgIHsgZGlzcGxheTogJ2ZsZXgnLCBnYXA6ICcxLjVyZW0nLCBtYXJnaW5Cb3R0b206ICcwLjlyZW0nIH0sXG4gIHJhZGlvTGFiZWw6ICB7IGNvbG9yOiAnI2U4ZTBkMCcsIGZvbnRTaXplOiAnMC45cmVtJywgY3Vyc29yOiAncG9pbnRlcicgfSxcbiAgZm9vdGVyOiAgICAgIHsgZGlzcGxheTogJ2ZsZXgnLCBqdXN0aWZ5Q29udGVudDogJ3NwYWNlLWJldHdlZW4nLCBhbGlnbkl0ZW1zOiAnY2VudGVyJywgbWFyZ2luVG9wOiAnMC43NXJlbScsIHBhZGRpbmdUb3A6ICcwLjc1cmVtJywgYm9yZGVyVG9wOiAnMXB4IHNvbGlkICMyYTFjMDgnIH0sXG4gIHRhYk5hdjogICAgICB7IGRpc3BsYXk6ICdmbGV4JyB9LFxuICBhY3Rpb25zOiAgICAgeyBkaXNwbGF5OiAnZmxleCcsIGdhcDogJzAuNnJlbScgfSxcbiAgZXJyOiAgICAgICAgIHsgY29sb3I6ICcjZTA1MDUwJywgZm9udFNpemU6ICcwLjgycmVtJywgbWFyZ2luVG9wOiAnLTAuNnJlbScsIG1hcmdpbkJvdHRvbTogJzAuNzVyZW0nIH0sXG4gIGJ0blByaW1hcnk6ICB7IGJhY2tncm91bmQ6ICcjYzlhODRjJywgY29sb3I6ICcjMGQwYTA1JywgYm9yZGVyOiAnbm9uZScsIHBhZGRpbmc6ICcwLjVyZW0gMS4ycmVtJywgYm9yZGVyUmFkaXVzOiA0LCBjdXJzb3I6ICdwb2ludGVyJywgZm9udFdlaWdodDogJ2JvbGQnLCBmb250U2l6ZTogJzAuODhyZW0nIH0sXG4gIGJ0blNlY29uZGFyeTp7IGJhY2tncm91bmQ6ICd0cmFuc3BhcmVudCcsIGNvbG9yOiAnI2E4OTA2MCcsIGJvcmRlcjogJzFweCBzb2xpZCAjYTg5MDYwJywgcGFkZGluZzogJzAuNXJlbSAxLjJyZW0nLCBib3JkZXJSYWRpdXM6IDQsIGN1cnNvcjogJ3BvaW50ZXInLCBmb250U2l6ZTogJzAuODhyZW0nIH0sXG59XG4iXSwiZmlsZSI6IkM6L1VzZXJzL2NocmlzL0Rlc2t0b3AvRHVuZ2VvbiBNYXN0ZXIgQ2FtcGFpZ24gU3VpdGUvc3JjL2NvbXBvbmVudHMvd29ybGQvTlBDTW9kYWwuanN4In0=

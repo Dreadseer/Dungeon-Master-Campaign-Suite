@@ -1,0 +1,296 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/App.jsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=eaa9c5cf"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+import { BrowserRouter, Routes, Route } from "/node_modules/.vite/deps/react-router-dom.js?v=ff80c686";
+import Sidebar from "/src/components/Sidebar.jsx";
+import TopBar from "/src/components/TopBar.jsx";
+import SrdLoader from "/src/components/SrdLoader.jsx";
+import CampaignGuard from "/src/components/CampaignGuard.jsx";
+import CampaignManager from "/src/pages/CampaignManager.jsx";
+import WorldBuilder from "/src/pages/WorldBuilder.jsx";
+import LoreConnections from "/src/pages/LoreConnections.jsx";
+import MindMap from "/src/pages/MindMap.jsx";
+import MapEngine from "/src/pages/MapEngine.jsx";
+import Compendium from "/src/pages/Compendium.jsx";
+import CharacterSheets from "/src/pages/CharacterSheets.jsx";
+import EncounterBuilder from "/src/pages/EncounterBuilder.jsx";
+import CombatCalculator from "/src/pages/CombatCalculator.jsx";
+import AIAssistant from "/src/pages/AIAssistant.jsx";
+import Settings from "/src/pages/Settings.jsx";
+import Factions from "/src/pages/world/Factions.jsx";
+import Locations from "/src/pages/world/Locations.jsx";
+import NPCs from "/src/pages/world/NPCs.jsx";
+import Lore from "/src/pages/world/Lore.jsx";
+import Connections from "/src/pages/world/Connections.jsx";
+function Guarded({ children }) {
+  return /* @__PURE__ */ jsxDEV(CampaignGuard, { children }, void 0, false, {
+    fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+    lineNumber: 46,
+    columnNumber: 10
+  }, this);
+}
+_c = Guarded;
+export default function App() {
+  return /* @__PURE__ */ jsxDEV(BrowserRouter, { future: { v7_startTransition: true, v7_relativeSplatPath: true }, children: [
+    /* @__PURE__ */ jsxDEV(SrdLoader, {}, void 0, false, {
+      fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+      lineNumber: 52,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV(TopBar, {}, void 0, false, {
+      fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+      lineNumber: 53,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "app-layout", children: [
+      /* @__PURE__ */ jsxDEV(Sidebar, {}, void 0, false, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+        lineNumber: 55,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("main", { className: "main-content", children: /* @__PURE__ */ jsxDEV(Routes, { children: [
+        /* @__PURE__ */ jsxDEV(Route, { index: true, element: /* @__PURE__ */ jsxDEV(CampaignManager, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 58,
+          columnNumber: 35
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 58,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Route, { path: "/world", element: /* @__PURE__ */ jsxDEV(Guarded, { children: /* @__PURE__ */ jsxDEV(WorldBuilder, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 61,
+          columnNumber: 52
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 61,
+          columnNumber: 43
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 61,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Route, { path: "/world/factions", element: /* @__PURE__ */ jsxDEV(Guarded, { children: /* @__PURE__ */ jsxDEV(Factions, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 62,
+          columnNumber: 61
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 62,
+          columnNumber: 52
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 62,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Route, { path: "/world/locations", element: /* @__PURE__ */ jsxDEV(Guarded, { children: /* @__PURE__ */ jsxDEV(Locations, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 63,
+          columnNumber: 62
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 63,
+          columnNumber: 53
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 63,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Route, { path: "/world/npcs", element: /* @__PURE__ */ jsxDEV(Guarded, { children: /* @__PURE__ */ jsxDEV(NPCs, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 64,
+          columnNumber: 57
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 64,
+          columnNumber: 48
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 64,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Route, { path: "/world/lore", element: /* @__PURE__ */ jsxDEV(Guarded, { children: /* @__PURE__ */ jsxDEV(Lore, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 65,
+          columnNumber: 57
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 65,
+          columnNumber: 48
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 65,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Route, { path: "/world/connections", element: /* @__PURE__ */ jsxDEV(Guarded, { children: /* @__PURE__ */ jsxDEV(Connections, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 66,
+          columnNumber: 64
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 66,
+          columnNumber: 55
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 66,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Route, { path: "/lore", element: /* @__PURE__ */ jsxDEV(Guarded, { children: /* @__PURE__ */ jsxDEV(LoreConnections, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 68,
+          columnNumber: 51
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 68,
+          columnNumber: 42
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 68,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Route, { path: "/mindmap", element: /* @__PURE__ */ jsxDEV(Guarded, { children: /* @__PURE__ */ jsxDEV(MindMap, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 69,
+          columnNumber: 54
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 69,
+          columnNumber: 45
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 69,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Route, { path: "/maps", element: /* @__PURE__ */ jsxDEV(Guarded, { children: /* @__PURE__ */ jsxDEV(MapEngine, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 70,
+          columnNumber: 51
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 70,
+          columnNumber: 42
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 70,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Route, { path: "/characters", element: /* @__PURE__ */ jsxDEV(Guarded, { children: /* @__PURE__ */ jsxDEV(CharacterSheets, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 71,
+          columnNumber: 57
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 71,
+          columnNumber: 48
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 71,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Route, { path: "/encounters", element: /* @__PURE__ */ jsxDEV(Guarded, { children: /* @__PURE__ */ jsxDEV(EncounterBuilder, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 72,
+          columnNumber: 57
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 72,
+          columnNumber: 48
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 72,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Route, { path: "/calculator", element: /* @__PURE__ */ jsxDEV(Guarded, { children: /* @__PURE__ */ jsxDEV(CombatCalculator, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 73,
+          columnNumber: 57
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 73,
+          columnNumber: 48
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 73,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Route, { path: "/compendium", element: /* @__PURE__ */ jsxDEV(Compendium, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 74,
+          columnNumber: 48
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 74,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Route, { path: "/ai", element: /* @__PURE__ */ jsxDEV(AIAssistant, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 75,
+          columnNumber: 40
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 75,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Route, { path: "/settings", element: /* @__PURE__ */ jsxDEV(Settings, {}, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 76,
+          columnNumber: 46
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+          lineNumber: 76,
+          columnNumber: 13
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+        lineNumber: 57,
+        columnNumber: 11
+      }, this) }, void 0, false, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+        lineNumber: 56,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+      lineNumber: 54,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx",
+    lineNumber: 51,
+    columnNumber: 5
+  }, this);
+}
+_c2 = App;
+var _c, _c2;
+$RefreshReg$(_c, "Guarded");
+$RefreshReg$(_c2, "App");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/App.jsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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QUFoRTtBQUFBO0FBQUE7QUFBQTtBQUFBLGVBQTJFO0FBQUEsUUFDM0UsdUJBQUMsU0FBTSxNQUFLLGVBQWMsU0FBUyx1QkFBQyxnQkFBRDtBQUFBO0FBQUE7QUFBQTtBQUFBLGVBQVcsS0FBOUM7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQUFrRDtBQUFBLFFBQ2xELHVCQUFDLFNBQU0sTUFBSyxPQUFjLFNBQVMsdUJBQUMsaUJBQUQ7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQUFZLEtBQS9DO0FBQUE7QUFBQTtBQUFBO0FBQUEsZUFBbUQ7QUFBQSxRQUNuRCx1QkFBQyxTQUFNLE1BQUssYUFBYyxTQUFTLHVCQUFDLGNBQUQ7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQUFTLEtBQTVDO0FBQUE7QUFBQTtBQUFBO0FBQUEsZUFBZ0Q7QUFBQSxXQW5CbEQ7QUFBQTtBQUFBO0FBQUE7QUFBQSxhQW9CQSxLQXJCRjtBQUFBO0FBQUE7QUFBQTtBQUFBLGFBc0JBO0FBQUEsU0F4QkY7QUFBQTtBQUFBO0FBQUE7QUFBQSxXQXlCQTtBQUFBLE9BNUJGO0FBQUE7QUFBQTtBQUFBO0FBQUEsU0E2QkE7QUFFSjtBQUFDQyxNQWpDdUJIO0FBQUcsSUFBQUQsSUFBQUk7QUFBQSxhQUFBSixJQUFBO0FBQUEsYUFBQUksS0FBQSIsIm5hbWVzIjpbIkJyb3dzZXJSb3V0ZXIiLCJSb3V0ZXMiLCJSb3V0ZSIsIlNpZGViYXIiLCJUb3BCYXIiLCJTcmRMb2FkZXIiLCJDYW1wYWlnbkd1YXJkIiwiQ2FtcGFpZ25NYW5hZ2VyIiwiV29ybGRCdWlsZGVyIiwiTG9yZUNvbm5lY3Rpb25zIiwiTWluZE1hcCIsIk1hcEVuZ2luZSIsIkNvbXBlbmRpdW0iLCJDaGFyYWN0ZXJTaGVldHMiLCJFbmNvdW50ZXJCdWlsZGVyIiwiQ29tYmF0Q2FsY3VsYXRvciIsIkFJQXNzaXN0YW50IiwiU2V0dGluZ3MiLCJGYWN0aW9ucyIsIkxvY2F0aW9ucyIsIk5QQ3MiLCJMb3JlIiwiQ29ubmVjdGlvbnMiLCJHdWFyZGVkIiwiY2hpbGRyZW4iLCJfYyIsIkFwcCIsInY3X3N0YXJ0VHJhbnNpdGlvbiIsInY3X3JlbGF0aXZlU3BsYXRQYXRoIiwiX2MyIl0sImlnbm9yZUxpc3QiOltdLCJzb3VyY2VzIjpbIkFwcC5qc3giXSwic291cmNlc0NvbnRlbnQiOlsiaW1wb3J0IHsgQnJvd3NlclJvdXRlciwgUm91dGVzLCBSb3V0ZSB9IGZyb20gJ3JlYWN0LXJvdXRlci1kb20nXG5pbXBvcnQgU2lkZWJhciAgICAgICAgZnJvbSAnLi9jb21wb25lbnRzL1NpZGViYXInXG5pbXBvcnQgVG9wQmFyICAgICAgICAgZnJvbSAnLi9jb21wb25lbnRzL1RvcEJhcidcbmltcG9ydCBTcmRMb2FkZXIgICAgICBmcm9tICcuL2NvbXBvbmVudHMvU3JkTG9hZGVyJ1xuaW1wb3J0IENhbXBhaWduR3VhcmQgIGZyb20gJy4vY29tcG9uZW50cy9DYW1wYWlnbkd1YXJkJ1xuXG5pbXBvcnQgQ2FtcGFpZ25NYW5hZ2VyICBmcm9tICcuL3BhZ2VzL0NhbXBhaWduTWFuYWdlcidcbmltcG9ydCBXb3JsZEJ1aWxkZXIgICAgIGZyb20gJy4vcGFnZXMvV29ybGRCdWlsZGVyJ1xuaW1wb3J0IExvcmVDb25uZWN0aW9ucyAgZnJvbSAnLi9wYWdlcy9Mb3JlQ29ubmVjdGlvbnMnXG5pbXBvcnQgTWluZE1hcCAgICAgICAgICBmcm9tICcuL3BhZ2VzL01pbmRNYXAnXG5pbXBvcnQgTWFwRW5naW5lICAgICAgICBmcm9tICcuL3BhZ2VzL01hcEVuZ2luZSdcbmltcG9ydCBDb21wZW5kaXVtICAgICAgIGZyb20gJy4vcGFnZXMvQ29tcGVuZGl1bSdcbmltcG9ydCBDaGFyYWN0ZXJTaGVldHMgIGZyb20gJy4vcGFnZXMvQ2hhcmFjdGVyU2hlZXRzJ1xuaW1wb3J0IEVuY291bnRlckJ1aWxkZXIgZnJvbSAnLi9wYWdlcy9FbmNvdW50ZXJCdWlsZGVyJ1xuaW1wb3J0IENvbWJhdENhbGN1bGF0b3IgZnJvbSAnLi9wYWdlcy9Db21iYXRDYWxjdWxhdG9yJ1xuaW1wb3J0IEFJQXNzaXN0YW50ICAgICAgZnJvbSAnLi9wYWdlcy9BSUFzc2lzdGFudCdcbmltcG9ydCBTZXR0aW5ncyAgICAgICAgIGZyb20gJy4vcGFnZXMvU2V0dGluZ3MnXG5cbi8vIFBoYXNlIDIg4oCUIFdvcmxkIEJ1aWxkZXIgcGFnZXNcbmltcG9ydCBGYWN0aW9ucyAgICBmcm9tICcuL3BhZ2VzL3dvcmxkL0ZhY3Rpb25zJ1xuaW1wb3J0IExvY2F0aW9ucyAgIGZyb20gJy4vcGFnZXMvd29ybGQvTG9jYXRpb25zJ1xuaW1wb3J0IE5QQ3MgICAgICAgIGZyb20gJy4vcGFnZXMvd29ybGQvTlBDcydcbmltcG9ydCBMb3JlICAgICAgICBmcm9tICcuL3BhZ2VzL3dvcmxkL0xvcmUnXG5pbXBvcnQgQ29ubmVjdGlvbnMgZnJvbSAnLi9wYWdlcy93b3JsZC9Db25uZWN0aW9ucydcblxuZnVuY3Rpb24gR3VhcmRlZCh7IGNoaWxkcmVuIH0pIHtcbiAgcmV0dXJuIDxDYW1wYWlnbkd1YXJkPntjaGlsZHJlbn08L0NhbXBhaWduR3VhcmQ+XG59XG5cbmV4cG9ydCBkZWZhdWx0IGZ1bmN0aW9uIEFwcCgpIHtcbiAgcmV0dXJuIChcbiAgICA8QnJvd3NlclJvdXRlciBmdXR1cmU9e3sgdjdfc3RhcnRUcmFuc2l0aW9uOiB0cnVlLCB2N19yZWxhdGl2ZVNwbGF0UGF0aDogdHJ1ZSB9fT5cbiAgICAgIDxTcmRMb2FkZXIgLz5cbiAgICAgIDxUb3BCYXIgLz5cbiAgICAgIDxkaXYgY2xhc3NOYW1lPVwiYXBwLWxheW91dFwiPlxuICAgICAgICA8U2lkZWJhciAvPlxuICAgICAgICA8bWFpbiBjbGFzc05hbWU9XCJtYWluLWNvbnRlbnRcIj5cbiAgICAgICAgICA8Um91dGVzPlxuICAgICAgICAgICAgPFJvdXRlIGluZGV4ICAgICAgICAgICAgICBlbGVtZW50PXs8Q2FtcGFpZ25NYW5hZ2VyIC8+fSAvPlxuXG4gICAgICAgICAgICB7LyogV29ybGQgQnVpbGRlciByb3V0ZXMgKi99XG4gICAgICAgICAgICA8Um91dGUgcGF0aD1cIi93b3JsZFwiICAgICAgICAgICAgZWxlbWVudD17PEd1YXJkZWQ+PFdvcmxkQnVpbGRlciAvPjwvR3VhcmRlZD59IC8+XG4gICAgICAgICAgICA8Um91dGUgcGF0aD1cIi93b3JsZC9mYWN0aW9uc1wiICAgZWxlbWVudD17PEd1YXJkZWQ+PEZhY3Rpb25zIC8+PC9HdWFyZGVkPn0gLz5cbiAgICAgICAgICAgIDxSb3V0ZSBwYXRoPVwiL3dvcmxkL2xvY2F0aW9uc1wiICBlbGVtZW50PXs8R3VhcmRlZD48TG9jYXRpb25zIC8+PC9HdWFyZGVkPn0gLz5cbiAgICAgICAgICAgIDxSb3V0ZSBwYXRoPVwiL3dvcmxkL25wY3NcIiAgICAgICAgIGVsZW1lbnQ9ezxHdWFyZGVkPjxOUENzIC8+PC9HdWFyZGVkPn0gLz5cbiAgICAgICAgICAgIDxSb3V0ZSBwYXRoPVwiL3dvcmxkL2xvcmVcIiAgICAgICAgIGVsZW1lbnQ9ezxHdWFyZGVkPjxMb3JlIC8+PC9HdWFyZGVkPn0gLz5cbiAgICAgICAgICAgIDxSb3V0ZSBwYXRoPVwiL3dvcmxkL2Nvbm5lY3Rpb25zXCIgIGVsZW1lbnQ9ezxHdWFyZGVkPjxDb25uZWN0aW9ucyAvPjwvR3VhcmRlZD59IC8+XG5cbiAgICAgICAgICAgIDxSb3V0ZSBwYXRoPVwiL2xvcmVcIiAgICAgICBlbGVtZW50PXs8R3VhcmRlZD48TG9yZUNvbm5lY3Rpb25zIC8+PC9HdWFyZGVkPn0gLz5cbiAgICAgICAgICAgIDxSb3V0ZSBwYXRoPVwiL21pbmRtYXBcIiAgICBlbGVtZW50PXs8R3VhcmRlZD48TWluZE1hcCAvPjwvR3VhcmRlZD59IC8+XG4gICAgICAgICAgICA8Um91dGUgcGF0aD1cIi9tYXBzXCIgICAgICAgZWxlbWVudD17PEd1YXJkZWQ+PE1hcEVuZ2luZSAvPjwvR3VhcmRlZD59IC8+XG4gICAgICAgICAgICA8Um91dGUgcGF0aD1cIi9jaGFyYWN0ZXJzXCIgZWxlbWVudD17PEd1YXJkZWQ+PENoYXJhY3RlclNoZWV0cyAvPjwvR3VhcmRlZD59IC8+XG4gICAgICAgICAgICA8Um91dGUgcGF0aD1cIi9lbmNvdW50ZXJzXCIgZWxlbWVudD17PEd1YXJkZWQ+PEVuY291bnRlckJ1aWxkZXIgLz48L0d1YXJkZWQ+fSAvPlxuICAgICAgICAgICAgPFJvdXRlIHBhdGg9XCIvY2FsY3VsYXRvclwiIGVsZW1lbnQ9ezxHdWFyZGVkPjxDb21iYXRDYWxjdWxhdG9yIC8+PC9HdWFyZGVkPn0gLz5cbiAgICAgICAgICAgIDxSb3V0ZSBwYXRoPVwiL2NvbXBlbmRpdW1cIiBlbGVtZW50PXs8Q29tcGVuZGl1bSAvPn0gLz5cbiAgICAgICAgICAgIDxSb3V0ZSBwYXRoPVwiL2FpXCIgICAgICAgICBlbGVtZW50PXs8QUlBc3Npc3RhbnQgLz59IC8+XG4gICAgICAgICAgICA8Um91dGUgcGF0aD1cIi9zZXR0aW5nc1wiICAgZWxlbWVudD17PFNldHRpbmdzIC8+fSAvPlxuICAgICAgICAgIDwvUm91dGVzPlxuICAgICAgICA8L21haW4+XG4gICAgICA8L2Rpdj5cbiAgICA8L0Jyb3dzZXJSb3V0ZXI+XG4gIClcbn1cbiJdLCJmaWxlIjoiQzovVXNlcnMvY2hyaXMvRGVza3RvcC9EdW5nZW9uIE1hc3RlciBDYW1wYWlnbiBTdWl0ZS9zcmMvQXBwLmpzeCJ9

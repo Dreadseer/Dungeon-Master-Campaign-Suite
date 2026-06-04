@@ -1,0 +1,314 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/components/map/MapToolbar.jsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=eaa9c5cf"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=eaa9c5cf"; const useState = __vite__cjsImport3_react["useState"];
+export default function MapToolbar({
+  activeTool,
+  onToolChange,
+  gridSize,
+  onGridSizeChange,
+  mapName,
+  onBack,
+  stageScale,
+  onResetView,
+  onSaveGridSize,
+  map
+}) {
+  _s();
+  const [savingGrid, setSavingGrid] = useState(false);
+  async function handleSaveGridSize() {
+    setSavingGrid(true);
+    await window.electronAPI.db.maps.update(map.id, {
+      name: map.name,
+      location_id: map.location_id ?? null,
+      grid_size: gridSize
+    });
+    setSavingGrid(false);
+    onSaveGridSize?.(gridSize);
+  }
+  const tools = [
+    { id: "pan", label: "🤚 Pan", disabled: false },
+    { id: "fog", label: "🌫️ Fog", disabled: true, title: "Fog of War — Prompt 03" },
+    { id: "token", label: "🪙 Token", disabled: true, title: "Tokens — Prompt 04" }
+  ];
+  return /* @__PURE__ */ jsxDEV("div", { style: s.toolbar, children: [
+    /* @__PURE__ */ jsxDEV("div", { style: s.section, children: tools.map(
+      (t) => /* @__PURE__ */ jsxDEV(
+        "button",
+        {
+          style: activeTool === t.id ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn,
+          onClick: () => !t.disabled && onToolChange(t.id),
+          disabled: t.disabled,
+          title: t.title ?? t.label,
+          children: t.label
+        },
+        t.id,
+        false,
+        {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+          lineNumber: 58,
+          columnNumber: 9
+        },
+        this
+      )
+    ) }, void 0, false, {
+      fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+      lineNumber: 56,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { style: s.section, children: [
+      /* @__PURE__ */ jsxDEV("span", { style: s.label, children: "Grid" }, void 0, false, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+        lineNumber: 72,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV(
+        "button",
+        {
+          style: s.nudgeBtn,
+          onClick: () => onGridSizeChange(Math.max(20, gridSize - 5)),
+          title: "Decrease grid size",
+          children: "−"
+        },
+        void 0,
+        false,
+        {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+          lineNumber: 73,
+          columnNumber: 9
+        },
+        this
+      ),
+      /* @__PURE__ */ jsxDEV("span", { style: s.gridVal, children: [
+        gridSize,
+        "px"
+      ] }, void 0, true, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+        lineNumber: 77,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV(
+        "button",
+        {
+          style: s.nudgeBtn,
+          onClick: () => onGridSizeChange(Math.min(100, gridSize + 5)),
+          title: "Increase grid size",
+          children: "+"
+        },
+        void 0,
+        false,
+        {
+          fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+          lineNumber: 78,
+          columnNumber: 9
+        },
+        this
+      ),
+      /* @__PURE__ */ jsxDEV("button", { style: s.saveBtn, onClick: handleSaveGridSize, disabled: savingGrid, children: savingGrid ? "…" : "Save" }, void 0, false, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+        lineNumber: 82,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+      lineNumber: 71,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { style: s.section, children: [
+      /* @__PURE__ */ jsxDEV("span", { style: s.label, children: "Zoom" }, void 0, false, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+        lineNumber: 89,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("span", { style: s.zoomVal, children: [
+        Math.round(stageScale * 100),
+        "%"
+      ] }, void 0, true, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+        lineNumber: 90,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("button", { style: s.resetBtn, onClick: onResetView, title: "Reset to 100% at origin", children: "Reset View" }, void 0, false, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+        lineNumber: 91,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+      lineNumber: 88,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { style: { ...s.section, marginLeft: "auto" }, children: [
+      map?.location_name && /* @__PURE__ */ jsxDEV("span", { style: s.locBadge, children: map.location_name }, void 0, false, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+        lineNumber: 99,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("span", { style: s.mapName, children: mapName }, void 0, false, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+        lineNumber: 101,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("button", { style: s.backBtn, onClick: onBack, children: "← Maps" }, void 0, false, {
+        fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+        lineNumber: 102,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+      lineNumber: 97,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx",
+    lineNumber: 54,
+    columnNumber: 5
+  }, this);
+}
+_s(MapToolbar, "Esfuv9lgTg1E2gwGB1JMFEvRAK4=");
+_c = MapToolbar;
+const s = {
+  toolbar: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    padding: "0.35rem 0.75rem",
+    background: "#0d0a05",
+    borderBottom: "1px solid #2a1c08",
+    height: 46,
+    boxSizing: "border-box",
+    flexShrink: 0,
+    overflowX: "auto"
+  },
+  section: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.35rem",
+    paddingRight: "0.75rem",
+    borderRight: "1px solid #2a1c08",
+    marginRight: "0.25rem"
+  },
+  label: {
+    color: "#6b5a3a",
+    fontSize: "0.72rem",
+    marginRight: 2
+  },
+  toolBtn: {
+    background: "transparent",
+    border: "1px solid #3a2a10",
+    color: "#a89060",
+    borderRadius: 4,
+    padding: "0.25rem 0.55rem",
+    cursor: "pointer",
+    fontSize: "0.78rem",
+    whiteSpace: "nowrap"
+  },
+  toolBtnActive: {
+    background: "#c9a84c",
+    color: "#0d0a05",
+    borderColor: "#c9a84c",
+    fontWeight: "bold"
+  },
+  nudgeBtn: {
+    background: "transparent",
+    border: "1px solid #3a2a10",
+    color: "#a89060",
+    borderRadius: 3,
+    width: 22,
+    height: 22,
+    cursor: "pointer",
+    fontSize: "0.9rem",
+    lineHeight: "1",
+    padding: 0,
+    textAlign: "center"
+  },
+  gridVal: {
+    color: "#e8e0d0",
+    fontSize: "0.82rem",
+    minWidth: 38,
+    textAlign: "center"
+  },
+  saveBtn: {
+    background: "transparent",
+    border: "1px solid #a89060",
+    color: "#a89060",
+    borderRadius: 3,
+    padding: "0.18rem 0.5rem",
+    cursor: "pointer",
+    fontSize: "0.72rem"
+  },
+  zoomVal: {
+    color: "#e8e0d0",
+    fontSize: "0.82rem",
+    minWidth: 38,
+    textAlign: "center"
+  },
+  resetBtn: {
+    background: "transparent",
+    border: "1px solid #3a2a10",
+    color: "#a89060",
+    borderRadius: 3,
+    padding: "0.18rem 0.5rem",
+    cursor: "pointer",
+    fontSize: "0.72rem"
+  },
+  mapName: {
+    color: "#c9a84c",
+    fontFamily: "Georgia, serif",
+    fontSize: "0.9rem",
+    fontWeight: 600,
+    maxWidth: 180,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap"
+  },
+  locBadge: {
+    background: "#1a2a1a",
+    color: "#5a9a5a",
+    fontSize: "0.68rem",
+    padding: "0.1rem 0.35rem",
+    borderRadius: 3
+  },
+  backBtn: {
+    background: "none",
+    border: "1px solid #3a2a10",
+    color: "#a89060",
+    padding: "0.25rem 0.65rem",
+    borderRadius: 4,
+    cursor: "pointer",
+    fontSize: "0.8rem",
+    whiteSpace: "nowrap"
+  }
+};
+var _c;
+$RefreshReg$(_c, "MapToolbar");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Users/chris/Desktop/Dungeon Master Campaign Suite/src/components/map/MapToolbar.jsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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b25Ub29sQ2hhbmdlIiwiZ3JpZFNpemUiLCJvbkdyaWRTaXplQ2hhbmdlIiwibWFwTmFtZSIsIm9uQmFjayIsInN0YWdlU2NhbGUiLCJvblJlc2V0VmlldyIsIm9uU2F2ZUdyaWRTaXplIiwibWFwIiwiX3MiLCJzYXZpbmdHcmlkIiwic2V0U2F2aW5nR3JpZCIsImhhbmRsZVNhdmVHcmlkU2l6ZSIsIndpbmRvdyIsImVsZWN0cm9uQVBJIiwiZGIiLCJtYXBzIiwidXBkYXRlIiwiaWQiLCJuYW1lIiwibG9jYXRpb25faWQiLCJncmlkX3NpemUiLCJ0b29scyIsImxhYmVsIiwiZGlzYWJsZWQiLCJ0aXRsZSIsInMiLCJ0b29sYmFyIiwic2VjdGlvbiIsInQiLCJ0b29sQnRuIiwidG9vbEJ0bkFjdGl2ZSIsIm51ZGdlQnRuIiwiTWF0aCIsIm1heCIsImdyaWRWYWwiLCJtaW4iLCJzYXZlQnRuIiwiem9vbVZhbCIsInJvdW5kIiwicmVzZXRCdG4iLCJtYXJnaW5MZWZ0IiwibG9jYXRpb25fbmFtZSIsImxvY0JhZGdlIiwiYmFja0J0biIsImRpc3BsYXkiLCJhbGlnbkl0ZW1zIiwiZ2FwIiwicGFkZGluZyIsImJhY2tncm91bmQiLCJib3JkZXJCb3R0b20iLCJoZWlnaHQiLCJib3hTaXppbmciLCJmbGV4U2hyaW5rIiwib3ZlcmZsb3dYIiwicGFkZGluZ1JpZ2h0IiwiYm9yZGVyUmlnaHQiLCJtYXJnaW5SaWdodCIsImNvbG9yIiwiZm9udFNpemUiLCJib3JkZXIiLCJib3JkZXJSYWRpdXMiLCJjdXJzb3IiLCJ3aGl0ZVNwYWNlIiwiYm9yZGVyQ29sb3IiLCJmb250V2VpZ2h0Iiwid2lkdGgiLCJsaW5lSGVpZ2h0IiwidGV4dEFsaWduIiwibWluV2lkdGgiLCJmb250RmFtaWx5IiwibWF4V2lkdGgiLCJvdmVyZmxvdyIsInRleHRPdmVyZmxvdyIsIl9jIl0sImlnbm9yZUxpc3QiOltdLCJzb3VyY2VzIjpbIk1hcFRvb2xiYXIuanN4Il0sInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7IHVzZVN0YXRlIH0gZnJvbSAncmVhY3QnXG5cbmV4cG9ydCBkZWZhdWx0IGZ1bmN0aW9uIE1hcFRvb2xiYXIoe1xuICBhY3RpdmVUb29sLFxuICBvblRvb2xDaGFuZ2UsXG4gIGdyaWRTaXplLFxuICBvbkdyaWRTaXplQ2hhbmdlLFxuICBtYXBOYW1lLFxuICBvbkJhY2ssXG4gIHN0YWdlU2NhbGUsXG4gIG9uUmVzZXRWaWV3LFxuICBvblNhdmVHcmlkU2l6ZSxcbiAgbWFwLFxufSkge1xuICBjb25zdCBbc2F2aW5nR3JpZCwgc2V0U2F2aW5nR3JpZF0gPSB1c2VTdGF0ZShmYWxzZSlcblxuICBhc3luYyBmdW5jdGlvbiBoYW5kbGVTYXZlR3JpZFNpemUoKSB7XG4gICAgc2V0U2F2aW5nR3JpZCh0cnVlKVxuICAgIGF3YWl0IHdpbmRvdy5lbGVjdHJvbkFQSS5kYi5tYXBzLnVwZGF0ZShtYXAuaWQsIHtcbiAgICAgIG5hbWU6ICAgICAgICBtYXAubmFtZSxcbiAgICAgIGxvY2F0aW9uX2lkOiBtYXAubG9jYXRpb25faWQgPz8gbnVsbCxcbiAgICAgIGdyaWRfc2l6ZTogICBncmlkU2l6ZSxcbiAgICB9KVxuICAgIHNldFNhdmluZ0dyaWQoZmFsc2UpXG4gICAgb25TYXZlR3JpZFNpemU/LihncmlkU2l6ZSlcbiAgfVxuXG4gIGNvbnN0IHRvb2xzID0gW1xuICAgIHsgaWQ6ICdwYW4nLCAgICAgIGxhYmVsOiAn8J+kmiBQYW4nLCAgICAgICAgZGlzYWJsZWQ6IGZhbHNlIH0sXG4gICAgeyBpZDogJ2ZvZycsICAgICAgbGFiZWw6ICfwn4yr77iPIEZvZycsICAgICAgICBkaXNhYmxlZDogdHJ1ZSwgIHRpdGxlOiAnRm9nIG9mIFdhciDigJQgUHJvbXB0IDAzJyB9LFxuICAgIHsgaWQ6ICd0b2tlbicsICAgIGxhYmVsOiAn8J+qmSBUb2tlbicsICAgICAgIGRpc2FibGVkOiB0cnVlLCAgdGl0bGU6ICdUb2tlbnMg4oCUIFByb21wdCAwNCcgfSxcbiAgXVxuXG4gIHJldHVybiAoXG4gICAgPGRpdiBzdHlsZT17cy50b29sYmFyfT5cbiAgICAgIHsvKiDilIDilIAgTGVmdDogVG9vbCBidXR0b25zIOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgCAqL31cbiAgICAgIDxkaXYgc3R5bGU9e3Muc2VjdGlvbn0+XG4gICAgICAgIHt0b29scy5tYXAodCA9PiAoXG4gICAgICAgICAgPGJ1dHRvblxuICAgICAgICAgICAga2V5PXt0LmlkfVxuICAgICAgICAgICAgc3R5bGU9e2FjdGl2ZVRvb2wgPT09IHQuaWQgPyB7IC4uLnMudG9vbEJ0biwgLi4ucy50b29sQnRuQWN0aXZlIH0gOiBzLnRvb2xCdG59XG4gICAgICAgICAgICBvbkNsaWNrPXsoKSA9PiAhdC5kaXNhYmxlZCAmJiBvblRvb2xDaGFuZ2UodC5pZCl9XG4gICAgICAgICAgICBkaXNhYmxlZD17dC5kaXNhYmxlZH1cbiAgICAgICAgICAgIHRpdGxlPXt0LnRpdGxlID8/IHQubGFiZWx9XG4gICAgICAgICAgPlxuICAgICAgICAgICAge3QubGFiZWx9XG4gICAgICAgICAgPC9idXR0b24+XG4gICAgICAgICkpfVxuICAgICAgPC9kaXY+XG5cbiAgICAgIHsvKiDilIDilIAgQ2VudGVyOiBHcmlkIHNpemUgY29udHJvbCDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIAgKi99XG4gICAgICA8ZGl2IHN0eWxlPXtzLnNlY3Rpb259PlxuICAgICAgICA8c3BhbiBzdHlsZT17cy5sYWJlbH0+R3JpZDwvc3Bhbj5cbiAgICAgICAgPGJ1dHRvbiBzdHlsZT17cy5udWRnZUJ0bn1cbiAgICAgICAgICBvbkNsaWNrPXsoKSA9PiBvbkdyaWRTaXplQ2hhbmdlKE1hdGgubWF4KDIwLCBncmlkU2l6ZSAtIDUpKX1cbiAgICAgICAgICB0aXRsZT1cIkRlY3JlYXNlIGdyaWQgc2l6ZVwiXG4gICAgICAgID7iiJI8L2J1dHRvbj5cbiAgICAgICAgPHNwYW4gc3R5bGU9e3MuZ3JpZFZhbH0+e2dyaWRTaXplfXB4PC9zcGFuPlxuICAgICAgICA8YnV0dG9uIHN0eWxlPXtzLm51ZGdlQnRufVxuICAgICAgICAgIG9uQ2xpY2s9eygpID0+IG9uR3JpZFNpemVDaGFuZ2UoTWF0aC5taW4oMTAwLCBncmlkU2l6ZSArIDUpKX1cbiAgICAgICAgICB0aXRsZT1cIkluY3JlYXNlIGdyaWQgc2l6ZVwiXG4gICAgICAgID4rPC9idXR0b24+XG4gICAgICAgIDxidXR0b24gc3R5bGU9e3Muc2F2ZUJ0bn0gb25DbGljaz17aGFuZGxlU2F2ZUdyaWRTaXplfSBkaXNhYmxlZD17c2F2aW5nR3JpZH0+XG4gICAgICAgICAge3NhdmluZ0dyaWQgPyAn4oCmJyA6ICdTYXZlJ31cbiAgICAgICAgPC9idXR0b24+XG4gICAgICA8L2Rpdj5cblxuICAgICAgey8qIOKUgOKUgCBDZW50ZXItcmlnaHQ6IFpvb20gY29udHJvbCDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIAgKi99XG4gICAgICA8ZGl2IHN0eWxlPXtzLnNlY3Rpb259PlxuICAgICAgICA8c3BhbiBzdHlsZT17cy5sYWJlbH0+Wm9vbTwvc3Bhbj5cbiAgICAgICAgPHNwYW4gc3R5bGU9e3Muem9vbVZhbH0+e01hdGgucm91bmQoc3RhZ2VTY2FsZSAqIDEwMCl9JTwvc3Bhbj5cbiAgICAgICAgPGJ1dHRvbiBzdHlsZT17cy5yZXNldEJ0bn0gb25DbGljaz17b25SZXNldFZpZXd9IHRpdGxlPVwiUmVzZXQgdG8gMTAwJSBhdCBvcmlnaW5cIj5cbiAgICAgICAgICBSZXNldCBWaWV3XG4gICAgICAgIDwvYnV0dG9uPlxuICAgICAgPC9kaXY+XG5cbiAgICAgIHsvKiDilIDilIAgUmlnaHQ6IE1hcCBuYW1lICsgYmFjayBidXR0b24g4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSAICovfVxuICAgICAgPGRpdiBzdHlsZT17eyAuLi5zLnNlY3Rpb24sIG1hcmdpbkxlZnQ6ICdhdXRvJyB9fT5cbiAgICAgICAge21hcD8ubG9jYXRpb25fbmFtZSAmJiAoXG4gICAgICAgICAgPHNwYW4gc3R5bGU9e3MubG9jQmFkZ2V9PnttYXAubG9jYXRpb25fbmFtZX08L3NwYW4+XG4gICAgICAgICl9XG4gICAgICAgIDxzcGFuIHN0eWxlPXtzLm1hcE5hbWV9PnttYXBOYW1lfTwvc3Bhbj5cbiAgICAgICAgPGJ1dHRvbiBzdHlsZT17cy5iYWNrQnRufSBvbkNsaWNrPXtvbkJhY2t9PuKGkCBNYXBzPC9idXR0b24+XG4gICAgICA8L2Rpdj5cbiAgICA8L2Rpdj5cbiAgKVxufVxuXG5jb25zdCBzID0ge1xuICB0b29sYmFyOiB7XG4gICAgZGlzcGxheTogJ2ZsZXgnLFxuICAgIGFsaWduSXRlbXM6ICdjZW50ZXInLFxuICAgIGdhcDogJzAuNXJlbScsXG4gICAgcGFkZGluZzogJzAuMzVyZW0gMC43NXJlbScsXG4gICAgYmFja2dyb3VuZDogJyMwZDBhMDUnLFxuICAgIGJvcmRlckJvdHRvbTogJzFweCBzb2xpZCAjMmExYzA4JyxcbiAgICBoZWlnaHQ6IDQ2LFxuICAgIGJveFNpemluZzogJ2JvcmRlci1ib3gnLFxuICAgIGZsZXhTaHJpbms6IDAsXG4gICAgb3ZlcmZsb3dYOiAnYXV0bycsXG4gIH0sXG4gIHNlY3Rpb246IHtcbiAgICBkaXNwbGF5OiAnZmxleCcsXG4gICAgYWxpZ25JdGVtczogJ2NlbnRlcicsXG4gICAgZ2FwOiAnMC4zNXJlbScsXG4gICAgcGFkZGluZ1JpZ2h0OiAnMC43NXJlbScsXG4gICAgYm9yZGVyUmlnaHQ6ICcxcHggc29saWQgIzJhMWMwOCcsXG4gICAgbWFyZ2luUmlnaHQ6ICcwLjI1cmVtJyxcbiAgfSxcbiAgbGFiZWw6IHtcbiAgICBjb2xvcjogJyM2YjVhM2EnLFxuICAgIGZvbnRTaXplOiAnMC43MnJlbScsXG4gICAgbWFyZ2luUmlnaHQ6IDIsXG4gIH0sXG4gIHRvb2xCdG46IHtcbiAgICBiYWNrZ3JvdW5kOiAndHJhbnNwYXJlbnQnLFxuICAgIGJvcmRlcjogJzFweCBzb2xpZCAjM2EyYTEwJyxcbiAgICBjb2xvcjogJyNhODkwNjAnLFxuICAgIGJvcmRlclJhZGl1czogNCxcbiAgICBwYWRkaW5nOiAnMC4yNXJlbSAwLjU1cmVtJyxcbiAgICBjdXJzb3I6ICdwb2ludGVyJyxcbiAgICBmb250U2l6ZTogJzAuNzhyZW0nLFxuICAgIHdoaXRlU3BhY2U6ICdub3dyYXAnLFxuICB9LFxuICB0b29sQnRuQWN0aXZlOiB7XG4gICAgYmFja2dyb3VuZDogJyNjOWE4NGMnLFxuICAgIGNvbG9yOiAnIzBkMGEwNScsXG4gICAgYm9yZGVyQ29sb3I6ICcjYzlhODRjJyxcbiAgICBmb250V2VpZ2h0OiAnYm9sZCcsXG4gIH0sXG4gIG51ZGdlQnRuOiB7XG4gICAgYmFja2dyb3VuZDogJ3RyYW5zcGFyZW50JyxcbiAgICBib3JkZXI6ICcxcHggc29saWQgIzNhMmExMCcsXG4gICAgY29sb3I6ICcjYTg5MDYwJyxcbiAgICBib3JkZXJSYWRpdXM6IDMsXG4gICAgd2lkdGg6IDIyLFxuICAgIGhlaWdodDogMjIsXG4gICAgY3Vyc29yOiAncG9pbnRlcicsXG4gICAgZm9udFNpemU6ICcwLjlyZW0nLFxuICAgIGxpbmVIZWlnaHQ6ICcxJyxcbiAgICBwYWRkaW5nOiAwLFxuICAgIHRleHRBbGlnbjogJ2NlbnRlcicsXG4gIH0sXG4gIGdyaWRWYWw6IHtcbiAgICBjb2xvcjogJyNlOGUwZDAnLFxuICAgIGZvbnRTaXplOiAnMC44MnJlbScsXG4gICAgbWluV2lkdGg6IDM4LFxuICAgIHRleHRBbGlnbjogJ2NlbnRlcicsXG4gIH0sXG4gIHNhdmVCdG46IHtcbiAgICBiYWNrZ3JvdW5kOiAndHJhbnNwYXJlbnQnLFxuICAgIGJvcmRlcjogJzFweCBzb2xpZCAjYTg5MDYwJyxcbiAgICBjb2xvcjogJyNhODkwNjAnLFxuICAgIGJvcmRlclJhZGl1czogMyxcbiAgICBwYWRkaW5nOiAnMC4xOHJlbSAwLjVyZW0nLFxuICAgIGN1cnNvcjogJ3BvaW50ZXInLFxuICAgIGZvbnRTaXplOiAnMC43MnJlbScsXG4gIH0sXG4gIHpvb21WYWw6IHtcbiAgICBjb2xvcjogJyNlOGUwZDAnLFxuICAgIGZvbnRTaXplOiAnMC44MnJlbScsXG4gICAgbWluV2lkdGg6IDM4LFxuICAgIHRleHRBbGlnbjogJ2NlbnRlcicsXG4gIH0sXG4gIHJlc2V0QnRuOiB7XG4gICAgYmFja2dyb3VuZDogJ3RyYW5zcGFyZW50JyxcbiAgICBib3JkZXI6ICcxcHggc29saWQgIzNhMmExMCcsXG4gICAgY29sb3I6ICcjYTg5MDYwJyxcbiAgICBib3JkZXJSYWRpdXM6IDMsXG4gICAgcGFkZGluZzogJzAuMThyZW0gMC41cmVtJyxcbiAgICBjdXJzb3I6ICdwb2ludGVyJyxcbiAgICBmb250U2l6ZTogJzAuNzJyZW0nLFxuICB9LFxuICBtYXBOYW1lOiB7XG4gICAgY29sb3I6ICcjYzlhODRjJyxcbiAgICBmb250RmFtaWx5OiAnR2VvcmdpYSwgc2VyaWYnLFxuICAgIGZvbnRTaXplOiAnMC45cmVtJyxcbiAgICBmb250V2VpZ2h0OiA2MDAsXG4gICAgbWF4V2lkdGg6IDE4MCxcbiAgICBvdmVyZmxvdzogJ2hpZGRlbicsXG4gICAgdGV4dE92ZXJmbG93OiAnZWxsaXBzaXMnLFxuICAgIHdoaXRlU3BhY2U6ICdub3dyYXAnLFxuICB9LFxuICBsb2NCYWRnZToge1xuICAgIGJhY2tncm91bmQ6ICcjMWEyYTFhJyxcbiAgICBjb2xvcjogJyM1YTlhNWEnLFxuICAgIGZvbnRTaXplOiAnMC42OHJlbScsXG4gICAgcGFkZGluZzogJzAuMXJlbSAwLjM1cmVtJyxcbiAgICBib3JkZXJSYWRpdXM6IDMsXG4gIH0sXG4gIGJhY2tCdG46IHtcbiAgICBiYWNrZ3JvdW5kOiAnbm9uZScsXG4gICAgYm9yZGVyOiAnMXB4IHNvbGlkICMzYTJhMTAnLFxuICAgIGNvbG9yOiAnI2E4OTA2MCcsXG4gICAgcGFkZGluZzogJzAuMjVyZW0gMC42NXJlbScsXG4gICAgYm9yZGVyUmFkaXVzOiA0LFxuICAgIGN1cnNvcjogJ3BvaW50ZXInLFxuICAgIGZvbnRTaXplOiAnMC44cmVtJyxcbiAgICB3aGl0ZVNwYWNlOiAnbm93cmFwJyxcbiAgfSxcbn1cbiJdLCJmaWxlIjoiQzovVXNlcnMvY2hyaXMvRGVza3RvcC9EdW5nZW9uIE1hc3RlciBDYW1wYWlnbiBTdWl0ZS9zcmMvY29tcG9uZW50cy9tYXAvTWFwVG9vbGJhci5qc3gifQ==
