@@ -24,6 +24,9 @@ class DatabaseService {
     const migrations = [
       { id: 1, name: 'core_schema',       sql: MIGRATION_001 },
       { id: 2, name: 'connections_lore',  sql: MIGRATION_002 },
+      { id: 3, name: 'pdf_chunks',        sql: MIGRATION_003 },
+      { id: 4, name: 'embedding_columns', sql: MIGRATION_004 },
+      { id: 5, name: 'ai_usage_log',      sql: MIGRATION_005 },
     ]
 
     for (const m of migrations) {
@@ -207,6 +210,37 @@ const MIGRATION_002 = `
   INSERT INTO compendium_custom_new SELECT * FROM compendium_custom;
   DROP TABLE compendium_custom;
   ALTER TABLE compendium_custom_new RENAME TO compendium_custom;
+`
+
+// Migration 003 — PDF chunks table for RAG pipeline
+const MIGRATION_003 = `
+  CREATE TABLE IF NOT EXISTS pdf_chunks (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id    INTEGER NOT NULL REFERENCES pdf_sources(id) ON DELETE CASCADE,
+    chunk_index  INTEGER NOT NULL,
+    page_number  INTEGER,
+    text         TEXT NOT NULL
+  )
+`
+
+// Migration 004 — Embedding tracking columns on pdf_chunks
+const MIGRATION_004 = `
+  ALTER TABLE pdf_chunks ADD COLUMN embedded       INTEGER DEFAULT 0;
+  ALTER TABLE pdf_chunks ADD COLUMN embedding_model TEXT;
+`
+
+// Migration 005 — AI usage log for stats and auditing
+const MIGRATION_005 = `
+  CREATE TABLE IF NOT EXISTS ai_usage_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id  INTEGER REFERENCES campaigns(id),
+    mode         TEXT,
+    type         TEXT,
+    prompt_len   INTEGER,
+    response_len INTEGER,
+    duration_ms  INTEGER,
+    created_at   DATETIME DEFAULT (datetime('now'))
+  )
 `
 
 module.exports = DatabaseService

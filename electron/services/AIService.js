@@ -38,27 +38,100 @@ class AIService {
   }
 
   async complete(systemPrompt, userMessage, options = {}) {
+    const start = Date.now()
+    let result
+
     if (this.mode === 'online') {
       const response = await this.anthropicClient.messages.create({
-        model: this.anthropicModel,
+        model:      this.anthropicModel,
         max_tokens: options.maxTokens || 1024,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userMessage }],
+        system:     systemPrompt,
+        messages:   [{ role: 'user', content: userMessage }],
       })
-      return response.content[0].text
-    }
+      result = response.content[0].text
 
-    if (this.mode === 'offline-ollama') {
+    } else if (this.mode === 'offline-ollama') {
       const body = await this._ollamaPost('/api/generate', {
-        model: this.ollamaModel,
+        model:  this.ollamaModel,
         prompt: userMessage,
         system: systemPrompt,
         stream: false,
       })
-      return body.response
+      result = body.response
+
+    } else {
+      throw new Error('No AI service available. Please configure an API key or install Ollama.')
     }
 
-    throw new Error('No AI service available. Please configure an API key or install Ollama.')
+    // Non-critical: log usage without blocking the response
+    try {
+      if (global.db) {
+        global.db.run(
+          'INSERT INTO ai_usage_log (campaign_id, mode, type, prompt_len, response_len, duration_ms) VALUES (?,?,?,?,?,?)',
+          [options.campaignId ?? null, this.mode, options.type ?? 'chat',
+           (systemPrompt + userMessage).length, result.length, Date.now() - start]
+        )
+      }
+    } catch { /* logging is non-critical */ }
+
+    return result
+  }
+
+  // Streaming completion — fires onChunk(text) for each token, onDone() when finished.
+  // messages: [{ role: 'user'|'assistant', content: string }] for multi-turn support.
+  async stream(systemPrompt, messages, onChunk, onDone) {
+    if (this.mode === 'online') {
+      const stream = await this.anthropicClient.messages.stream({
+        model:      this.anthropicModel,
+        max_tokens: 1024,
+        system:     systemPrompt,
+        messages,
+      })
+
+      for await (const chunk of stream) {
+        if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+          onChunk(chunk.delta.text)
+        }
+      }
+      await stream.finalMessage()
+      onDone()
+
+    } else if (this.mode === 'offline-ollama') {
+      // Build a single prompt string from the messages array for Ollama
+      const prompt = messages
+        .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+        .join('\n') + '\nAssistant:'
+
+      const response = await fetch(`${this.ollamaBaseUrl}/api/generate`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          model:  this.ollamaModel,
+          prompt,
+          system: systemPrompt,
+          stream: true,
+        }),
+      })
+      if (!response.ok) throw new Error(`Ollama stream failed: ${response.status}`)
+
+      const reader  = response.body.getReader()
+      const decoder = new TextDecoder()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const lines = decoder.decode(value).split('\n').filter(Boolean)
+        for (const line of lines) {
+          try {
+            const data = JSON.parse(line)
+            if (data.response) onChunk(data.response)
+          } catch { /* partial JSON line — skip */ }
+        }
+      }
+      onDone()
+
+    } else {
+      throw new Error('No AI service available. Please configure an API key or install Ollama.')
+    }
   }
 
   getMode() {

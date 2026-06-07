@@ -14,6 +14,7 @@ import CharacterSheets  from './pages/CharacterSheets'
 import EncounterBuilder from './pages/EncounterBuilder'
 import CombatCalculator from './pages/CombatCalculator'
 import AIAssistant      from './pages/AIAssistant'
+import AISources        from './pages/AISources'
 import Settings         from './pages/Settings'
 
 // Phase 2 — World Builder pages
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="/calculator" element={<Guarded><CombatCalculator /></Guarded>} />
             <Route path="/compendium" element={<Compendium />} />
             <Route path="/ai"         element={<AIAssistant />} />
+            <Route path="/ai/sources" element={<Guarded><AISources /></Guarded>} />
             <Route path="/settings"   element={<Settings />} />
           </Routes>
         </main>

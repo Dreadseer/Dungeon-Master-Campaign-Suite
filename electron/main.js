@@ -12,9 +12,14 @@ const DatabaseService    = require('./database/DatabaseService')
 const SrdService         = require('./services/SrdService')
 const AIService          = require('./services/AIService')
 const KeyService         = require('./services/KeyService')
-const registerDbHandlers  = require('./ipc/dbHandlers')
-const registerSrdHandlers = require('./ipc/srdHandlers')
-const registerAiHandlers  = require('./ipc/aiHandlers')
+const PdfIngestionService  = require('./services/PdfIngestionService')
+const EmbeddingService     = require('./services/EmbeddingService')
+const RAGService           = require('./services/RAGService')
+const registerDbHandlers   = require('./ipc/dbHandlers')
+const registerSrdHandlers  = require('./ipc/srdHandlers')
+const registerAiHandlers   = require('./ipc/aiHandlers')
+const registerPdfHandlers  = require('./ipc/pdfHandlers')
+const registerEmbedHandlers = require('./ipc/embeddingHandlers')
 require('./ipc/fileHandlers')   // file dialog + image copy/read (self-registering)
 
 const MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' }
@@ -60,14 +65,27 @@ app.whenReady().then(async () => {
   const dbPath = path.join(app.getPath('userData'), 'dmcs.db')
   console.log('[DB] Path:', dbPath)
 
-  global.db         = new DatabaseService(dbPath)
-  global.srdService = new SrdService(global.db)
-  global.keyService = new KeyService()
-  global.aiService  = new AIService()
+  global.db               = new DatabaseService(dbPath)
+  global.srdService       = new SrdService(global.db)
+  global.keyService       = new KeyService()
+  global.aiService        = new AIService()
+  global.pdfService       = new PdfIngestionService(global.db, app.getPath('userData'))
+  global.embeddingService = new EmbeddingService(global.db, app.getPath('userData'))
+  global.ragService       = new RAGService(global.db, global.embeddingService, global.aiService)
+
+  // RAG settings — load from disk or fall back to defaults
+  const ragSettingsPath = path.join(app.getPath('userData'), 'rag-settings.json')
+  try {
+    global.ragSettings = JSON.parse(fs.readFileSync(ragSettingsPath, 'utf8'))
+  } catch {
+    global.ragSettings = { topK: 5, scoreThreshold: 0.5, ollamaModel: 'llama3', embedModel: 'nomic-embed-text' }
+  }
 
   registerDbHandlers(global.db)
   registerSrdHandlers(global.db, global.srdService)
   registerAiHandlers(global.aiService, global.keyService)
+  registerPdfHandlers(global.pdfService, global.db)
+  registerEmbedHandlers(global.embeddingService)
 
   // Auto-initialize AI with saved key (if any)
   const savedKey = global.keyService.loadKey()

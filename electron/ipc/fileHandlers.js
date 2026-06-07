@@ -49,3 +49,17 @@ ipcMain.handle('file:readThumbnail', (_, mapId) => {
   const buffer = fs.readFileSync(thumbPath)
   return `data:image/png;base64,${buffer.toString('base64')}`
 })
+
+// Export mind map canvas as PNG — opens OS save dialog, writes file, returns saved path
+ipcMain.handle('file:saveExportedImage', async (_, campaignName, dataUrl) => {
+  const safeName = (campaignName ?? 'campaign').replace(/[^a-zA-Z0-9_-]/g, '_')
+  const result   = await dialog.showSaveDialog({
+    title:       'Export Mind Map',
+    defaultPath: `${safeName}_mind_map.png`,
+    filters:     [{ name: 'PNG Image', extensions: ['png'] }],
+  })
+  if (result.canceled || !result.filePath) return null
+  const base64 = dataUrl.replace(/^data:image\/png;base64,/, '')
+  fs.writeFileSync(result.filePath, Buffer.from(base64, 'base64'))
+  return result.filePath
+})

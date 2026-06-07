@@ -36,6 +36,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       update:   (id, data)   => ipcRenderer.invoke('db:factions:update', id, data),
       delete:   (id)         => ipcRenderer.invoke('db:factions:delete', id),
     },
+    mindmap: {
+      getPositions:   (campaignId)          => ipcRenderer.invoke('db:mindmap:getPositions',  campaignId),
+      savePosition:   (data)                => ipcRenderer.invoke('db:mindmap:savePosition',  data),
+      savePositions:  (campaignId, positions) => ipcRenderer.invoke('db:mindmap:savePositions', campaignId, positions),
+      clearPositions: (campaignId)          => ipcRenderer.invoke('db:mindmap:clearPositions', campaignId),
+    },
     connections: {
       getAll:         (campaignId)           => ipcRenderer.invoke('db:connections:getAll', campaignId),
       getForEntity:   (entityType, entityId) => ipcRenderer.invoke('db:connections:getForEntity', entityType, entityId),
@@ -80,6 +86,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       updateMonsters: (id, monsters, xpTotal) => ipcRenderer.invoke('db:encounters:updateMonsters', id, monsters, xpTotal),
       delete:         (id)                    => ipcRenderer.invoke('db:encounters:delete',         id),
     },
+    pdf: {
+      getAll:        (campaignId) => ipcRenderer.invoke('db:pdf:getAll',        campaignId),
+      getById:       (id)         => ipcRenderer.invoke('db:pdf:getById',        id),
+      create:        (data)       => ipcRenderer.invoke('db:pdf:create',         data),
+      updateStatus:  (id, status, chunkCount) => ipcRenderer.invoke('db:pdf:updateStatus', id, status, chunkCount),
+      delete:        (id)         => ipcRenderer.invoke('db:pdf:delete',         id),
+      getChunks:     (sourceId)   => ipcRenderer.invoke('db:pdf:getChunks',      sourceId),
+      insertChunks:  (sourceId, chunks) => ipcRenderer.invoke('db:pdf:insertChunks', sourceId, chunks),
+      deleteChunks:  (sourceId)   => ipcRenderer.invoke('db:pdf:deleteChunks',   sourceId),
+    },
     characters: {
       getAll:           (campaignId)             => ipcRenderer.invoke('db:characters:getAll',           campaignId),
       getById:          (id)                     => ipcRenderer.invoke('db:characters:getById',          id),
@@ -112,6 +128,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getLocalUrl: (filePath) => filePath
       ? 'dmcs-asset:///' + encodeURI(filePath.replace(/\\/g, '/'))
       : null,
+    saveExportedImage: (campaignName, dataUrl) =>
+      ipcRenderer.invoke('file:saveExportedImage', campaignName, dataUrl),
   },
 
   srd: {
@@ -127,11 +145,48 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   ai: {
-    initialize:  ()                      => ipcRenderer.invoke('ai:initialize'),
-    getMode:     ()                      => ipcRenderer.invoke('ai:getMode'),
-    complete:    (systemPrompt, message) => ipcRenderer.invoke('ai:complete', systemPrompt, message),
-    saveKey:     (key)                   => ipcRenderer.invoke('ai:saveKey', key),
-    deleteKey:   ()                      => ipcRenderer.invoke('ai:deleteKey'),
-    hasKey:      ()                      => ipcRenderer.invoke('ai:hasKey'),
+    initialize:    ()                              => ipcRenderer.invoke('ai:initialize'),
+    getMode:       ()                              => ipcRenderer.invoke('ai:getMode'),
+    complete:      (systemPrompt, message)         => ipcRenderer.invoke('ai:complete',  systemPrompt, message),
+    saveKey:       (key)                           => ipcRenderer.invoke('ai:saveKey',   key),
+    deleteKey:     ()                              => ipcRenderer.invoke('ai:deleteKey'),
+    hasKey:        ()                              => ipcRenderer.invoke('ai:hasKey'),
+    ragQuery:      (question, campaignId, options) => ipcRenderer.invoke('ai:ragQuery',      question, campaignId, options),
+    getUsageStats: (campaignId)                    => ipcRenderer.invoke('ai:getUsageStats', campaignId),
+    clearUsageLog: (campaignId)                    => ipcRenderer.invoke('ai:clearUsageLog', campaignId),
+    // Streaming — fire-and-forget send; results come back via chunk/done/error events
+    streamStart:   (systemPrompt, messages, requestId) =>
+      ipcRenderer.send('ai:stream:start', { systemPrompt, messages, requestId }),
+    onStreamChunk: (cb) => ipcRenderer.on('ai:stream:chunk', (_e, data) => cb(data)),
+    onStreamDone:  (cb) => ipcRenderer.on('ai:stream:done',  (_e, data) => cb(data)),
+    onStreamError: (cb) => ipcRenderer.on('ai:stream:error', (_e, data) => cb(data)),
+    offStream:     ()   => {
+      ipcRenderer.removeAllListeners('ai:stream:chunk')
+      ipcRenderer.removeAllListeners('ai:stream:done')
+      ipcRenderer.removeAllListeners('ai:stream:error')
+    },
+  },
+
+  pdf: {
+    openDialog: ()                          => ipcRenderer.invoke('pdf:openDialog'),
+    ingest:     (campaignId, filePath)      => ipcRenderer.invoke('pdf:ingest',    campaignId, filePath),
+    reIngest:   (sourceId)                  => ipcRenderer.invoke('pdf:reIngest',  sourceId),
+    delete:     (sourceId, filePath)        => ipcRenderer.invoke('pdf:delete',    sourceId, filePath),
+    onProgress: (callback)                  => ipcRenderer.on('pdf:progress',    (_event, data) => callback(data)),
+    offProgress:(callback)                  => ipcRenderer.removeListener('pdf:progress', callback),
+  },
+
+  rag: {
+    getSettings: ()         => ipcRenderer.invoke('rag:getSettings'),
+    saveSettings:(settings) => ipcRenderer.invoke('rag:saveSettings', settings),
+  },
+
+  embed: {
+    source:       (sourceId)            => ipcRenderer.invoke('embed:source',       sourceId),
+    search:       (queryText, topK)     => ipcRenderer.invoke('embed:search',        queryText, topK),
+    deleteSource: (sourceId)            => ipcRenderer.invoke('embed:deleteSource',  sourceId),
+    getStatus:    ()                    => ipcRenderer.invoke('embed:getStatus'),
+    onProgress:   (callback)            => ipcRenderer.on('embed:progress',   (_event, data) => callback(data)),
+    offProgress:  (callback)            => ipcRenderer.removeListener('embed:progress', callback),
   },
 })

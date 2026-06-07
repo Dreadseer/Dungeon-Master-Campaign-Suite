@@ -401,6 +401,45 @@ function registerDbHandlers(db) {
     return db.run('UPDATE characters SET spell_slots=? WHERE id=?', [JSON.stringify(slots), charId])
   })
 
+  // ── Mind Map positions — Phase 6 ─────────────────────────────────────────
+  ipcMain.handle('db:mindmap:getPositions', (_, campaignId) =>
+    db.all('SELECT * FROM mind_map_positions WHERE campaign_id = ?', [campaignId]))
+
+  ipcMain.handle('db:mindmap:savePosition', (_, data) => {
+    const existing = db.get(
+      'SELECT id FROM mind_map_positions WHERE campaign_id=? AND entity_type=? AND entity_id=?',
+      [data.campaign_id, data.entity_type, data.entity_id])
+    if (existing) {
+      return db.run(
+        'UPDATE mind_map_positions SET x_pos=?, y_pos=? WHERE id=?',
+        [data.x_pos, data.y_pos, existing.id])
+    }
+    return db.run(
+      'INSERT INTO mind_map_positions (campaign_id, entity_type, entity_id, x_pos, y_pos) VALUES (?,?,?,?,?)',
+      [data.campaign_id, data.entity_type, data.entity_id, data.x_pos, data.y_pos])
+  })
+
+  ipcMain.handle('db:mindmap:savePositions', (_, campaignId, positions) => {
+    // Note: db.transaction(fn) already invokes the transaction — no extra () needed
+    return db.transaction(() => {
+      positions.forEach(p => {
+        const existing = db.get(
+          'SELECT id FROM mind_map_positions WHERE campaign_id=? AND entity_type=? AND entity_id=?',
+          [campaignId, p.entity_type, p.entity_id])
+        if (existing) {
+          db.run('UPDATE mind_map_positions SET x_pos=?, y_pos=? WHERE id=?',
+            [p.x_pos, p.y_pos, existing.id])
+        } else {
+          db.run('INSERT INTO mind_map_positions (campaign_id, entity_type, entity_id, x_pos, y_pos) VALUES (?,?,?,?,?)',
+            [campaignId, p.entity_type, p.entity_id, p.x_pos, p.y_pos])
+        }
+      })
+    })
+  })
+
+  ipcMain.handle('db:mindmap:clearPositions', (_, campaignId) =>
+    db.run('DELETE FROM mind_map_positions WHERE campaign_id=?', [campaignId]))
+
   // ── Encounters — Phase 5 ─────────────────────────────────────────────────
   ipcMain.handle('db:encounters:getAll', (_, campaignId) =>
     db.all(`
@@ -441,6 +480,47 @@ function registerDbHandlers(db) {
 
   ipcMain.handle('db:encounters:delete', (_, id) =>
     db.run('DELETE FROM encounters WHERE id=?', [id]))
+
+  // ── PDF Sources — Phase 7 ────────────────────────────────────────────────
+  ipcMain.handle('db:pdf:getAll', (_, campaignId) =>
+    db.all('SELECT * FROM pdf_sources WHERE campaign_id = ? ORDER BY indexed_at DESC', [campaignId]))
+
+  ipcMain.handle('db:pdf:getById', (_, id) =>
+    db.get('SELECT * FROM pdf_sources WHERE id = ?', [id]))
+
+  ipcMain.handle('db:pdf:create', (_, data) =>
+    db.run(`
+      INSERT INTO pdf_sources (campaign_id, filename, file_path, status, chunk_count, indexed_at)
+      VALUES (?, ?, ?, 'pending', 0, NULL)`,
+      [data.campaign_id, data.filename, data.file_path]))
+
+  ipcMain.handle('db:pdf:updateStatus', (_, id, status, chunkCount) =>
+    db.run(`
+      UPDATE pdf_sources SET status=?, chunk_count=?, indexed_at=datetime('now') WHERE id=?`,
+      [status, chunkCount ?? 0, id]))
+
+  ipcMain.handle('db:pdf:delete', (_, id) => {
+    db.run('DELETE FROM pdf_chunks WHERE source_id = ?', [id])
+    return db.run('DELETE FROM pdf_sources WHERE id = ?', [id])
+  })
+
+  // ── PDF Chunks — Phase 7 ─────────────────────────────────────────────────
+  ipcMain.handle('db:pdf:getChunks', (_, sourceId) =>
+    db.all('SELECT id, source_id, chunk_index, page_number, text FROM pdf_chunks WHERE source_id = ? ORDER BY chunk_index ASC', [sourceId]))
+
+  ipcMain.handle('db:pdf:insertChunks', (_, sourceId, chunks) => {
+    return db.transaction(() => {
+      chunks.forEach((chunk, i) => {
+        db.run(`
+          INSERT INTO pdf_chunks (source_id, chunk_index, page_number, text)
+          VALUES (?, ?, ?, ?)`,
+          [sourceId, i, chunk.page, chunk.text])
+      })
+    })
+  })
+
+  ipcMain.handle('db:pdf:deleteChunks', (_, sourceId) =>
+    db.run('DELETE FROM pdf_chunks WHERE source_id = ?', [sourceId]))
 }
 
 module.exports = registerDbHandlers
