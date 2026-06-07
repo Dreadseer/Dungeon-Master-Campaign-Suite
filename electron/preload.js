@@ -189,4 +189,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onProgress:   (callback)            => ipcRenderer.on('embed:progress',   (_event, data) => callback(data)),
     offProgress:  (callback)            => ipcRenderer.removeListener('embed:progress', callback),
   },
+
+  // ── Player window ──────────────────────────────────────────────────────────
+  player: {
+    openWindow:    (campaignId)  => ipcRenderer.invoke('player:openWindow',    campaignId),
+    closeWindow:   ()            => ipcRenderer.invoke('player:closeWindow'),
+    isOpen:        ()            => ipcRenderer.invoke('player:isOpen'),
+    setFullScreen: (fullScreen)  => ipcRenderer.invoke('player:setFullScreen', fullScreen),
+    broadcast:     (message)     => ipcRenderer.send('player:broadcast', message),
+    onReceive:     (callback)    => ipcRenderer.on('player:receive', callback),
+    offReceive:    (callback)    => ipcRenderer.removeListener('player:receive', callback),
+  },
 })

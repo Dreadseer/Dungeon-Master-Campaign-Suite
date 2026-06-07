@@ -2,6 +2,50 @@ const { app, BrowserWindow, ipcMain, shell, safeStorage, protocol } = require('e
 const fs   = require('fs')
 const path = require('path')
 
+// ── Player window ─────────────────────────────────────────────────────────────
+let playerWindow = null
+
+function createPlayerWindow(campaignId) {
+  if (playerWindow && !playerWindow.isDestroyed()) {
+    playerWindow.focus()
+    return
+  }
+  playerWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    title: 'DMCS — Player View',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  })
+  if (process.env.NODE_ENV === 'development') {
+    playerWindow.loadURL(`http://localhost:5173/player?campaign=${campaignId}`)
+  } else {
+    playerWindow.loadFile(
+      path.join(__dirname, '../dist/renderer/index.html'),
+      { hash: `/player?campaign=${campaignId}` }
+    )
+  }
+  playerWindow.on('closed', () => { playerWindow = null })
+}
+
+ipcMain.handle('player:openWindow',  (_, campaignId) => { createPlayerWindow(campaignId); return { success: true } })
+ipcMain.handle('player:closeWindow', ()              => { if (playerWindow && !playerWindow.isDestroyed()) playerWindow.close(); return { success: true } })
+ipcMain.handle('player:isOpen',      ()              => ({ isOpen: !!playerWindow && !playerWindow.isDestroyed() }))
+ipcMain.handle('player:setFullScreen', (_, fullScreen) => {
+  if (playerWindow && !playerWindow.isDestroyed()) playerWindow.setFullScreen(fullScreen)
+  return { success: true }
+})
+
+// Broadcast relay — DM window sends, player window receives
+ipcMain.on('player:broadcast', (_event, message) => {
+  if (playerWindow && !playerWindow.isDestroyed()) {
+    playerWindow.webContents.send('player:receive', message)
+  }
+})
+
 // Must be called before app is ready — registers dmcs-asset:// as a secure scheme
 // so Chromium accepts it as an image source when the page is served from localhost
 protocol.registerSchemesAsPrivileged([

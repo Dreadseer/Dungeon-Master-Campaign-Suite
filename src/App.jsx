@@ -1,8 +1,11 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import Sidebar        from './components/Sidebar'
-import TopBar         from './components/TopBar'
-import SrdLoader      from './components/SrdLoader'
-import CampaignGuard  from './components/CampaignGuard'
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
+import Sidebar            from './components/Sidebar'
+import TopBar             from './components/TopBar'
+import SrdLoader          from './components/SrdLoader'
+import CampaignGuard      from './components/CampaignGuard'
+import PlayerApp          from './PlayerApp'
+import DMPlayerControls   from './components/player/DMPlayerControls'
+import usePlayerStore     from './stores/playerStore'
 
 import CampaignManager  from './pages/CampaignManager'
 import WorldBuilder     from './pages/WorldBuilder'
@@ -28,11 +31,31 @@ function Guarded({ children }) {
   return <CampaignGuard>{children}</CampaignGuard>
 }
 
-export default function App() {
+// Inner app — has access to router context (useLocation requires being inside BrowserRouter)
+function AppContent() {
+  const location         = useLocation()
+  const isPlayer         = location.pathname.startsWith('/player')
+  const showPlayerPanel  = usePlayerStore(s => s.showPlayerPanel)
+  const setShowPlayerPanel = usePlayerStore(s => s.setShowPlayerPanel)
+
+  // ── Player view — standalone, no DM chrome ───────────────────────────────
+  if (isPlayer) {
+    return (
+      <Routes>
+        <Route path="/player" element={<PlayerApp />} />
+      </Routes>
+    )
+  }
+
+  // ── DM view — full chrome ─────────────────────────────────────────────────
   return (
-    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <>
       <SrdLoader />
       <TopBar />
+      {/* DMPlayerControls panel — position:fixed overlay, toggled from TopBar */}
+      {showPlayerPanel && (
+        <DMPlayerControls onClose={() => setShowPlayerPanel(false)} />
+      )}
       <div className="app-layout">
         <Sidebar />
         <main className="main-content">
@@ -60,6 +83,14 @@ export default function App() {
           </Routes>
         </main>
       </div>
+    </>
+  )
+}
+
+export default function App() {
+  return (
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <AppContent />
     </BrowserRouter>
   )
 }

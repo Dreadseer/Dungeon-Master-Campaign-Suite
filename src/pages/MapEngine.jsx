@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import useCampaignStore from '../stores/campaignStore'
+import usePlayerStore   from '../stores/playerStore'
 import EntityModal from '../components/world/EntityModal'
 import Skeleton from '../components/ui/Skeleton'
 import MapCanvas from '../components/map/MapCanvas'
@@ -46,6 +47,38 @@ export default function MapEngine() {
   const registerFogControls = useCallback((controls) => {
     fogControlsRef.current = controls
   }, [])
+
+  // ── Player broadcast / auto-sync ──────────────────────────────────
+  const autoSync          = usePlayerStore(s => s.autoSync)
+  const playerWindowOpen  = usePlayerStore(s => s.playerWindowOpen)
+  const fogBroadcastRef   = useRef(null)
+
+  const handleFogChange = useCallback((fogData) => {
+    if (!autoSync || !playerWindowOpen || !activeMap) return
+    clearTimeout(fogBroadcastRef.current)
+    fogBroadcastRef.current = setTimeout(() => {
+      window.electronAPI.player.broadcast({
+        type: 'map:update',
+        payload: {
+          mapId:   activeMap.id,
+          fogData: fogData,
+          tokens:  JSON.parse(activeMap.tokens ?? '[]'),
+        },
+      })
+    }, 500)
+  }, [autoSync, playerWindowOpen, activeMap])
+
+  const handleTokensChange = useCallback((tokens) => {
+    if (!autoSync || !playerWindowOpen || !activeMap) return
+    window.electronAPI.player.broadcast({
+      type: 'map:update',
+      payload: {
+        mapId:   activeMap.id,
+        fogData: JSON.parse(activeMap.fog_data ?? '[]'),
+        tokens:  tokens,
+      },
+    })
+  }, [autoSync, playerWindowOpen, activeMap])
 
   // ── View mode (DM vs Player) ───────────────────────────────────────
   const [viewMode, setViewMode] = useState('dm')
@@ -205,8 +238,8 @@ export default function MapEngine() {
           map={activeMap}
           mode={viewMode}
           campaignId={activeCampaign.id}
-          onFogChange={null}
-          onTokensChange={null}
+          onFogChange={handleFogChange}
+          onTokensChange={handleTokensChange}
           stageScale={stageScale}
           stagePos={stagePos}
           setStageScale={setStageScale}

@@ -219,6 +219,13 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
     if (playerUpdates.length > 0) {
       try {
         await window.electronAPI.db.characters.bulkUpdateHP(playerUpdates)
+        // Broadcast character:sync to player window so HP updates live
+        playerUpdates.forEach(u => {
+          window.electronAPI.player.broadcast({
+            type:    'character:sync',
+            payload: { characterId: u.id },
+          })
+        })
       } catch { /* non-critical — combat still ends */ }
     }
 

@@ -9,9 +9,10 @@ import AddTokenModal  from './AddTokenModal'
 import TokenInspector from './TokenInspector'
 
 // Layout constants — keep in sync with Sidebar, TopBar, and MapToolbar heights
-const SIDEBAR_W    = 240
-const TOPBAR_H     = 56
-const MAPTOOLBAR_H = 46
+const SIDEBAR_W      = 240
+const TOPBAR_H       = 56
+const MAPTOOLBAR_H   = 46
+const PLAYER_TOPBAR_H = 48   // PlayerTopBar height
 
 export default function MapCanvas({
   map,
@@ -58,15 +59,19 @@ export default function MapCanvas({
   const saveTokensRef = useRef(null)
 
   // ── Canvas resize listener ─────────────────────────────────────────
+  // Player mode: no sidebar, no MapToolbar — full width minus only PlayerTopBar
   useEffect(() => {
-    const updateSize = () => setCanvasSize({
-      width:  window.innerWidth  - SIDEBAR_W,
-      height: window.innerHeight - TOPBAR_H - MAPTOOLBAR_H,
-    })
+    const updateSize = () => {
+      if (mode === 'player') {
+        setCanvasSize({ width: window.innerWidth, height: window.innerHeight - PLAYER_TOPBAR_H })
+      } else {
+        setCanvasSize({ width: window.innerWidth - SIDEBAR_W, height: window.innerHeight - TOPBAR_H - MAPTOOLBAR_H })
+      }
+    }
     updateSize()
     window.addEventListener('resize', updateSize)
     return () => window.removeEventListener('resize', updateSize)
-  }, [setCanvasSize])
+  }, [setCanvasSize, mode])
 
   // ── Background image loader ────────────────────────────────────────
   // Uses dmcs-asset:// protocol — no base64/IPC overhead, works with large files
@@ -282,8 +287,9 @@ export default function MapCanvas({
         // Viewport cull — skip off-screen fog cells
         if (!isCellInViewport(col, row, effectiveGrid, stagePos, stageScale, canvasSize)) continue
 
-        // In player mode, fog is fully opaque — no hint of what lies beneath
-        const alpha = mode === 'player' ? 1.0 : 0.92
+        // Player mode: fully opaque solid black — zero content visible beneath.
+        // DM mode: semi-transparent dark overlay — DM can still see the map.
+        const fill = mode === 'player' ? 'rgba(0,0,0,1)' : 'rgba(10,8,5,0.92)'
         rects.push(
           <Rect
             key={`fog-${col}-${row}`}
@@ -291,7 +297,7 @@ export default function MapCanvas({
             y={row * effectiveGrid}
             width={effectiveGrid}
             height={effectiveGrid}
-            fill={`rgba(10, 8, 5, ${alpha})`}
+            fill={fill}
             listening={false}
           />
         )
@@ -419,19 +425,28 @@ export default function MapCanvas({
           {renderFog()}
         </Layer>
 
-        {/* Layer 4 — Tokens */}
+        {/* Layer 4 — Tokens
+             Player mode: only render tokens on revealed (fog-lifted) cells.
+             DM mode: all tokens visible regardless of fog. */}
         <Layer>
-          {tokens.map(token => (
-            <MapToken
-              key={token.id}
-              token={token}
-              gridSize={effectiveGrid}
-              isSelected={selectedToken?.id === token.id}
-              onSelect={setSelectedToken}
-              onDragEnd={handleTokenDragEnd}
-              mode={mode}
-            />
-          ))}
+          {tokens
+            .filter(token => {
+              if (mode !== 'player') return true
+              const { numCols } = getMapDimensions(imageSize, effectiveGrid)
+              return isCellRevealed(fogData, token.col, token.row, numCols)
+            })
+            .map(token => (
+              <MapToken
+                key={token.id}
+                token={token}
+                gridSize={effectiveGrid}
+                isSelected={selectedToken?.id === token.id}
+                onSelect={setSelectedToken}
+                onDragEnd={handleTokenDragEnd}
+                mode={mode}
+              />
+            ))
+          }
         </Layer>
       </Stage>
 
