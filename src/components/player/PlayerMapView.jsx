@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import MapCanvas         from '../map/MapCanvas'
 import PlayerMapControls from './PlayerMapControls'
-import Skeleton          from '../ui/Skeleton'
 
 const PLAYER_TOPBAR_H = 48
 
@@ -10,7 +9,6 @@ export default function PlayerMapView({ campaignId, broadcastMsg }) {
   const [activeMap,    setActiveMap]    = useState(null)
   const [maps,         setMaps]         = useState([])
   const [loading,      setLoading]      = useState(false)
-  const [imageReady,   setImageReady]   = useState(false)  // tracks map image decode
 
   // Distance measurement — Shift+hover
   const [distLabel,    setDistLabel]    = useState(null)   // { x, y, text }
@@ -86,22 +84,11 @@ export default function PlayerMapView({ campaignId, broadcastMsg }) {
     if (!broadcastMsg) return
 
     if (broadcastMsg.type === 'map:set') {
-      setImageReady(false)  // show skeleton while image decodes
       window.electronAPI.db.maps.getById(broadcastMsg.payload.mapId).then(map => {
         if (map) {
           setActiveMap(map)
-          // Reset pan/zoom when a new map is pushed
           setStageScale(1.0)
           setStagePos({ x: 0, y: 0 })
-          // Pre-decode the base64 image so MapCanvas doesn't stutter
-          if (map.image_data) {
-            const img = new Image()
-            img.onload  = () => setImageReady(true)
-            img.onerror = () => setImageReady(true) // proceed even on error
-            img.src = map.image_data
-          } else {
-            setImageReady(true)
-          }
         }
       })
     }
@@ -158,13 +145,6 @@ export default function PlayerMapView({ campaignId, broadcastMsg }) {
   // ── Active map view ───────────────────────────────────────────────────────
   return (
     <div style={s.mapRoot} ref={mapContainerRef}>
-      {/* Image decode skeleton — shown while base64 image loads */}
-      {!imageReady && (
-        <div style={s.imageLoadOverlay}>
-          <Skeleton width="100%" height="100%" borderRadius="0" />
-          <p style={s.imageLoadLabel}>Loading map…</p>
-        </div>
-      )}
       <MapCanvas
         map={activeMap}
         mode="player"
@@ -245,25 +225,6 @@ const s = {
     height:    `calc(100vh - ${PLAYER_TOPBAR_H}px)`,
     overflow:  'hidden',
     background: '#0d0a05',
-  },
-
-  imageLoadOverlay: {
-    position:       'absolute',
-    inset:          0,
-    zIndex:         20,
-    display:        'flex',
-    alignItems:     'center',
-    justifyContent: 'center',
-    flexDirection:  'column',
-    gap:            '0.75rem',
-    background:     '#0d0a05',
-  },
-  imageLoadLabel: {
-    position:  'absolute',
-    color:     '#c9a84c',
-    fontFamily: 'Georgia, serif',
-    fontSize:  '1rem',
-    margin:    0,
   },
 
   distLabel: {
