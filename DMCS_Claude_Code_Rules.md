@@ -29,8 +29,8 @@ Two source-of-truth documents live in this project folder. They govern every dec
 
 | Document | Filename | Purpose |
 |---|---|---|
-| **AI Spec Sheet** | `DMCS_AI_Spec_Sheet.docx` | Master architecture — tech stack, all 13 modules, full database schema, AI strategy, build phases |
-| **Feature Sheet** | `DMCS_Phase1_Agent_Prompts.docx` | Phase-by-phase implementation prompts — exact files, logic, verification steps per feature |
+| **AI Spec Sheet** | `DMCS_AI_Spec_Sheet.md` | Master architecture — tech stack, all 13 modules, full database schema, AI strategy, build phases |
+| **Feature Sheet** | `DMCS_PDF_Compendium_Import.md` | Phase-by-phase implementation prompts — exact files, logic, verification steps per feature |
 
 Before starting any prompt, read both documents in full using your file reading tools. Do not rely on memory from a previous session. **Always read fresh.**
 

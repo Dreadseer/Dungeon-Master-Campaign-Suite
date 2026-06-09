@@ -386,6 +386,22 @@ function registerDbHandlers(db) {
       [char.hp_max, JSON.stringify(slots), charId])
   })
 
+  ipcMain.handle('db:characters:updateCurrency', (_, charId, currency) => {
+    const char  = db.get('SELECT stats FROM characters WHERE id=?', [charId])
+    const stats = JSON.parse(char.stats ?? '{}')
+    stats.currency = { pp: 0, gp: 0, ep: 0, sp: 0, cp: 0, ...stats.currency, ...currency }
+    return db.run('UPDATE characters SET stats=? WHERE id=?', [JSON.stringify(stats), charId])
+  })
+
+  ipcMain.handle('db:characters:updateAC', (_, charId, updates) => {
+    // updates: { ac_override?: number|null, ac_magic_bonus?: number }
+    const char  = db.get('SELECT stats FROM characters WHERE id=?', [charId])
+    const stats = JSON.parse(char.stats ?? '{}')
+    if ('ac_override'    in updates) stats.ac_override    = updates.ac_override
+    if ('ac_magic_bonus' in updates) stats.ac_magic_bonus = updates.ac_magic_bonus ?? 0
+    return db.run('UPDATE characters SET stats=? WHERE id=?', [JSON.stringify(stats), charId])
+  })
+
   ipcMain.handle('db:characters:addKnownSpell', (_, charId, spell) => {
     const char  = db.get('SELECT spell_slots FROM characters WHERE id=?', [charId])
     const slots = JSON.parse(char.spell_slots ?? '{}')
@@ -400,6 +416,30 @@ function registerDbHandlers(db) {
     slots.known_spells = (slots.known_spells ?? []).filter(s => s.index !== spellIndex)
     return db.run('UPDATE characters SET spell_slots=? WHERE id=?', [JSON.stringify(slots), charId])
   })
+
+  // ── Subclasses ────────────────────────────────────────────────────────────
+
+  ipcMain.handle('db:subclasses:getByClass', (_, className) =>
+    db.all('SELECT * FROM subclasses WHERE class_name = ? ORDER BY name ASC', [className]))
+
+  ipcMain.handle('db:subclasses:getByName', (_, className, subclassName) =>
+    db.get('SELECT * FROM subclasses WHERE class_name = ? AND name = ?', [className, subclassName]))
+
+  ipcMain.handle('db:subclasses:getAll', () =>
+    db.all('SELECT * FROM subclasses ORDER BY class_name ASC, name ASC'))
+
+  ipcMain.handle('db:characters:setSubclass', (_, charId, subclassName) =>
+    db.run('UPDATE characters SET subclass_name=? WHERE id=?', [subclassName ?? null, charId]))
+
+  ipcMain.handle('db:subclasses:create', (_, data) =>
+    db.run(
+      `INSERT INTO subclasses (class_name, name, description, unlock_level, features, source)
+       VALUES (?, ?, ?, ?, ?, 'custom')`,
+      [data.class_name, data.name, data.description ?? '',
+       data.unlock_level ?? 3, JSON.stringify(data.features ?? [])]))
+
+  ipcMain.handle('db:subclasses:delete', (_, id) =>
+    db.run('DELETE FROM subclasses WHERE id=?', [id]))
 
   // ── Mind Map positions — Phase 6 ─────────────────────────────────────────
   ipcMain.handle('db:mindmap:getPositions', (_, campaignId) =>

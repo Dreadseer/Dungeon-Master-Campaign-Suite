@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import EntityModal from '../world/EntityModal'
+import { useState, useEffect } from 'react'
+import EntityModal  from '../world/EntityModal'
+import SubclassCard from './SubclassCard'
 import {
   abilityMod, modStr, profBonus, getCasterType,
   HIT_DICE, SPELL_SLOTS,
@@ -23,10 +24,40 @@ export default function LevelUpModal({ character, onClose, onApply }) {
   const [rollResult, setRollResult] = useState(null)
   const [applying, setApplying] = useState(false)
 
+  // Subclass state
+  const [subclassCandidates, setSubclassCandidates] = useState([])
+  const [selectedSubclass,   setSelectedSubclass]   = useState(null)
+
+  useEffect(() => {
+    if (!character.class) return
+    window.electronAPI.db.subclasses.getByClass(character.class)
+      .then(setSubclassCandidates)
+      .catch(() => setSubclassCandidates([]))
+  }, [character.class])
+
+  // Show subclass step when this level-up is the unlock level AND no subclass assigned yet
+  const triggerSubclass = subclassCandidates.length > 0
+    && !character.subclass_name
+    && subclassCandidates.some(s => s.unlock_level === newLevel)
+
   // ── Step helpers ────────────────────────────────────────────────────────────
+  // Step map: 1=Confirm  2=HP  3=Subclass(conditional)  4=SpellSlots(conditional)  5=Summary
   function nextStep() {
-    if (step === 2 && !casterType) setStep(4)
-    else setStep(s => s + 1)
+    if      (step === 2 && triggerSubclass) setStep(3)
+    else if (step === 2 && casterType)      setStep(4)
+    else if (step === 2)                    setStep(5)
+    else if (step === 3 && casterType)      setStep(4)
+    else if (step === 3)                    setStep(5)
+    else                                    setStep(s => s + 1)
+  }
+
+  function prevStep() {
+    if      (step === 5 && casterType)      setStep(4)
+    else if (step === 5 && triggerSubclass) setStep(3)
+    else if (step === 5)                    setStep(2)
+    else if (step === 4 && triggerSubclass) setStep(3)
+    else if (step === 4)                    setStep(2)
+    else                                    setStep(s => s - 1)
   }
 
   function roll() {
@@ -77,10 +108,23 @@ export default function LevelUpModal({ character, onClose, onApply }) {
 
   // ── Apply ────────────────────────────────────────────────────────────────────
   async function applyLevelUp() {
-    const gain    = hpGain ?? Math.max(1, conMod + 1)
+    const gain     = hpGain ?? Math.max(1, conMod + 1)
     const newSlots = buildNewSlots()
     const newHpMax = (character.hp_max ?? 0) + gain
     const newHpCur = Math.min((character.hp_current ?? 0) + gain, newHpMax)
+
+    // Build new stats — merge subclass features if a subclass was chosen this level-up
+    const newStats = { ...(character._stats ?? {}) }
+    if (selectedSubclass) {
+      const subFeatures = JSON.parse(selectedSubclass.features ?? '[]')
+      const existing    = newStats.features?.class_features ?? []
+      const merged      = [
+        ...existing,
+        ...subFeatures.filter(f => f.level_gained <= newLevel),
+      ].sort((a, b) => (a.level_gained ?? 0) - (b.level_gained ?? 0))
+      newStats.features = { ...(newStats.features ?? {}), class_features: merged }
+    }
+
     setApplying(true)
     try {
       await window.electronAPI.db.characters.update(character.id, {
@@ -89,13 +133,16 @@ export default function LevelUpModal({ character, onClose, onApply }) {
         class:          character.class,
         race:           character.race,
         level:          newLevel,
-        stats:          character._stats,
+        stats:          newStats,
         hp_current:     newHpCur,
         hp_max:         newHpMax,
         inventory:      character._inventory,
         spell_slots:    newSlots,
         notes:          character.notes ?? '',
       })
+      if (selectedSubclass) {
+        await window.electronAPI.db.characters.setSubclass(character.id, selectedSubclass.name)
+      }
       onApply()
     } catch { /* empty */ }
     setApplying(false)
@@ -105,8 +152,9 @@ export default function LevelUpModal({ character, onClose, onApply }) {
   const titles = {
     1: 'Level Up — Confirm',
     2: 'Level Up — Hit Points',
-    3: 'Level Up — Spell Slots',
-    4: 'Level Up — Summary',
+    3: 'Level Up — Choose Subclass',
+    4: 'Level Up — Spell Slots',
+    5: 'Level Up — Summary',
   }
 
   return (
@@ -198,14 +246,49 @@ export default function LevelUpModal({ character, onClose, onApply }) {
           <div style={w.btnRow}>
             <button style={w.cancelBtn} onClick={() => setStep(1)}>← Back</button>
             <button style={w.nextBtn} onClick={nextStep} disabled={hpGain === null}>
-              {casterType ? 'Next →' : 'Review →'}
+              {(triggerSubclass || casterType) ? 'Next →' : 'Review →'}
             </button>
           </div>
         </div>
       )}
 
-      {/* ── Step 3: Spell Slots (casters only) ── */}
-      {step === 3 && casterType && (
+      {/* ── Step 3: Choose Subclass (conditional) ── */}
+      {step === 3 && triggerSubclass && (
+        <div style={w.step}>
+          <p style={w.stepDesc}>
+            As a level <strong style={{ color: '#c9a84c' }}>{newLevel}</strong>{' '}
+            <strong style={{ color: '#c9a84c' }}>{cls}</strong>, you now choose your specialization.
+            This decision is permanent.
+          </p>
+
+          <div style={{ maxHeight: '340px', overflowY: 'auto', paddingRight: '4px' }}>
+            {subclassCandidates
+              .filter(s => s.unlock_level <= newLevel)
+              .map(sub => (
+                <SubclassCard
+                  key={sub.id}
+                  subclass={sub}
+                  selected={selectedSubclass?.id === sub.id}
+                  onSelect={() => setSelectedSubclass(sub)}
+                />
+              ))}
+          </div>
+
+          <div style={w.btnRow}>
+            <button style={w.cancelBtn} onClick={() => setStep(2)}>← Back</button>
+            <button
+              style={{ ...w.nextBtn, opacity: selectedSubclass ? 1 : 0.4 }}
+              onClick={nextStep}
+              disabled={!selectedSubclass}
+            >
+              {selectedSubclass ? `Choose ${selectedSubclass.name} →` : 'Select a subclass to continue'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Step 4: Spell Slots (casters only) ── */}
+      {step === 4 && casterType && (
         <div style={w.step}>
           <p style={w.stepDesc}>
             At level <strong style={{ color: '#c9a84c' }}>{newLevel}</strong>, your{' '}
@@ -236,14 +319,14 @@ export default function LevelUpModal({ character, onClose, onApply }) {
           </table>
 
           <div style={w.btnRow}>
-            <button style={w.cancelBtn} onClick={() => setStep(2)}>← Back</button>
+            <button style={w.cancelBtn} onClick={prevStep}>← Back</button>
             <button style={w.nextBtn} onClick={nextStep}>Review →</button>
           </div>
         </div>
       )}
 
-      {/* ── Step 4: Summary ── */}
-      {step === 4 && (
+      {/* ── Step 5: Summary ── */}
+      {step === 5 && (
         <div style={w.step}>
           <p style={w.summaryTitle}>Ready to level up to <strong style={{ color: '#c9a84c' }}>Level {newLevel}</strong></p>
 
@@ -252,6 +335,9 @@ export default function LevelUpModal({ character, onClose, onApply }) {
             <SummaryRow label="Proficiency"   value={`+${oldProf} → +${newProf}`} highlight={oldProf !== newProf} />
             <SummaryRow label="Max HP"        value={`${character.hp_max ?? 0} → ${(character.hp_max ?? 0) + (hpGain ?? 1)}`} highlight />
             <SummaryRow label="HP Gain"       value={`+${hpGain ?? 1}`} highlight />
+            {selectedSubclass && (
+              <SummaryRow label="Subclass" value={selectedSubclass.name} highlight />
+            )}
             {casterType && slotDiff().some(r => r.gained > 0) && (
               <SummaryRow label="New Slots"
                 value={slotDiff().filter(r => r.gained > 0).map(r => `${r.label} (+${r.gained})`).join(', ')}
@@ -260,7 +346,7 @@ export default function LevelUpModal({ character, onClose, onApply }) {
           </div>
 
           <div style={w.btnRow}>
-            <button style={w.cancelBtn} onClick={() => setStep(casterType ? 3 : 2)}>← Back</button>
+            <button style={w.cancelBtn} onClick={prevStep}>← Back</button>
             <button style={w.applyBtn} onClick={applyLevelUp} disabled={applying}>
               {applying ? 'Applying…' : `⬆ Apply Level Up`}
             </button>

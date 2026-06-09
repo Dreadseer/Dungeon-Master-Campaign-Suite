@@ -9,6 +9,113 @@ const CLASSES = [
   'Monk','Paladin','Ranger','Rogue','Sorcerer','Warlock','Wizard',
 ]
 
+// ── Pre-population tables ─────────────────────────────────────────────────────
+
+const RACIAL_TRAITS = {
+  Elf: [
+    { name: 'Darkvision',   description: 'You can see in dim light within 60 feet as if it were bright light, and in darkness as if it were dim light.' },
+    { name: 'Fey Ancestry', description: "You have advantage on saving throws against being charmed, and magic can't put you to sleep." },
+    { name: 'Trance',       description: "Elves don't need to sleep. Instead, they meditate deeply for 4 hours a day." },
+  ],
+  Dwarf: [
+    { name: 'Darkvision',         description: 'You can see in dim light within 60 feet as if it were bright light, and in darkness as if it were dim light.' },
+    { name: 'Dwarven Resilience', description: 'You have advantage on saving throws against poison, and resistance against poison damage.' },
+    { name: 'Stonecunning',       description: 'Whenever you make an Intelligence (History) check related to stonework, you are considered proficient in the History skill.' },
+  ],
+  Halfling: [
+    { name: 'Lucky',      description: 'When you roll a 1 on the d20 for an attack roll, ability check, or saving throw, you can reroll and must use the new roll.' },
+    { name: 'Brave',      description: 'You have advantage on saving throws against being frightened.' },
+    { name: 'Nimbleness', description: 'You can move through the space of any creature that is of a size larger than yours.' },
+  ],
+  Tiefling: [
+    { name: 'Darkvision',        description: 'You can see in dim light within 60 feet as if it were bright light, and in darkness as if it were dim light.' },
+    { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
+    { name: 'Infernal Legacy',   description: 'You know the Thaumaturgy cantrip. At 3rd level, you can cast Hellish Rebuke once per day.' },
+  ],
+  Human:      [{ name: 'Extra Language', description: 'You can speak, read, and write one extra language of your choice.' }],
+  Dragonborn: [
+    { name: 'Breath Weapon',     description: 'You can use your action to exhale destructive energy. Your draconic ancestry determines size, shape, and damage type.' },
+    { name: 'Damage Resistance', description: 'You have resistance to the damage type associated with your draconic ancestry.' },
+  ],
+  Gnome: [
+    { name: 'Darkvision',    description: 'Accustomed to life underground, you can see in dim light within 60 feet as if it were bright light.' },
+    { name: 'Gnome Cunning', description: 'You have advantage on all Intelligence, Wisdom, and Charisma saving throws against magic.' },
+  ],
+  'Half-Elf': [
+    { name: 'Darkvision',        description: 'You can see in dim light within 60 feet as if it were bright light, and in darkness as if it were dim light.' },
+    { name: 'Fey Ancestry',      description: "You have advantage on saving throws against being charmed, and magic can't put you to sleep." },
+    { name: 'Skill Versatility', description: 'You gain proficiency in two skills of your choice.' },
+  ],
+  'Half-Orc': [
+    { name: 'Darkvision',         description: 'You can see in dim light within 60 feet as if it were bright light, and in darkness as if it were dim light.' },
+    { name: 'Relentless Endurance', description: 'When you are reduced to 0 hit points but not killed outright, you can drop to 1 hit point instead. Once per long rest.' },
+    { name: 'Savage Attacks',     description: 'When you score a critical hit with a melee weapon attack, you can roll one of the weapon\'s damage dice one additional time.' },
+  ],
+}
+
+const CLASS_FEATURES_L1 = {
+  Fighter: [
+    { name: 'Fighting Style', level_gained: 1, description: 'You adopt a particular style of fighting as your specialty.' },
+    { name: 'Second Wind',    level_gained: 1, description: 'As a bonus action, regain 1d10 + fighter level HP. Once per short or long rest.' },
+  ],
+  Rogue: [
+    { name: 'Expertise',     level_gained: 1, description: 'Choose two skill proficiencies. Your proficiency bonus is doubled for those skills.' },
+    { name: 'Sneak Attack',  level_gained: 1, description: 'Once per turn, deal extra 1d6 damage when you have advantage on the attack roll.' },
+    { name: "Thieves' Cant", level_gained: 1, description: 'You know a secret mix of dialect and code used by thieves to hide messages in normal conversation.' },
+  ],
+  Wizard: [
+    { name: 'Arcane Recovery', level_gained: 1, description: 'Once per day on a short rest, recover expended spell slots up to half your wizard level (rounded up).' },
+    { name: 'Spellcasting',    level_gained: 1, description: 'As a student of arcane magic, you have a spellbook containing spells.' },
+  ],
+  Barbarian: [
+    { name: 'Rage',              level_gained: 1, description: 'As a bonus action, enter a rage: advantage on STR checks/saves, +2 damage, resistance to bludgeoning/piercing/slashing.' },
+    { name: 'Unarmored Defense', level_gained: 1, description: 'Without armor, AC = 10 + DEX modifier + CON modifier.' },
+  ],
+  Paladin: [
+    { name: 'Divine Sense', level_gained: 1, description: 'Detect celestials, fiends, and undead within 60 feet as an action.' },
+    { name: 'Lay on Hands', level_gained: 1, description: 'Pool of healing power equal to 5 × your paladin level, replenished on long rest.' },
+  ],
+  Ranger: [
+    { name: 'Favored Enemy',    level_gained: 1, description: 'You have significant experience tracking a certain type of enemy.' },
+    { name: 'Natural Explorer', level_gained: 1, description: 'You are adept at traveling and surviving in a particular natural environment.' },
+  ],
+  Cleric: [
+    { name: 'Divine Domain', level_gained: 1, description: 'Choose a domain related to your deity, granting domain spells and features.' },
+    { name: 'Spellcasting',  level_gained: 1, description: 'As a conduit for divine power, you can cast cleric spells.' },
+  ],
+  Druid: [
+    { name: 'Druidic',    level_gained: 1, description: 'You know Druidic, the secret language of druids.' },
+    { name: 'Spellcasting', level_gained: 1, description: 'Drawing on the divine essence of nature, you can cast spells.' },
+  ],
+  Bard: [
+    { name: 'Bardic Inspiration', level_gained: 1, description: 'Bonus action: give one creature within 60 ft a Bardic Inspiration die (d6) to add to one ability check, attack, or save.' },
+    { name: 'Spellcasting',       level_gained: 1, description: 'You have learned to reshape reality in harmony with your music.' },
+  ],
+  Monk: [
+    { name: 'Unarmored Defense', level_gained: 1, description: 'Without armor or shield, AC = 10 + DEX modifier + WIS modifier.' },
+    { name: 'Martial Arts',      level_gained: 1, description: 'You have mastery of combat styles using unarmed strikes and monk weapons.' },
+  ],
+  Sorcerer: [
+    { name: 'Spellcasting',     level_gained: 1, description: 'An event in your past infused you with arcane magic.' },
+    { name: 'Sorcerous Origin', level_gained: 1, description: 'Choose an origin describing the source of your innate magical power.' },
+  ],
+  Warlock: [
+    { name: 'Otherworldly Patron', level_gained: 1, description: 'You have struck a bargain with an otherworldly being of your choice.' },
+    { name: 'Pact Magic',          level_gained: 1, description: 'Your arcane research and patron have given you spells.' },
+  ],
+}
+
+function findRaceTraits(raceName) {
+  if (!raceName) return []
+  // Exact match first
+  if (RACIAL_TRAITS[raceName]) return RACIAL_TRAITS[raceName]
+  // Partial match (e.g. "High Elf" → "Elf", "Hill Dwarf" → "Dwarf")
+  const key = Object.keys(RACIAL_TRAITS).find(k =>
+    raceName.toLowerCase().includes(k.toLowerCase())
+  )
+  return key ? RACIAL_TRAITS[key] : []
+}
+
 const RACES = [
   'Human','Elf','High Elf','Wood Elf','Dwarf','Hill Dwarf','Mountain Dwarf',
   'Halfling','Lightfoot Halfling','Stout Halfling','Gnome','Rock Gnome',
@@ -47,9 +154,27 @@ export default function CharacterSheets() {
   const [fClass,       setFClass]       = useState('')
   const [fLevel,       setFLevel]       = useState(1)
   const [fHpMax,       setFHpMax]       = useState('')
+  const [fSpeed,       setFSpeed]       = useState(30)
   const [fStats,       setFStats]       = useState(defaultStats())
+  const [fSubclass,    setFSubclass]    = useState('')
   const [fSaving,      setFSaving]      = useState(false)
   const [fError,       setFError]       = useState('')
+
+  // ── Subclass picker (populated when class changes) ────────────────────────
+  const [availableSubclasses, setAvailableSubclasses] = useState([])
+
+  useEffect(() => {
+    if (!fClass) { setAvailableSubclasses([]); setFSubclass(''); return }
+    window.electronAPI.db.subclasses.getByClass(fClass)
+      .then(subs => { setAvailableSubclasses(subs); setFSubclass('') })
+      .catch(() => setAvailableSubclasses([]))
+  }, [fClass])
+
+  // Only show the subclass picker when the character level meets the unlock requirement
+  const subMinUnlock = availableSubclasses.length > 0
+    ? Math.min(...availableSubclasses.map(s => s.unlock_level))
+    : 99
+  const showSubclassPicker = availableSubclasses.length > 0 && parseInt(fLevel) >= subMinUnlock
 
   // ── Load characters ────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -77,7 +202,8 @@ export default function CharacterSheets() {
   // ── Helpers ────────────────────────────────────────────────────────────────
   function resetCreateForm() {
     setFName(''); setFPlayer(''); setFRace(''); setFClass('')
-    setFLevel(1); setFHpMax(''); setFStats(defaultStats()); setFError('')
+    setFLevel(1); setFHpMax(''); setFSpeed(30); setFStats(defaultStats())
+    setFSubclass(''); setAvailableSubclasses([]); setFError('')
   }
 
   function openCreate() { resetCreateForm(); setShowCreate(true) }
@@ -93,17 +219,52 @@ export default function CharacterSheets() {
     const maxHp = fHpMax !== '' ? Number(fHpMax) : 0
     setFSaving(true); setFError('')
     try {
-      await window.electronAPI.db.characters.create({
+      // Pre-populate features, extra_attacks, currency from known tables
+      const initStats = {
+        ...fStats,
+        save_proficiencies:  [],
+        skill_proficiencies: [],
+        extra_attacks:       [],
+        currency:            { pp: 0, gp: 0, ep: 0, sp: 0, cp: 0 },
+        speed:               Number(fSpeed) || 30,
+        features: {
+          racial_traits:  findRaceTraits(fRace.trim()).map(t => ({ ...t, id: crypto.randomUUID() })),
+          class_features: (CLASS_FEATURES_L1[fClass] ?? []).map(f => ({ ...f, id: crypto.randomUUID() })),
+          background:     { personality_traits: '', ideals: '', bonds: '', flaws: '' },
+          feats:          [],
+        },
+      }
+
+      // Merge subclass features into class_features before saving
+      if (fSubclass) {
+        const sub = availableSubclasses.find(s => s.name === fSubclass)
+        if (sub) {
+          const subFeatures = JSON.parse(sub.features ?? '[]')
+          const merged = [
+            ...initStats.features.class_features,
+            ...subFeatures.filter(f => f.level_gained <= Number(fLevel)),
+          ].sort((a, b) => (a.level_gained ?? 0) - (b.level_gained ?? 0))
+          initStats.features.class_features = merged
+        }
+      }
+
+      const result = await window.electronAPI.db.characters.create({
         campaign_id:    activeCampaign.id,
         player_name:    fPlayer.trim(),
         character_name: fName.trim(),
         class:          fClass,
         race:           fRace.trim(),
         level:          Number(fLevel),
-        stats:          { ...fStats, save_proficiencies: [], skill_proficiencies: [] },
+        stats:          initStats,
         hp_current:     maxHp,
         hp_max:         maxHp,
       })
+
+      // Persist selected subclass name
+      if (fSubclass && result?.lastInsertRowid) {
+        await window.electronAPI.db.characters.setSubclass(result.lastInsertRowid, fSubclass)
+      }
+
       closeCreate()
       await load()
     } catch (err) {
@@ -153,7 +314,7 @@ export default function CharacterSheets() {
                     <p style={s.charName}>{char.character_name}</p>
                     {char.player_name && <p style={s.playerName}>Player: {char.player_name}</p>}
                     <p style={s.classBio}>
-                      {[char.race, char.class].filter(Boolean).join(' · ') || '—'}
+                      {[char.race, char.class, char.subclass_name].filter(Boolean).join(' · ') || '—'}
                     </p>
                   </div>
                 </div>
@@ -233,10 +394,37 @@ export default function CharacterSheets() {
               </Field>
             </div>
 
-            <Field label="Maximum HP">
-              <input style={s.input} type="number" min="0" value={fHpMax}
-                onChange={e => setFHpMax(e.target.value)} placeholder="0" />
-            </Field>
+            {/* Subclass picker — only shown when class + level meet unlock requirement */}
+            {showSubclassPicker && (
+              <Field label={`Subclass (unlocks at Level ${subMinUnlock} for ${fClass})`}>
+                <select style={s.input} value={fSubclass}
+                  onChange={e => setFSubclass(e.target.value)}>
+                  <option value="">— Choose a subclass (optional) —</option>
+                  {availableSubclasses.map(sub => (
+                    <option key={sub.id} value={sub.name}>{sub.name}</option>
+                  ))}
+                </select>
+                <span style={{ color: '#6b5a3a', fontSize: '0.65rem', marginTop: 2 }}>
+                  You can also choose your subclass later from the Features tab.
+                </span>
+              </Field>
+            )}
+
+            <div style={s.formRow2}>
+              <Field label="Maximum HP">
+                <input style={s.input} type="number" min="0" value={fHpMax}
+                  onChange={e => setFHpMax(e.target.value)} placeholder="0" />
+              </Field>
+              <Field label="Movement Speed (ft)">
+                <>
+                  <input style={s.input} type="number" min="5" max="120" step="5" value={fSpeed}
+                    onChange={e => setFSpeed(e.target.value)} />
+                  <span style={{ color: '#6b5a3a', fontSize: '0.65rem', marginTop: 2 }}>
+                    Standard 30 ft — check your race.
+                  </span>
+                </>
+              </Field>
+            </div>
 
             {/* Ability scores */}
             <p style={s.sectionLabel}>Ability Scores</p>

@@ -4,6 +4,7 @@ import {
   passivePerception, SKILLS, getCasterType, spellcastingAbility,
   spellSaveDC, spellAttackBonus, SPELL_SLOTS,
 } from '../../utils/dnd5e'
+import { calculateAC } from '../../utils/acUtils'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -31,8 +32,6 @@ function hpColor(pct) {
   if (pct > 25) return '#B8750A'
   return '#8B0000'
 }
-
-function baseAC(dex) { return 10 + Math.floor(((dex ?? 10) - 10) / 2) }
 
 function fmtWeight(w) {
   const n = parseFloat(w)
@@ -114,7 +113,7 @@ export default function PlayerCharacterSheet({ characterId, broadcastMsg, onBack
   const isUnconscious = hpCurrent === 0
 
   const passPerc  = passivePerception(stats.wis ?? 10, level, skillProfs.includes('perception'))
-  const ac        = baseAC(stats.dex)
+  const acResult  = calculateAC(character)
 
   const deathSaves = stats.death_saves ?? { successes: 0, failures: 0 }
 
@@ -128,7 +127,7 @@ export default function PlayerCharacterSheet({ characterId, broadcastMsg, onBack
         <div style={s.headerCenter}>
           <h1 style={s.charName}>{character.character_name}</h1>
           <p style={s.charSub}>
-            {[character.race, character.class].filter(Boolean).join(' · ')}
+            {[character.race, character.class, character.subclass_name].filter(Boolean).join(' · ')}
             {' · '}
             <span style={{ color: '#c9a84c', fontWeight: 700 }}>Level {level}</span>
           </p>
@@ -138,9 +137,19 @@ export default function PlayerCharacterSheet({ characterId, broadcastMsg, onBack
         </div>
 
         <div style={s.headerRight}>
-          <div style={s.acBadge}>
-            <span style={s.acValue}>{ac}</span>
+          <div style={s.acBadge} title={acResult.breakdown}>
+            <span style={s.acValue}>
+              {acResult.ac}
+              {acResult.has_shield && <span style={{ fontSize: '0.7rem', marginLeft: '3px' }}>🛡</span>}
+            </span>
             <span style={s.acLabel}>AC</span>
+            {acResult.wearing !== 'Unarmored' && acResult.wearing !== 'Custom' && (
+              <span style={{ fontSize: '0.55rem', color: '#6b5a3a', display: 'block',
+                lineHeight: 1, marginTop: '1px', overflow: 'hidden',
+                textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '72px' }}>
+                {acResult.wearing}
+              </span>
+            )}
           </div>
           <div style={s.statChip}>
             <span style={s.chipLabel}>Prof</span>

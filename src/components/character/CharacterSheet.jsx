@@ -7,12 +7,16 @@ import InventoryPanel        from './InventoryPanel'
 import SpellSlotsPanel       from './SpellSlotsPanel'
 import LevelUpModal          from './LevelUpModal'
 import AICharacterAssistant  from './AICharacterAssistant'
+import AttacksTab            from './AttacksTab'
+import FeaturesTab           from './FeaturesTab'
+import ACBreakdownPanel      from './ACBreakdownPanel'
+import { calculateAC }       from '../../utils/acUtils'
 
 const ABILITY_KEYS   = ['str','dex','con','int','wis','cha']
 const ABILITY_LABELS = { str:'Strength', dex:'Dexterity', con:'Constitution', int:'Intelligence', wis:'Wisdom', cha:'Charisma' }
 const ABILITY_SHORT  = { str:'STR', dex:'DEX', con:'CON', int:'INT', wis:'WIS', cha:'CHA' }
 
-const TABS = ['Stats','Inventory','Spells','Notes']
+const TABS = ['Stats','Attacks','Inventory','Spells','Features','Notes']
 
 export default function CharacterSheet({ characterId, onBack }) {
   const [character, setCharacter] = useState(null)
@@ -199,7 +203,7 @@ export default function CharacterSheet({ characterId, onBack }) {
         <div style={s.headerInfo}>
           <h1 style={s.charName}>{character.character_name}</h1>
           <p style={s.charSub}>
-            {[character.race, character.class].filter(Boolean).join(' · ')}
+            {[character.race, character.class, character.subclass_name].filter(Boolean).join(' · ')}
             {' — Level '}<strong style={{ color: '#c9a84c' }}>{level}</strong>
           </p>
         </div>
@@ -274,9 +278,11 @@ export default function CharacterSheet({ characterId, onBack }) {
 
       {/* ── Tab content ── */}
       <div style={s.tabContent}>
-        {activeTab === 'Stats'     && <StatsTab     stats={stats} level={level} saves={saves} skills={skills} onToggleSave={toggleSaveProficiency} onToggleSkill={toggleSkillProficiency} editingAbility={editingAbility} editingValue={editingValue} onStartEdit={startEditAbility} onEditChange={setEditingValue} onCommitEdit={commitAbility} />}
+        {activeTab === 'Stats'     && <StatsTab     stats={stats} level={level} saves={saves} skills={skills} onToggleSave={toggleSaveProficiency} onToggleSkill={toggleSkillProficiency} editingAbility={editingAbility} editingValue={editingValue} onStartEdit={startEditAbility} onEditChange={setEditingValue} onCommitEdit={commitAbility} character={character} onRefresh={load} />}
+        {activeTab === 'Attacks'   && <AttacksTab   characterId={characterId} character={character} onRefresh={load} onGoToInventory={() => setActiveTab('Inventory')} />}
         {activeTab === 'Inventory' && <InventoryPanel  characterId={characterId} character={character} onRefresh={load} />}
         {activeTab === 'Spells'    && <SpellSlotsPanel characterId={characterId} character={character} onRefresh={load} />}
+        {activeTab === 'Features'  && <FeaturesTab  characterId={characterId} character={character} onRefresh={load} />}
         {activeTab === 'Notes' && (
           <NotesTab notes={character.notes ?? ''} onSave={saveNotes} />
         )}
@@ -303,8 +309,28 @@ export default function CharacterSheet({ characterId, onBack }) {
 
 // ── Stats Tab ─────────────────────────────────────────────────────────────────
 
-function StatsTab({ stats, level, saves, skills, onToggleSave, onToggleSkill, editingAbility, editingValue, onStartEdit, onEditChange, onCommitEdit }) {
-  const prof = profBonus(level)
+function StatChip({ label, value, color, tooltip, badge }) {
+  return (
+    <div title={tooltip} style={{
+      background: '#1a1208', border: `2px solid ${color}`,
+      borderRadius: '8px', padding: '10px 16px',
+      textAlign: 'center', minWidth: '120px',
+      cursor: tooltip ? 'help' : 'default',
+      flex: 1,
+    }}>
+      <div style={{ fontSize: '22px', fontWeight: 'bold', color, fontFamily: 'Georgia, serif', lineHeight: 1 }}>
+        {value}
+        {badge && <span style={{ fontSize: '14px', marginLeft: '4px' }}>{badge}</span>}
+      </div>
+      <div style={{ fontSize: '11px', color: '#6b6b6b', marginTop: '4px',
+        textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
+    </div>
+  )
+}
+
+function StatsTab({ stats, level, saves, skills, onToggleSave, onToggleSkill, editingAbility, editingValue, onStartEdit, onEditChange, onCommitEdit, character, onRefresh }) {
+  const prof     = profBonus(level)
+  const acResult = calculateAC(character)
 
   return (
     <div style={s.statsLayout}>
@@ -339,6 +365,41 @@ function StatsTab({ stats, level, saves, skills, onToggleSave, onToggleSkill, ed
             )
           })}
         </div>
+
+        {/* Stat chips — AC, Proficiency Bonus, Movement Speed, Passive Perception */}
+        <div style={{ display: 'flex', gap: '1rem', margin: '1rem 0', flexWrap: 'wrap' }}>
+          <StatChip
+            label="Armor Class"
+            value={acResult.ac}
+            color="#C0392B"
+            tooltip={acResult.breakdown}
+            badge={acResult.has_shield ? '🛡' : undefined}
+          />
+          <StatChip label="Proficiency Bonus"  value={`+${prof}`}                                                                        color="#C9A84C" />
+          <StatChip label="Movement Speed"     value={`${stats.speed ?? 30} ft`}                                                         color="#4A90D9" />
+          <StatChip label="Passive Perception" value={String(passivePerception(stats.wis ?? 10, level, skills.includes('perception')))}  color="#9B59B6" />
+        </div>
+
+        {/* STR / stealth warnings from AC engine */}
+        {acResult.warnings.length > 0 && (
+          <div style={{ marginTop: '8px' }}>
+            {acResult.warnings.map((w, i) => (
+              <div key={i} style={{
+                background: '#2a0a00', border: '1px solid #BA7517', borderRadius: '4px',
+                padding: '6px 12px', color: '#F5A623', fontSize: '13px', marginBottom: '4px',
+              }}>
+                ⚠ {w}
+              </div>
+            ))}
+          </div>
+        )}
+        {acResult.stealth_dis && (
+          <div style={{ fontSize: '12px', color: '#8a8a8a', marginTop: '4px' }}>
+            🔇 Stealth disadvantage from {acResult.wearing}
+          </div>
+        )}
+
+        <ACBreakdownPanel character={character} onRefresh={onRefresh} />
       </div>
 
       {/* Right column: saving throws + skills */}

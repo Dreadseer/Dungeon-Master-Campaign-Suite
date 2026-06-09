@@ -41,12 +41,19 @@ export default function SpellDetail({ index, onClose }) {
     if (!selCharId || !spell) return
     setAdding(true)
     try {
+      const _descText = spell.desc?.join(' ') ?? ''
+      const _dmgMatch = _descText.match(/(\d+d\d+(?:\s*\+\s*\d+)?)\s+(\w+)\s+damage/i)
       await window.electronAPI.db.characters.addKnownSpell(Number(selCharId), {
-        name:   spell.name,
-        index:  spell.index,
-        level:  spell.level,
-        school: spell.school?.name ?? spell.school ?? '',
-        source: 'srd',
+        name:              spell.name,
+        index:             spell.index,
+        level:             spell.level,
+        school:            spell.school?.name ?? spell.school ?? '',
+        source:            'srd',
+        range:             spell.range ?? '',
+        description_short: spell.desc?.[0]?.slice(0, 120) ?? '',
+        is_damage_spell:   /\d+d\d+/.test(_descText),
+        damage:            _dmgMatch ? `${_dmgMatch[1]} ${_dmgMatch[2]}` : '—',
+        attack_bonus:      spell.attack_type ? 'calculated' : '—',
       })
       const char = characters.find(c => c.id === Number(selCharId))
       showToast(`✓ ${spell.name} added to ${char?.character_name ?? 'character'}'s spellbook.`)

@@ -3,6 +3,7 @@ import {
   getCasterType, spellcastingAbility, spellSaveDC,
   spellAttackBonus, SPELL_SLOTS, modStr,
 } from '../../utils/dnd5e'
+import SpellDescriptionPopup from './SpellDescriptionPopup'
 
 const LEVEL_LABELS = ['Cantrip','1st','2nd','3rd','4th','5th','6th','7th','8th','9th']
 
@@ -24,9 +25,10 @@ export default function SpellSlotsPanel({ characterId, character, onRefresh }) {
   const castingScore = castingAbil ? (stats[castingAbil] ?? 10) : null
   const slotTable    = casterType ? (SPELL_SLOTS[casterType][level] ?? []) : []
 
-  const [initializing, setInitializing] = useState(false)
-  const [acting,       setActing]       = useState(null)   // slotLevel being used/restored
-  const [resting,      setResting]      = useState(false)
+  const [initializing,  setInitializing]  = useState(false)
+  const [acting,        setActing]        = useState(null)   // slotLevel being used/restored
+  const [resting,       setResting]       = useState(false)
+  const [selectedSpell, setSelectedSpell] = useState(null)   // spell open in SpellDescriptionPopup
 
   // Spell picker
   const [showPicker,   setShowPicker]   = useState(false)
@@ -98,6 +100,12 @@ export default function SpellSlotsPanel({ characterId, character, onRefresh }) {
     onRefresh()
   }
 
+  // Called by SpellDescriptionPopup after a spell is cast — closes popup and refreshes slots
+  function handleSlotUsed() {
+    setSelectedSpell(null)
+    onRefresh()
+  }
+
   // ── Spell picker ──────────────────────────────────────────────────────────
   async function openPicker() {
     setShowPicker(true)
@@ -129,7 +137,7 @@ export default function SpellSlotsPanel({ characterId, character, onRefresh }) {
   const knownSet = new Set(knownSpells.map(s => s.index))
   const filteredSpells = spellQuery.trim()
     ? allSpells.filter(s => s.name.toLowerCase().includes(spellQuery.toLowerCase()))
-    : allSpells.slice(0, 60)
+    : allSpells
 
   // ── Non-caster ────────────────────────────────────────────────────────────
   if (!casterType) {
@@ -223,7 +231,13 @@ export default function SpellSlotsPanel({ characterId, character, onRefresh }) {
                 <span style={{ ...s.levelDot, background: LEVEL_COLORS[spell.level ?? 0] }}>
                   {spell.level === 0 ? 'C' : spell.level}
                 </span>
-                <span style={s.spellName}>{spell.name}</span>
+                <span
+                  style={{ ...s.spellName, color: '#c9a84c', cursor: 'pointer' }}
+                  onClick={() => { setShowPicker(false); setSelectedSpell(spell) }}
+                  title="Click for details & cast"
+                >
+                  {spell.name}
+                </span>
                 {spell.school && <span style={s.spellSchool}>{spell.school}</span>}
                 <button style={s.removeSpellBtn} onClick={() => removeSpell(spell.index)} title="Remove">✕</button>
               </div>
@@ -268,6 +282,17 @@ export default function SpellSlotsPanel({ characterId, character, onRefresh }) {
           </div>
         )}
       </div>
+
+      {/* Spell detail popup — appears as a third column when a spell is selected */}
+      {selectedSpell && (
+        <SpellDescriptionPopup
+          spell={selectedSpell}
+          characterId={characterId}
+          spellSlots={slots}
+          onClose={() => setSelectedSpell(null)}
+          onSlotUsed={handleSlotUsed}
+        />
+      )}
     </div>
   )
 }

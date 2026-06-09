@@ -113,6 +113,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       longRest:         (charId)                  => ipcRenderer.invoke('db:characters:longRest',        charId),
       addKnownSpell:    (charId, spell)           => ipcRenderer.invoke('db:characters:addKnownSpell',   charId, spell),
       removeKnownSpell: (charId, spellIndex)      => ipcRenderer.invoke('db:characters:removeKnownSpell',charId, spellIndex),
+      updateCurrency:   (charId, currency)        => ipcRenderer.invoke('db:characters:updateCurrency',  charId, currency),
+      updateAC:         (charId, updates)         => ipcRenderer.invoke('db:characters:updateAC',         charId, updates),
+      setSubclass:      (charId, subclassName)    => ipcRenderer.invoke('db:characters:setSubclass',      charId, subclassName),
+    },
+    subclasses: {
+      getByClass: (className)                    => ipcRenderer.invoke('db:subclasses:getByClass', className),
+      getByName:  (className, subclassName)      => ipcRenderer.invoke('db:subclasses:getByName',  className, subclassName),
+      getAll:     ()                             => ipcRenderer.invoke('db:subclasses:getAll'),
+      create:     (data)                         => ipcRenderer.invoke('db:subclasses:create',     data),
+      delete:     (id)                           => ipcRenderer.invoke('db:subclasses:delete',     id),
     },
   },
 

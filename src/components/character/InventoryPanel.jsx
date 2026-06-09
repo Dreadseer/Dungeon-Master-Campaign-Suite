@@ -1,5 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
-import useCampaignStore from '../../stores/campaignStore'
+import { useState, useRef } from 'react'
+import useCampaignStore      from '../../stores/campaignStore'
+import CurrencyWallet        from './CurrencyWallet'
+import EquipmentSlots        from './EquipmentSlots'
+import ItemDescriptionPopup  from './ItemDescriptionPopup'
 
 // Carrying capacity: STR score × 15 lbs
 const carryCapacity = (strScore) => (strScore ?? 10) * 15
@@ -16,13 +19,16 @@ function fmtWeight(w) {
 export default function InventoryPanel({ characterId, character, onRefresh }) {
   const activeCampaign = useCampaignStore(st => st.activeCampaign)
 
-  const inventory = character._inventory ?? []
-  const strScore  = character._stats?.str ?? 10
-  const capacity  = carryCapacity(strScore)
-  const carried   = totalWeight(inventory)
-  const overWeight= carried > capacity
+  const inventory   = character._inventory ?? []
+  const stats       = character._stats     ?? {}
+  const strScore    = stats.str ?? 10
+  const capacity    = carryCapacity(strScore)
+  const carried     = totalWeight(inventory)
+  const overWeight  = carried > capacity
+  const currency    = stats.currency ?? { pp: 0, gp: 0, ep: 0, sp: 0, cp: 0 }
 
-  const [showPicker, setShowPicker] = useState(false)
+  const [showPicker,   setShowPicker]   = useState(false)
+  const [selectedItem, setSelectedItem] = useState(null)
 
   // ── Edit quantity inline ─────────────────────────────────────────────────
   const [editQty, setEditQty] = useState(null)   // itemId
@@ -44,100 +50,135 @@ export default function InventoryPanel({ characterId, character, onRefresh }) {
 
   async function removeItem(itemId) {
     await window.electronAPI.db.characters.removeItem(characterId, itemId)
+    // close popup if the removed item was open
+    if (selectedItem?.id === itemId) setSelectedItem(null)
     onRefresh()
+  }
+
+  function openItemDetail(item) {
+    setSelectedItem(item)
+    setShowPicker(false)
+  }
+
+  function openPicker() {
+    setShowPicker(true)
+    setSelectedItem(null)
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={s.root}>
-      {/* Left: inventory list */}
-      <div style={s.listCol}>
-        {/* Weight bar */}
-        <div style={s.weightBar}>
-          <span style={{ color: overWeight ? '#da7a7a' : '#a89060', fontSize: '0.78rem' }}>
-            ⚖ Carrying <strong>{fmtWeight(carried)}</strong> / {capacity} lbs
-          </span>
-          <div style={s.weightTrack}>
-            <div style={{
-              ...s.weightFill,
-              width: `${Math.min(100, (carried / capacity) * 100)}%`,
-              background: overWeight ? '#8B0000' : '#2D7A2D',
-            }} />
-          </div>
-        </div>
+      {/* ── Left pane: currency + equipment + inventory list ── */}
+      <div style={s.leftPane}>
+        {/* Currency wallet */}
+        <CurrencyWallet
+          currency={currency}
+          characterId={characterId}
+          onRefresh={onRefresh}
+        />
 
-        {/* Column headers */}
-        {inventory.length > 0 && (
-          <div style={s.colHeader}>
-            <span style={{ width: 22, flexShrink: 0 }} />
-            <span style={{ flex: 1 }}>Item</span>
-            <span style={s.colQty}>Qty</span>
-            <span style={s.colWt}>Wt (ea)</span>
-            <span style={s.colTotal}>Total</span>
-            <span style={{ width: 24, flexShrink: 0 }} />
-          </div>
-        )}
+        {/* Equipment slots */}
+        <EquipmentSlots
+          inventory={inventory}
+          characterId={characterId}
+          onRefresh={onRefresh}
+        />
 
-        {/* Rows */}
-        {inventory.length === 0 ? (
-          <p style={s.empty}>No items yet. Add from the Compendium or manually.</p>
-        ) : (
-          inventory.map(item => (
-            <div key={item.id} style={s.row}>
-              {/* Equipped toggle */}
-              <button
-                style={{ ...s.equipBtn, color: item.equipped ? '#c9a84c' : '#3a2a10' }}
-                title={item.equipped ? 'Unequip' : 'Equip'}
-                onClick={() => toggleEquipped(item)}
-              >🛡</button>
-
-              {/* Name + notes */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={s.itemName}>{item.name}</span>
-                {item.notes && <span style={s.itemNotes}> · {item.notes}</span>}
-              </div>
-
-              {/* Quantity */}
-              <div style={{ ...s.colQty, display: 'flex', alignItems: 'center', gap: 2 }}>
-                {editQty === item.id ? (
-                  <input
-                    style={s.qtyInput}
-                    type="number" min="1" value={editVal}
-                    onChange={e => setEditVal(e.target.value)}
-                    onBlur={() => commitQty(item.id)}
-                    onKeyDown={e => { if (e.key === 'Enter') commitQty(item.id) }}
-                    autoFocus
-                  />
-                ) : (
-                  <>
-                    <button style={s.qtyBtn}
-                      onClick={async () => { await window.electronAPI.db.characters.updateItem(characterId, item.id, { quantity: Math.max(1, (item.quantity ?? 1) - 1) }); onRefresh() }}>−</button>
-                    <span style={s.qtyVal}
-                      onClick={() => { setEditQty(item.id); setEditVal(String(item.quantity ?? 1)) }}>
-                      {item.quantity ?? 1}
-                    </span>
-                    <button style={s.qtyBtn}
-                      onClick={async () => { await window.electronAPI.db.characters.updateItem(characterId, item.id, { quantity: (item.quantity ?? 1) + 1 }); onRefresh() }}>＋</button>
-                  </>
-                )}
-              </div>
-
-              {/* Weight per unit */}
-              <span style={s.colWt}>{fmtWeight(item.weight ?? 0)} lb</span>
-
-              {/* Total weight */}
-              <span style={s.colTotal}>{fmtWeight((item.weight ?? 0) * (item.quantity ?? 1))} lb</span>
-
-              {/* Remove */}
-              <button style={s.removeBtn} onClick={() => removeItem(item.id)} title="Remove">🗑</button>
+        {/* Inventory list */}
+        <div style={s.listCol}>
+          {/* Weight bar */}
+          <div style={s.weightBar}>
+            <span style={{ color: overWeight ? '#da7a7a' : '#a89060', fontSize: '0.78rem' }}>
+              ⚖ Carrying <strong>{fmtWeight(carried)}</strong> / {capacity} lbs
+            </span>
+            <div style={s.weightTrack}>
+              <div style={{
+                ...s.weightFill,
+                width:      `${Math.min(100, (carried / capacity) * 100)}%`,
+                background: overWeight ? '#8B0000' : '#2D7A2D',
+              }} />
             </div>
-          ))
-        )}
+          </div>
 
-        <button style={s.addBtn} onClick={() => setShowPicker(true)}>＋ Add Item</button>
+          {/* Column headers */}
+          {inventory.length > 0 && (
+            <div style={s.colHeader}>
+              <span style={{ width: 22, flexShrink: 0 }} />
+              <span style={{ flex: 1 }}>Item</span>
+              <span style={s.colQty}>Qty</span>
+              <span style={s.colWt}>Wt (ea)</span>
+              <span style={s.colTotal}>Total</span>
+              <span style={{ width: 24, flexShrink: 0 }} />
+            </div>
+          )}
+
+          {/* Rows */}
+          {inventory.length === 0 ? (
+            <p style={s.empty}>No items yet. Add from the Compendium or manually.</p>
+          ) : (
+            inventory.map(item => (
+              <div key={item.id} style={s.row}>
+                {/* Equipped toggle */}
+                <button
+                  style={{ ...s.equipBtn, color: item.equipped ? '#c9a84c' : '#3a2a10' }}
+                  title={item.equipped ? 'Unequip' : 'Equip'}
+                  onClick={() => toggleEquipped(item)}
+                >🛡</button>
+
+                {/* Name (clickable to open popup) + notes */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span
+                    style={s.itemName}
+                    onClick={() => openItemDetail(item)}
+                    title="View details"
+                  >
+                    {item.name}
+                  </span>
+                  {item.notes && <span style={s.itemNotes}> · {item.notes}</span>}
+                </div>
+
+                {/* Quantity */}
+                <div style={{ ...s.colQty, display: 'flex', alignItems: 'center', gap: 2 }}>
+                  {editQty === item.id ? (
+                    <input
+                      style={s.qtyInput}
+                      type="number" min="1" value={editVal}
+                      onChange={e => setEditVal(e.target.value)}
+                      onBlur={() => commitQty(item.id)}
+                      onKeyDown={e => { if (e.key === 'Enter') commitQty(item.id) }}
+                      autoFocus
+                    />
+                  ) : (
+                    <>
+                      <button style={s.qtyBtn}
+                        onClick={async () => { await window.electronAPI.db.characters.updateItem(characterId, item.id, { quantity: Math.max(1, (item.quantity ?? 1) - 1) }); onRefresh() }}>−</button>
+                      <span style={s.qtyVal}
+                        onClick={() => { setEditQty(item.id); setEditVal(String(item.quantity ?? 1)) }}>
+                        {item.quantity ?? 1}
+                      </span>
+                      <button style={s.qtyBtn}
+                        onClick={async () => { await window.electronAPI.db.characters.updateItem(characterId, item.id, { quantity: (item.quantity ?? 1) + 1 }); onRefresh() }}>＋</button>
+                    </>
+                  )}
+                </div>
+
+                {/* Weight per unit */}
+                <span style={s.colWt}>{fmtWeight(item.weight ?? 0)} lb</span>
+
+                {/* Total weight */}
+                <span style={s.colTotal}>{fmtWeight((item.weight ?? 0) * (item.quantity ?? 1))} lb</span>
+
+                {/* Remove */}
+                <button style={s.removeBtn} onClick={() => removeItem(item.id)} title="Remove">🗑</button>
+              </div>
+            ))
+          )}
+
+          <button style={s.addBtn} onClick={openPicker}>＋ Add Item</button>
+        </div>
       </div>
 
-      {/* Right: item picker */}
+      {/* ── Right panel: item picker OR item description ── */}
       {showPicker && (
         <ItemPicker
           characterId={characterId}
@@ -146,11 +187,21 @@ export default function InventoryPanel({ characterId, character, onRefresh }) {
           onClose={() => setShowPicker(false)}
         />
       )}
+
+      {selectedItem && !showPicker && (
+        <ItemDescriptionPopup
+          item={selectedItem}
+          characterId={characterId}
+          onClose={() => setSelectedItem(null)}
+          onRefresh={onRefresh}
+        />
+      )}
     </div>
   )
 }
 
 // ── Item Picker ───────────────────────────────────────────────────────────────
+// (unchanged from original implementation)
 
 function ItemPicker({ characterId, campaignId, onAdd, onClose }) {
   const [query,      setQuery]      = useState('')
@@ -170,7 +221,7 @@ function ItemPicker({ characterId, campaignId, onAdd, onClose }) {
   const debounceRef = useRef(null)
 
   // Load SRD equipment + custom compendium on mount
-  useEffect(() => {
+  useState(() => {
     async function fetchAll() {
       setLoading(true)
       const [srd, custom] = await Promise.all([
@@ -198,11 +249,11 @@ function ItemPicker({ characterId, campaignId, onAdd, onClose }) {
       setLoading(false)
     }
     fetchAll()
-  }, [campaignId])
+  })
 
   const filtered = query.trim()
     ? allItems.filter(i => i.name.toLowerCase().includes(query.toLowerCase()))
-    : allItems.slice(0, 80)
+    : allItems
 
   async function addItem() {
     if (!selected) return
@@ -315,10 +366,11 @@ function ItemPicker({ characterId, campaignId, onAdd, onClose }) {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const s = {
-  root:      { display: 'flex', flex: 1, gap: '0.75rem', overflow: 'hidden', padding: '0.85rem 1.5rem' },
-  listCol:   { display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', gap: '0.3rem' },
+  root:     { display: 'flex', flex: 1, gap: '0.75rem', overflow: 'hidden', padding: '0.85rem 1.5rem' },
+  leftPane: { display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', gap: '0.4rem', minWidth: 0 },
+  listCol:  { display: 'flex', flexDirection: 'column', flex: 1, overflowY: 'auto', gap: '0.3rem', minHeight: 0 },
 
-  weightBar:   { display: 'flex', flexDirection: 'column', gap: '0.25rem', marginBottom: '0.25rem', flexShrink: 0 },
+  weightBar:   { display: 'flex', flexDirection: 'column', gap: '0.25rem', marginBottom: '0.15rem', flexShrink: 0 },
   weightTrack: { height: 6, background: '#1a1208', borderRadius: 3, overflow: 'hidden' },
   weightFill:  { height: '100%', borderRadius: 3, transition: 'width 0.3s ease' },
 
@@ -334,7 +386,14 @@ const s = {
 
   row:       { display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.35rem 0.5rem', borderBottom: '1px solid #1a1208', flexShrink: 0 },
   equipBtn:  { background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', padding: 0, lineHeight: 1, width: 22, flexShrink: 0 },
-  itemName:  { color: '#e8e0d0', fontSize: '0.85rem', fontWeight: 600 },
+  itemName: {
+    color:         '#c9a84c',
+    fontSize:      '0.85rem',
+    fontWeight:    600,
+    cursor:        'pointer',
+    textDecoration:'none',
+    transition:    'text-decoration 0.1s',
+  },
   itemNotes: { color: '#6b5a3a', fontSize: '0.75rem' },
 
   qtyBtn:    { background: '#1a1208', border: '1px solid #2a1c08', color: '#a89060', borderRadius: 2, width: 18, height: 18, cursor: 'pointer', fontSize: '0.75rem', padding: 0, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' },
