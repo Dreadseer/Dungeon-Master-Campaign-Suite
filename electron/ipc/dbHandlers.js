@@ -274,8 +274,8 @@ function registerDbHandlers(db) {
   ipcMain.handle('db:compendium:create', (_, data) =>
     db.run(`
       INSERT INTO compendium_custom (campaign_id, type, name, data, source, created_at)
-      VALUES (?, ?, ?, ?, 'custom', datetime('now'))`,
-      [data.campaign_id, data.type, data.name, JSON.stringify(data.data)]))
+      VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+      [data.campaign_id, data.type, data.name, JSON.stringify(data.data), data.source ?? 'custom']))
 
   ipcMain.handle('db:compendium:update', (_, id, data) =>
     db.run('UPDATE compendium_custom SET name=?, data=? WHERE id=?',
@@ -561,6 +561,38 @@ function registerDbHandlers(db) {
 
   ipcMain.handle('db:pdf:deleteChunks', (_, sourceId) =>
     db.run('DELETE FROM pdf_chunks WHERE source_id = ?', [sourceId]))
+
+  // ── PDF Chunk Search — Phase 7 (Compendium Import) ───────────────────────
+  ipcMain.handle('db:pdf:searchChunks', (_, campaignId, query, limit) => {
+    const q = `%${query}%`
+    return db.all(`
+      SELECT pc.id, pc.source_id, pc.chunk_index, pc.page_number,
+             pc.text, ps.filename
+      FROM pdf_chunks pc
+      JOIN pdf_sources ps ON pc.source_id = ps.id
+      WHERE ps.campaign_id = ?
+        AND ps.status IN ('indexed', 'embedded')
+        AND pc.text LIKE ?
+      ORDER BY pc.source_id ASC, pc.chunk_index ASC
+      LIMIT ?`,
+      [campaignId, q, limit ?? 30]
+    )
+  })
+
+  ipcMain.handle('db:pdf:getChunksBySource', (_, sourceId, offset, limit) =>
+    db.all(
+      'SELECT id, source_id, chunk_index, page_number, text FROM pdf_chunks WHERE source_id=? ORDER BY chunk_index ASC LIMIT ? OFFSET ?',
+      [sourceId, limit ?? 50, offset ?? 0]
+    )
+  )
+
+  ipcMain.handle('db:pdf:getChunkContext', (_, sourceId, chunkIndex, contextRadius) => {
+    const radius = contextRadius ?? 1
+    return db.all(
+      'SELECT id, chunk_index, page_number, text FROM pdf_chunks WHERE source_id=? AND chunk_index BETWEEN ? AND ? ORDER BY chunk_index ASC',
+      [sourceId, chunkIndex - radius, chunkIndex + radius]
+    )
+  })
 }
 
 module.exports = registerDbHandlers

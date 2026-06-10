@@ -97,7 +97,7 @@ export default function MonsterSearchPanel({ rosterMonsters, onAdd, recentlyUsed
         })
       }
 
-      setResults(combined.slice(0, 80))
+      setResults(combined)
     } catch (err) {
       console.error('MonsterSearchPanel search error:', err)
     } finally {
@@ -130,6 +130,9 @@ export default function MonsterSearchPanel({ rosterMonsters, onAdd, recentlyUsed
     }
     onAdd(entry)
   }
+
+  // Only show recently-used when no search/filter is active
+  const showRecent = !query.trim() && !crMin && !crMax && !typeFilter
 
   return (
     <div style={s.panel}>
@@ -170,8 +173,16 @@ export default function MonsterSearchPanel({ rosterMonsters, onAdd, recentlyUsed
         </div>
       </div>
 
-      {/* Recently used */}
-      {recentlyUsed.length > 0 && (
+      {/* Count indicator */}
+      {!loading && results.length > 0 && (
+        <div style={s.countBar}>
+          Showing {results.length} monster{results.length === 1 ? '' : 's'}
+          {(query || crMin || crMax || typeFilter) ? ' matching filters' : ''}
+        </div>
+      )}
+
+      {/* Recently used — only when no active search/filter */}
+      {showRecent && recentlyUsed.length > 0 && (
         <div style={s.recentSection}>
           <div style={s.sectionLabel}>Recently Used</div>
           {recentlyUsed.slice(0, 5).map((m, i) => (
@@ -251,6 +262,7 @@ const s = {
     borderRadius: 3, color: '#888', cursor: 'pointer', fontSize: 11,
   },
   srcBtnActive: { background: '#3a3020', border: '1px solid #c9a84c', color: '#c9a84c' },
+  countBar: { fontSize: 12, color: '#6b6b6b', padding: '4px 12px 6px', borderBottom: '1px solid #2d1f0a' },
   recentSection: { padding: '6px 12px 0' },
   sectionLabel:  { color: '#666', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
   recentRow: {

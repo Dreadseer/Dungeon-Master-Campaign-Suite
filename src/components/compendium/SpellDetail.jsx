@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import useCampaignStore from '../../stores/campaignStore'
+import PdfImportPanel   from './PdfImportPanel'
 
 const LEVEL_ORDINALS = ['Cantrip','1st','2nd','3rd','4th','5th','6th','7th','8th','9th']
 
@@ -8,7 +9,9 @@ export default function SpellDetail({ index, onClose }) {
 
   const [spell,      setSpell]      = useState(null)
   const [loading,    setLoading]    = useState(true)
-  const [toast,      setToast]      = useState('')
+  const [toast,          setToast]          = useState('')
+  const [showPdfImport,  setShowPdfImport]  = useState(false)
+  const [pdfImportQuery, setPdfImportQuery] = useState('')
 
   // Add-to-character flow
   const [addMode,    setAddMode]    = useState(false)
@@ -188,11 +191,28 @@ export default function SpellDetail({ index, onClose }) {
             </div>
           </div>
         ) : (
-          <button style={s.actionBtn} onClick={openAddMode}>
-            + Add to Character
-          </button>
+          <>
+            <button style={s.actionBtn} onClick={openAddMode}>
+              + Add to Character
+            </button>
+            <button style={s.findPdfBtn} onClick={() => {
+              setPdfImportQuery(spell.name)
+              setShowPdfImport(true)
+            }}>
+              🔍 Find in my PDFs
+            </button>
+          </>
         )}
       </div>
+
+      {showPdfImport && (
+        <PdfImportPanel
+          campaignId={activeCampaign?.id}
+          initialQuery={pdfImportQuery}
+          onImportComplete={() => setShowPdfImport(false)}
+          onClose={() => setShowPdfImport(false)}
+        />
+      )}
     </div>
   )
 }
@@ -250,7 +270,8 @@ const s = {
   classValue: { color: '#a89060' },
 
   footer:       { borderTop: '1px solid #2a1c08', padding: '0.45rem 0.85rem', flexShrink: 0 },
-  actionBtn:    { width: '100%', background: 'transparent', border: '1px solid #3a2a10', color: '#a89060', borderRadius: 3, padding: '0.3rem 0.4rem', cursor: 'pointer', fontSize: '0.75rem' },
+  actionBtn:    { width: '100%', background: 'transparent', border: '1px solid #3a2a10', color: '#a89060', borderRadius: 3, padding: '0.3rem 0.4rem', cursor: 'pointer', fontSize: '0.75rem', marginBottom: '0.3rem' },
+  findPdfBtn:   { width: '100%', background: 'transparent', border: '1px solid #1a3a6a', color: '#4A90D9', borderRadius: 3, padding: '0.28rem 0.4rem', cursor: 'pointer', fontSize: '0.72rem' },
   addFlow:      { display: 'flex', flexDirection: 'column', gap: '0.15rem' },
   addMsg:       { color: '#6b5a3a', fontSize: '0.75rem', fontStyle: 'italic', margin: 0 },
   charSelect:   { width: '100%', background: '#0d0a05', border: '1px solid #3a2a10', borderRadius: 3, color: '#e8e0d0', padding: '0.25rem 0.4rem', fontSize: '0.78rem', outline: 'none' },

@@ -6,6 +6,7 @@ import CustomItemForm      from './forms/CustomItemForm'
 import CustomSpellForm     from './forms/CustomSpellForm'
 import CustomEquipmentForm from './forms/CustomEquipmentForm'
 import CustomMonsterForm   from './forms/CustomMonsterForm'
+import PdfImportPanel      from './PdfImportPanel'
 
 const TYPE_TABS = [
   { key: 'all',       label: 'All'       },
@@ -43,6 +44,7 @@ export default function CustomBrowser() {
   const [editEntry,      setEditEntry]      = useState(null)   // entry being edited (null = create)
   const [pickerOpen,     setPickerOpen]     = useState(false)  // "New Entry ▾" dropdown
   const [confirmDelete,  setConfirmDelete]  = useState(null)   // entry pending delete confirmation
+  const [showPdfImport,  setShowPdfImport]  = useState(false)  // slide-in PDF import panel
 
   // ── Load entries ────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -141,7 +143,7 @@ export default function CustomBrowser() {
           ))}
         </div>
 
-        {/* Search + New */}
+        {/* Search + Import + New */}
         <div style={s.topRight}>
           <input
             style={s.search}
@@ -149,6 +151,10 @@ export default function CustomBrowser() {
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
+
+          <button style={s.pdfImportBtn} onClick={() => setShowPdfImport(true)}>
+            📄 Import from PDF
+          </button>
 
           {activeType ? (
             <button style={s.newBtn} onClick={() => openCreate(activeType)}>
@@ -187,8 +193,14 @@ export default function CustomBrowser() {
           ) : (
             <>
               {filtered.map(entry => {
-                const tc = TYPE_COLORS[entry.type] ?? TYPE_COLORS.item
+                const tc         = TYPE_COLORS[entry.type] ?? TYPE_COLORS.item
                 const isSelected = selected?.id === entry.id
+                const isPdf      = entry.source === 'pdf_upload'
+                let   pdfData    = {}
+                if (isPdf) { try { pdfData = JSON.parse(entry.data ?? '{}') } catch { /* empty */ } }
+                const pdfTooltip = isPdf
+                  ? `Imported from ${pdfData.source_book || 'PDF'}${pdfData.page ? ', p.' + pdfData.page : ''}`
+                  : ''
                 return (
                   <div
                     key={entry.id}
@@ -198,6 +210,14 @@ export default function CustomBrowser() {
                     <span style={{ ...s.typeBadge, background: tc.bg, border: `1px solid ${tc.border}`, color: tc.text }}>
                       {TYPE_LABELS[entry.type] ?? entry.type}
                     </span>
+                    {isPdf && (
+                      <span
+                        style={s.pdfBadge}
+                        title={pdfTooltip}
+                      >
+                        📄 PDF
+                      </span>
+                    )}
                     <span style={s.entryName}>{entry.name}</span>
                     <div style={s.rowActions} onClick={e => e.stopPropagation()}>
                       <button style={s.editBtn} title="Edit" onClick={() => openEdit(entry)}>✏</button>
@@ -255,6 +275,15 @@ export default function CustomBrowser() {
           </div>
         </EntityModal>
       )}
+
+      {/* ── PDF Import Panel ── */}
+      {showPdfImport && (
+        <PdfImportPanel
+          campaignId={activeCampaign?.id}
+          onImportComplete={() => { setShowPdfImport(false); load() }}
+          onClose={() => setShowPdfImport(false)}
+        />
+      )}
     </div>
   )
 }
@@ -269,6 +298,8 @@ const s = {
   topRight:     { display: 'flex', gap: '0.5rem', alignItems: 'center', marginLeft: 'auto' },
   search:       { background: '#0d0a05', border: '1px solid #3a2a10', borderRadius: 4, color: '#e8e0d0', padding: '0.32rem 0.6rem', fontSize: '0.83rem', outline: 'none', width: 170 },
   newBtn:       { background: '#1a2a10', border: '1px solid #3a5a1a', color: '#8aba6a', borderRadius: 3, padding: '0.32rem 0.7rem', cursor: 'pointer', fontSize: '0.82rem', whiteSpace: 'nowrap' },
+  pdfImportBtn: { background: '#0d1a2a', border: '1px solid #1a4a8a', color: '#4A90D9', borderRadius: 4, padding: '0.32rem 0.75rem', cursor: 'pointer', fontSize: '0.82rem', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '0.3rem' },
+  pdfBadge:     { background: '#0d1a2a', border: '1px solid #1a3a6a', color: '#4A90D9', fontSize: '0.62rem', padding: '0.05rem 0.32rem', borderRadius: 10, fontWeight: 600, flexShrink: 0, cursor: 'help' },
   picker:       { position: 'absolute', top: '100%', right: 0, marginTop: 2, background: '#1a1208', border: '1px solid #3a2a10', borderRadius: 4, zIndex: 100, display: 'flex', flexDirection: 'column', minWidth: 130, boxShadow: '0 4px 12px rgba(0,0,0,0.5)' },
   pickerBtn:    { background: 'transparent', border: 'none', borderBottom: '1px solid #2a1c08', color: '#e8e0d0', padding: '0.4rem 0.85rem', cursor: 'pointer', fontSize: '0.83rem', textAlign: 'left' },
 
