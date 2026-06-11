@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import useCampaignStore from '../stores/campaignStore'
 import usePlayerStore   from '../stores/playerStore'
 import EntityModal from '../components/world/EntityModal'
@@ -12,6 +13,8 @@ const MAPTOOLBAR_H = 46
 
 export default function MapEngine() {
   const activeCampaign = useCampaignStore(s => s.activeCampaign)
+  const [searchParams] = useSearchParams()
+  const autoMapId = Number(searchParams.get('autoMap')) || null
 
   // ── View A state ───────────────────────────────────────────────────
   const [maps, setMaps]           = useState([])
@@ -135,6 +138,13 @@ export default function MapEngine() {
   }, [activeCampaign?.id])
 
   useEffect(() => { load() }, [load])
+
+  // ── Auto-select map from query param (combat map window) ─────────────
+  useEffect(() => {
+    if (!autoMapId || maps.length === 0 || activeMap) return
+    const target = maps.find(m => m.id === autoMapId)
+    if (target) openMap(target)
+  }, [autoMapId, maps]) // eslint-disable-line
 
   // ── Modal helpers ──────────────────────────────────────────────────
   function openCreate() {

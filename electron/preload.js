@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       create:         (data)                  => ipcRenderer.invoke('db:encounters:create',         data),
       update:         (id, data)              => ipcRenderer.invoke('db:encounters:update',         id, data),
       updateStatus:   (id, status)            => ipcRenderer.invoke('db:encounters:updateStatus',   id, status),
+      setMapId:       (id, mapId)             => ipcRenderer.invoke('db:encounters:setMapId',       id, mapId),
       updateMonsters: (id, monsters, xpTotal) => ipcRenderer.invoke('db:encounters:updateMonsters', id, monsters, xpTotal),
       delete:         (id)                    => ipcRenderer.invoke('db:encounters:delete',         id),
     },
@@ -205,6 +206,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getStatus:    ()                    => ipcRenderer.invoke('embed:getStatus'),
     onProgress:   (callback)            => ipcRenderer.on('embed:progress',   (_event, data) => callback(data)),
     offProgress:  (callback)            => ipcRenderer.removeListener('embed:progress', callback),
+  },
+
+  // ── Encounter map window ──────────────────────────────────────────────────
+  encounter: {
+    openMapWindow: (campaignId, mapId) => ipcRenderer.invoke('encounter:openMapWindow', campaignId, mapId),
   },
 
   // ── Player window ──────────────────────────────────────────────────────────

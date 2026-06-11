@@ -7,7 +7,7 @@ import Skeleton from '../../components/ui/Skeleton'
 
 const TYPES = ['town', 'dungeon', 'shop', 'region', 'landmark']
 const TABS  = ['All', ...TYPES]
-const EMPTY_FORM = { name: '', type: 'town', description: '', lore: '', parent_location_id: null }
+const EMPTY_FORM = { name: '', type: 'town', description: '', lore: '', parent_location_id: null, has_own_map: false, floor_number: '' }
 
 export default function Locations() {
   const activeCampaign = useCampaignStore(s => s.activeCampaign)
@@ -70,6 +70,8 @@ export default function Locations() {
       name: loc.name, type: loc.type || 'town',
       description: loc.description || '', lore: loc.lore || '',
       parent_location_id: loc.parent_location_id ?? null,
+      has_own_map: !!loc.has_own_map,
+      floor_number: loc.floor_number != null ? String(loc.floor_number) : '',
     })
     setError('')
     setModalOpen(true)
@@ -103,7 +105,13 @@ export default function Locations() {
       setError('A location cannot be its own parent.'); return
     }
     setSaving(true)
-    const payload = { ...form, campaign_id: activeCampaign.id, parent_location_id: form.parent_location_id || null }
+    const payload = {
+      ...form,
+      campaign_id: activeCampaign.id,
+      parent_location_id: form.parent_location_id || null,
+      has_own_map: !!form.has_own_map,
+      floor_number: form.floor_number !== '' ? parseInt(form.floor_number, 10) : null,
+    }
     if (editing) {
       await window.electronAPI.db.locations.update(editing.id, payload)
     } else {
@@ -176,6 +184,8 @@ export default function Locations() {
             const tags = []
             if (loc.lore) tags.push({ label: 'Has Lore', color: '#1a2a1a', text: '#6abf6a' })
             if (loc.parent_location_id) tags.push({ label: 'Sub-location', color: '#1a1a2a', text: '#6a8abf' })
+            if (loc.has_own_map) tags.push({ label: '🗺 Has Map', color: '#1a2a2a', text: '#5abfbf' })
+            if (loc.floor_number != null) tags.push({ label: `Floor ${loc.floor_number}`, color: '#2a1a2a', text: '#9a6abf' })
 
             const subtitle = loc.parent_name
               ? `${loc.type} in ${loc.parent_name}`
@@ -245,6 +255,32 @@ export default function Locations() {
             value={form.lore} onChange={e => setField('lore', e.target.value)}
             placeholder="History, secrets, hidden details..." />
 
+          {/* Map & floor flags */}
+          <div style={s.flagRow}>
+            <label style={s.flagLabel}>
+              <input
+                type="checkbox"
+                checked={!!form.has_own_map}
+                onChange={e => setField('has_own_map', e.target.checked)}
+                style={{ accentColor: '#c9a84c', marginRight: 6 }}
+              />
+              Large enough for its own map
+            </label>
+          </div>
+
+          <div style={s.floorRow}>
+            <label style={{ ...s.label, marginBottom: 0, flexShrink: 0 }}>Floor / Level #</label>
+            <input
+              style={{ ...s.input, marginBottom: 0, width: 80, textAlign: 'center' }}
+              type="number"
+              min="0"
+              placeholder="—"
+              value={form.floor_number}
+              onChange={e => setField('floor_number', e.target.value)}
+            />
+            <span style={s.floorHint}>Leave blank if not a numbered floor/level</span>
+          </div>
+
           <div style={s.row}>
             <button style={s.btnPrimary} type="submit" disabled={saving}>
               {saving ? 'Saving…' : editing ? 'Save Changes' : 'Create Location'}
@@ -312,6 +348,10 @@ const s = {
   filterSelect:   { background: '#0d0a05', border: '1px solid #3a2a10', borderRadius: 4, color: '#a89060', padding: '0.4rem 0.5rem', fontSize: '0.82rem', outline: 'none' },
   btnPrimary:     { background: '#c9a84c', color: '#0d0a05', border: 'none', padding: '0.5rem 1.2rem', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: '0.88rem' },
   btnSecondary:   { background: 'transparent', color: '#a89060', border: '1px solid #a89060', padding: '0.5rem 1.2rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.88rem' },
+  flagRow:        { display: 'flex', alignItems: 'center', marginBottom: '0.7rem' },
+  flagLabel:      { display: 'flex', alignItems: 'center', color: '#a89060', fontSize: '0.85rem', cursor: 'pointer' },
+  floorRow:       { display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.9rem', flexWrap: 'wrap' },
+  floorHint:      { color: '#6b5a3a', fontSize: '0.75rem', fontStyle: 'italic' },
   connSection:    { borderTop: '1px solid #2a1c08', marginTop: '0.75rem', paddingTop: '0.75rem' },
   connToggle:     { background: 'none', border: 'none', color: '#a89060', fontSize: '0.85rem', cursor: 'pointer', padding: 0 },
   connBody:       { marginTop: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' },

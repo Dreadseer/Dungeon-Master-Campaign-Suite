@@ -28,6 +28,7 @@ class DatabaseService {
       { id: 4, name: 'embedding_columns', sql: MIGRATION_004 },
       { id: 5, name: 'ai_usage_log',      sql: MIGRATION_005 },
       { id: 6, name: 'subclasses',        sql: MIGRATION_006 },
+      { id: 7, name: 'encounter_map_loc_fields', sql: MIGRATION_007 },
     ]
 
     for (const m of migrations) {
@@ -263,6 +264,13 @@ const MIGRATION_005 = `
     duration_ms  INTEGER,
     created_at   DATETIME DEFAULT (datetime('now'))
   )
+`
+
+// Migration 007 — Add map_id to encounters; add has_own_map + floor_number to locations
+const MIGRATION_007 = `
+  ALTER TABLE encounters  ADD COLUMN map_id      INTEGER REFERENCES maps(id);
+  ALTER TABLE locations   ADD COLUMN has_own_map INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE locations   ADD COLUMN floor_number INTEGER;
 `
 
 // Migration 006 — Subclasses catalog table; subclass_name column on characters

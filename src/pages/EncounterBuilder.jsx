@@ -40,6 +40,7 @@ export default function EncounterBuilder() {
   const [recentlyUsed, setRecentlyUsed]       = useState([])
   const [currentDifficulty, setCurrentDifficulty] = useState('')
   const [campaignChars, setCampaignChars]     = useState([])
+  const [campaignMaps, setCampaignMaps]       = useState([])
 
   // ── Load encounters list ──────────────────────────────────────────────────
   const loadEncounters = useCallback(async () => {
@@ -67,6 +68,13 @@ export default function EncounterBuilder() {
     window.electronAPI.db.locations.getAll(activeCampaign.id)
       .then(setLocations).catch(() => {})
   }, [activeCampaign, showCreate])
+
+  // Load maps for the encounter editor (map picker)
+  useEffect(() => {
+    if (!activeCampaign || !activeEncounter) return
+    window.electronAPI.db.maps.getAll(activeCampaign.id)
+      .then(setCampaignMaps).catch(() => {})
+  }, [activeCampaign, activeEncounter?.id])
 
   // Load recently used monsters across encounters in this campaign
   const loadRecentlyUsed = useCallback(async () => {
@@ -177,9 +185,21 @@ export default function EncounterBuilder() {
     try {
       await window.electronAPI.db.encounters.updateStatus(activeEncounter.id, 'active')
       setActiveEncounter(prev => ({ ...prev, status: 'active' }))
+      // Open the linked map in a secondary window if one is set
+      if (activeEncounter.map_id) {
+        window.electronAPI.encounter.openMapWindow(activeCampaign.id, activeEncounter.map_id)
+          .catch(err => console.error('Map window failed:', err))
+      }
     } catch (err) {
       console.error('Failed to start combat:', err)
     }
+  }
+
+  // ── Encounter map picker ──────────────────────────────────────────────────
+  const handleMapChange = async (mapId) => {
+    const id = mapId ? parseInt(mapId, 10) : null
+    await window.electronAPI.db.encounters.setMapId(activeEncounter.id, id).catch(() => {})
+    setActiveEncounter(prev => ({ ...prev, map_id: id }))
   }
 
   const handleEndCombat = async () => {
@@ -274,6 +294,26 @@ export default function EncounterBuilder() {
                 monsters={monsters}
                 onDifficultyChange={setCurrentDifficulty}
               />
+              {/* Map picker — optional linked map opened when combat starts */}
+              {campaignMaps.length > 0 && (
+                <div style={s.mapPickerRow}>
+                  <span style={s.mapPickerLabel}>🗺 Combat Map</span>
+                  <select
+                    style={s.mapPickerSelect}
+                    value={activeEncounter.map_id ?? ''}
+                    onChange={e => handleMapChange(e.target.value || null)}
+                  >
+                    <option value="">None — don't open map</option>
+                    {campaignMaps.map(m => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                  </select>
+                  {activeEncounter.map_id && (
+                    <span style={s.mapPickerHint}>Opens in new window on combat start</span>
+                  )}
+                </div>
+              )}
+
               <div style={s.startCombatRow}>
                 <button style={s.startCombatBtn} onClick={handleStartCombat} disabled={monsters.length === 0}>
                   ⚔ Start Combat
@@ -677,6 +717,10 @@ const s = {
   rosterCol: { flex: 60, minWidth: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto' },
   deadlyBorder: { borderRadius: 8, outline: '2px solid rgba(139,0,0,0.6)', outlineOffset: 2 },
   searchCol: { flex: 40, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 },
+  mapPickerRow:    { display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, padding: '6px 8px', background: '#141008', border: '1px solid #2a1c08', borderRadius: 6 },
+  mapPickerLabel:  { color: '#a89060', fontSize: 12, flexShrink: 0 },
+  mapPickerSelect: { flex: 1, background: '#0d0a05', border: '1px solid #3a2a10', borderRadius: 4, color: '#e8e0d0', padding: '4px 6px', fontSize: 12, outline: 'none' },
+  mapPickerHint:   { color: '#4a8a4a', fontSize: 11, flexShrink: 0 },
   startCombatRow: { display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, padding: '0 2px' },
   startCombatBtn: {
     padding: '9px 22px', background: '#3a1a1a', color: '#e05050',

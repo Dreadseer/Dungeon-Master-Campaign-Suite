@@ -31,6 +31,42 @@ function createPlayerWindow(campaignId) {
   playerWindow.on('closed', () => { playerWindow = null })
 }
 
+// ── Encounter map window ───────────────────────────────────────────────────────
+let mapWindows = {}
+
+function createEncounterMapWindow(campaignId, mapId) {
+  const key = `map-${mapId}`
+  if (mapWindows[key] && !mapWindows[key].isDestroyed()) {
+    mapWindows[key].focus()
+    return
+  }
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 900,
+    title: 'DMCS — Combat Map',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  })
+  if (process.env.NODE_ENV === 'development') {
+    win.loadURL(`http://localhost:5173/maps?autoMap=${mapId}`)
+  } else {
+    win.loadFile(
+      path.join(__dirname, '../dist/renderer/index.html'),
+      { hash: `/maps?autoMap=${mapId}` }
+    )
+  }
+  mapWindows[key] = win
+  win.on('closed', () => { delete mapWindows[key] })
+}
+
+ipcMain.handle('encounter:openMapWindow', (_, campaignId, mapId) => {
+  createEncounterMapWindow(campaignId, mapId)
+  return { success: true }
+})
+
 ipcMain.handle('player:openWindow',  (_, campaignId) => { createPlayerWindow(campaignId); return { success: true } })
 ipcMain.handle('player:closeWindow', ()              => { if (playerWindow && !playerWindow.isDestroyed()) playerWindow.close(); return { success: true } })
 ipcMain.handle('player:isOpen',      ()              => ({ isOpen: !!playerWindow && !playerWindow.isDestroyed() }))

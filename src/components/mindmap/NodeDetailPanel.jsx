@@ -1,8 +1,24 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { NODE_CONFIG } from '../../utils/mindMapUtils'
+import useCampaignStore from '../../stores/campaignStore'
 
 export default function NodeDetailPanel({ node, allNodes, onClose, onHighlight }) {
-  const navigate = useNavigate()
+  const navigate       = useNavigate()
+  const activeCampaign = useCampaignStore(st => st.activeCampaign)
+  const [locationEncounters, setLocationEncounters] = useState([])
+
+  // Load encounters linked to this location when it's a location node
+  useEffect(() => {
+    if (node?.type !== 'location' || !activeCampaign?.id) return
+    setLocationEncounters([])
+    window.electronAPI.db.encounters.getAll(activeCampaign.id)
+      .then(all => {
+        const linked = all.filter(e => e.location_id === node.data.entityId && e.status !== 'completed')
+        setLocationEncounters(linked)
+      })
+      .catch(() => {})
+  }, [node?.data?.entityId, node?.type, activeCampaign?.id])
 
   if (!node) return null
 
@@ -53,6 +69,28 @@ export default function NodeDetailPanel({ node, allNodes, onClose, onHighlight }
               <div style={s.textBlock}>
                 <div style={s.textLabel}>Description</div>
                 <div style={s.textVal}>{truncate(raw.description)}</div>
+              </div>
+            )}
+            {locationEncounters.length > 0 && (
+              <div style={s.encountersBlock}>
+                <div style={s.textLabel}>Encounters Here</div>
+                {locationEncounters.map(enc => (
+                  <div key={enc.id} style={s.encounterRow}>
+                    <span style={{
+                      ...s.encounterStatus,
+                      background: enc.status === 'active' ? '#1a3a1a' : '#1a1a2a',
+                      color:      enc.status === 'active' ? '#5dc45d' : '#888',
+                      border:     `1px solid ${enc.status === 'active' ? '#3a6a3a' : '#333'}`,
+                    }}>
+                      {enc.status === 'active' ? '⚔ Active' : '📋 Planned'}
+                    </span>
+                    <span style={s.encounterName}>{enc.name}</span>
+                  </div>
+                ))}
+                <button style={{ ...s.navBtn, marginTop: 4 }}
+                  onClick={() => { onClose(); navigate('/encounters') }}>
+                  Go to Encounters →
+                </button>
               </div>
             )}
             <div style={s.btnRow}>
@@ -179,6 +217,10 @@ const s = {
   textLabel: { color: '#666', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
   textVal:   { color: '#888', fontSize: 12, lineHeight: 1.5 },
   btnRow:    { marginTop: 4 },
+  encountersBlock: { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 },
+  encounterRow:    { display: 'flex', alignItems: 'center', gap: 6 },
+  encounterStatus: { fontSize: 10, padding: '1px 5px', borderRadius: 3, flexShrink: 0, fontWeight: 600 },
+  encounterName:   { color: '#c9c0a8', fontSize: 12, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   navBtn: {
     padding: '6px 14px', background: '#1a2a1a', color: '#7fc272',
     border: '1px solid #2d5a27', borderRadius: 4, cursor: 'pointer', fontSize: 12,

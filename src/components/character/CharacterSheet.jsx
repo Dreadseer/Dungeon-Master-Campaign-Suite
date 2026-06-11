@@ -80,10 +80,9 @@ export default function CharacterSheet({ characterId, onBack }) {
   }
 
   async function fullRest() {
-    const max = character.hp_max ?? 0
-    await window.electronAPI.db.characters.updateHP(characterId, max)
-    setCharacter(prev => ({ ...prev, hp_current: max }))
-    showToast('Full rest taken — HP restored.')
+    await window.electronAPI.db.characters.longRest(characterId)
+    await load()
+    showToast('Long rest — HP and all spell slots restored.')
   }
 
   // ── Ability score editing ───────────────────────────────────────────────────
@@ -331,6 +330,10 @@ function StatChip({ label, value, color, tooltip, badge }) {
 function StatsTab({ stats, level, saves, skills, onToggleSave, onToggleSkill, editingAbility, editingValue, onStartEdit, onEditChange, onCommitEdit, character, onRefresh }) {
   const prof     = profBonus(level)
   const acResult = calculateAC(character)
+  const [profLocked, setProfLocked] = useState(false)
+
+  const guardedToggleSave  = (key) => { if (!profLocked) onToggleSave(key) }
+  const guardedToggleSkill = (key) => { if (!profLocked) onToggleSkill(key) }
 
   return (
     <div style={s.statsLayout}>
@@ -406,15 +409,24 @@ function StatsTab({ stats, level, saves, skills, onToggleSave, onToggleSkill, ed
       <div style={s.statsRight}>
         {/* Saving Throws */}
         <div style={s.panel}>
-          <p style={s.panelTitle}>Saving Throws</p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <p style={{ ...s.panelTitle, margin: 0 }}>Saving Throws</p>
+            <button
+              title={profLocked ? 'Proficiencies locked — click to unlock' : 'Lock proficiencies to prevent accidental changes'}
+              style={{ ...s.lockBtn, color: profLocked ? '#c9a84c' : '#4a3a1a', border: `1px solid ${profLocked ? '#c9a84c' : '#3a2a10'}` }}
+              onClick={() => setProfLocked(l => !l)}
+            >
+              {profLocked ? '🔒' : '🔓'}
+            </button>
+          </div>
           {ABILITY_KEYS.map(key => {
             const isProficient = saves.includes(key)
             const bonus = savingThrow(stats[key] ?? 10, level, isProficient)
             const bonusStr = bonus >= 0 ? `+${bonus}` : `${bonus}`
             return (
-              <label key={key} style={s.checkRow}>
+              <label key={key} style={{ ...s.checkRow, cursor: profLocked ? 'not-allowed' : 'pointer', opacity: profLocked ? 0.8 : 1 }}>
                 <input type="checkbox" checked={isProficient}
-                  onChange={() => onToggleSave(key)} style={s.checkbox} />
+                  onChange={() => guardedToggleSave(key)} style={s.checkbox} disabled={profLocked} />
                 <span style={{ ...s.checkBonus, color: isProficient ? '#c9a84c' : '#a89060' }}>
                   {bonusStr}
                 </span>
@@ -426,7 +438,7 @@ function StatsTab({ stats, level, saves, skills, onToggleSave, onToggleSkill, ed
 
         {/* Skills */}
         <div style={s.panel}>
-          <p style={s.panelTitle}>Skills</p>
+          <p style={s.panelTitle}>Skills {profLocked && <span style={{ fontSize: '0.7rem', color: '#c9a84c', marginLeft: 4 }}>🔒 Locked</span>}</p>
           <div style={s.skillsGrid}>
             {SKILLS.map(skill => {
               const isProficient = skills.includes(skill.key)
@@ -434,9 +446,9 @@ function StatsTab({ stats, level, saves, skills, onToggleSave, onToggleSkill, ed
               const bonus = savingThrow(score, level, isProficient)
               const bonusStr = bonus >= 0 ? `+${bonus}` : `${bonus}`
               return (
-                <label key={skill.key} style={s.checkRow}>
+                <label key={skill.key} style={{ ...s.checkRow, cursor: profLocked ? 'not-allowed' : 'pointer', opacity: profLocked ? 0.8 : 1 }}>
                   <input type="checkbox" checked={isProficient}
-                    onChange={() => onToggleSkill(skill.key)} style={s.checkbox} />
+                    onChange={() => guardedToggleSkill(skill.key)} style={s.checkbox} disabled={profLocked} />
                   <span style={{ ...s.checkBonus, color: isProficient ? '#c9a84c' : '#a89060' }}>
                     {bonusStr}
                   </span>
@@ -618,6 +630,7 @@ const s = {
   // Checkboxes
   checkRow:  { display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.18rem 0', cursor: 'pointer' },
   checkbox:  { accentColor: '#c9a84c', cursor: 'pointer', flexShrink: 0 },
+  lockBtn:   { background: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.75rem', padding: '0.1rem 0.35rem', flexShrink: 0, lineHeight: 1.4 },
   checkBonus:{ fontSize: '0.78rem', fontWeight: 700, width: 28, textAlign: 'right', flexShrink: 0, fontFamily: 'Georgia, serif' },
   checkLabel:{ color: '#e8e0d0', fontSize: '0.8rem' },
   abilityTag:{ color: '#6b5a3a', fontSize: '0.68rem' },

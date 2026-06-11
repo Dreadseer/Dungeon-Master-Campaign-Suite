@@ -7,7 +7,7 @@ const ENTITY_TYPES = ['npc', 'location', 'faction']
 const RELATIONSHIP_SUGGESTIONS = [
   'ally', 'enemy', 'member of', 'rival', 'family', 'lover',
   'employer', 'employee', 'owns', 'worships', 'fears',
-  'knows secret of', 'neutral',
+  'knows secret of', 'neutral', 'shop keeper', 'tradesman',
 ]
 
 const EMPTY_FORM = {

@@ -100,15 +100,17 @@ function registerDbHandlers(db) {
 
   ipcMain.handle('db:locations:create', (_, data) =>
     db.run(
-      `INSERT INTO locations (campaign_id, name, type, description, lore, parent_location_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
-      [data.campaign_id, data.name, data.type, data.description, data.lore, data.parent_location_id ?? null]
+      `INSERT INTO locations (campaign_id, name, type, description, lore, parent_location_id, has_own_map, floor_number, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      [data.campaign_id, data.name, data.type, data.description, data.lore,
+       data.parent_location_id ?? null, data.has_own_map ? 1 : 0, data.floor_number ?? null]
     ))
 
   ipcMain.handle('db:locations:update', (_, id, data) =>
     db.run(
-      'UPDATE locations SET name = ?, type = ?, description = ?, lore = ?, parent_location_id = ? WHERE id = ?',
-      [data.name, data.type, data.description, data.lore, data.parent_location_id ?? null, id]
+      'UPDATE locations SET name = ?, type = ?, description = ?, lore = ?, parent_location_id = ?, has_own_map = ?, floor_number = ? WHERE id = ?',
+      [data.name, data.type, data.description, data.lore, data.parent_location_id ?? null,
+       data.has_own_map ? 1 : 0, data.floor_number ?? null, id]
     ))
 
   ipcMain.handle('db:locations:delete', (_, id) =>
@@ -496,23 +498,26 @@ function registerDbHandlers(db) {
   ipcMain.handle('db:encounters:create', (_, data) =>
     db.run(`
       INSERT INTO encounters
-        (campaign_id, name, location_id, monsters, status, xp_total, notes, created_at)
-      VALUES (?,?,?,?,'planned',?,?,datetime('now'))`,
-      [data.campaign_id, data.name, data.location_id ?? null,
+        (campaign_id, name, location_id, map_id, monsters, status, xp_total, notes, created_at)
+      VALUES (?,?,?,?,?,'planned',?,?,datetime('now'))`,
+      [data.campaign_id, data.name, data.location_id ?? null, data.map_id ?? null,
        JSON.stringify(data.monsters ?? []),
        data.xp_total ?? 0, data.notes ?? '']))
 
   ipcMain.handle('db:encounters:update', (_, id, data) =>
     db.run(`
       UPDATE encounters
-      SET name=?, location_id=?, monsters=?, status=?, xp_total=?, notes=?
+      SET name=?, location_id=?, map_id=?, monsters=?, status=?, xp_total=?, notes=?
       WHERE id=?`,
-      [data.name, data.location_id ?? null,
+      [data.name, data.location_id ?? null, data.map_id ?? null,
        JSON.stringify(data.monsters), data.status,
        data.xp_total, data.notes, id]))
 
   ipcMain.handle('db:encounters:updateStatus', (_, id, status) =>
     db.run('UPDATE encounters SET status=? WHERE id=?', [status, id]))
+
+  ipcMain.handle('db:encounters:setMapId', (_, id, mapId) =>
+    db.run('UPDATE encounters SET map_id=? WHERE id=?', [mapId ?? null, id]))
 
   ipcMain.handle('db:encounters:updateMonsters', (_, id, monsters, xpTotal) =>
     db.run('UPDATE encounters SET monsters=?, xp_total=? WHERE id=?',
