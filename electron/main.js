@@ -96,11 +96,14 @@ const PdfIngestionService  = require('./services/PdfIngestionService')
 const EmbeddingService     = require('./services/EmbeddingService')
 const RAGService           = require('./services/RAGService')
 const PdfExtractionService = require('./services/PdfExtractionService')
-const registerDbHandlers   = require('./ipc/dbHandlers')
-const registerSrdHandlers  = require('./ipc/srdHandlers')
-const registerAiHandlers   = require('./ipc/aiHandlers')
-const registerPdfHandlers  = require('./ipc/pdfHandlers')
+const PlayerServer         = require('./server/PlayerServer')
+const TunnelService        = require('./server/TunnelService')
+const registerDbHandlers    = require('./ipc/dbHandlers')
+const registerSrdHandlers   = require('./ipc/srdHandlers')
+const registerAiHandlers    = require('./ipc/aiHandlers')
+const registerPdfHandlers   = require('./ipc/pdfHandlers')
 const registerEmbedHandlers = require('./ipc/embeddingHandlers')
+const registerServerHandlers = require('./ipc/serverHandlers')
 require('./ipc/fileHandlers')   // file dialog + image copy/read (self-registering)
 
 const MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' }
@@ -163,11 +166,15 @@ app.whenReady().then(async () => {
     global.ragSettings = { topK: 5, scoreThreshold: 0.5, ollamaModel: 'llama3', embedModel: 'nomic-embed-text' }
   }
 
+  global.playerServer  = new PlayerServer(global.db)
+  global.tunnelService = new TunnelService()
+
   registerDbHandlers(global.db)
   registerSrdHandlers(global.db, global.srdService)
   registerAiHandlers(global.aiService, global.keyService)
   registerPdfHandlers(global.pdfService, global.db, global.pdfExtractionService)
   registerEmbedHandlers(global.embeddingService)
+  registerServerHandlers(global.playerServer, global.tunnelService, global.keyService)
 
   // Auto-initialize AI with saved key (if any)
   const savedKey = global.keyService.loadKey()
@@ -185,4 +192,11 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
+app.on('before-quit', async () => {
+  if (global.tunnelService) await global.tunnelService.close()
+  if (global.playerServer)  await global.playerServer.stop()
+})
+
 ipcMain.handle('app:version', () => app.getVersion())
+
+ipcMain.handle('shell:openExternal', (_, url) => shell.openExternal(url))

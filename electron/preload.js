@@ -223,4 +223,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onReceive:     (callback)    => ipcRenderer.on('player:receive', callback),
     offReceive:    (callback)    => ipcRenderer.removeListener('player:receive', callback),
   },
+
+  // ── Network server ─────────────────────────────────────────────────────────
+  server: {
+    start:             (port)    => ipcRenderer.invoke('server:start', port),
+    stop:              ()        => ipcRenderer.invoke('server:stop'),
+    status:            ()        => ipcRenderer.invoke('server:status'),
+    getPlayers:        ()        => ipcRenderer.invoke('server:getPlayers'),
+    kick:              (socketId)=> ipcRenderer.invoke('server:kick', socketId),
+    tunnel: {
+      open:            ()        => ipcRenderer.invoke('server:tunnel:open'),
+      close:           ()        => ipcRenderer.invoke('server:tunnel:close'),
+    },
+    qrCode:            (url)     => ipcRenderer.invoke('server:qrcode', url),
+    ngrok: {
+      saveToken:       (token)   => ipcRenderer.invoke('server:ngrok:saveToken', token),
+      hasToken:        ()        => ipcRenderer.invoke('server:ngrok:hasToken'),
+      deleteToken:     ()        => ipcRenderer.invoke('server:ngrok:deleteToken'),
+    },
+    broadcast:         (msg)     => ipcRenderer.send('server:broadcast', msg),
+    onPlayersChanged:  (cb)      => ipcRenderer.on('server:players-changed', (_e, data) => cb(data)),
+    offPlayersChanged: (cb)      => ipcRenderer.removeListener('server:players-changed', cb),
+  },
+
+  // ── Shell ──────────────────────────────────────────────────────────────────
+  shell: {
+    openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+  },
 })

@@ -6,34 +6,67 @@
   "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
-    "build": "vite build && electron-builder",
+    "dev:player": "vite --config vite.player.config.js",
+    "build": "vite build && vite build --config vite.player.config.js && electron-builder",
+    "build:player": "vite build --config vite.player.config.js",
     "electron": "electron .",
     "postinstall": "electron-rebuild -f -w better-sqlite3"
   },
   "build": {
     "appId": "com.dmcs.app",
     "productName": "DM Campaign Suite",
+    "asar": true,
     "directories": {
       "output": "dist/app"
     },
     "files": [
       "dist/renderer/**",
       "electron/**",
-      "package.json"
-    ]
+      "package.json",
+      "node_modules/**"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/player",
+        "to": "player",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.icns"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.0",
     "@dagrejs/dagre": "^3.0.0",
+    "@ngrok/ngrok": "^1.7.0",
     "@xyflow/react": "^12.11.0",
     "better-sqlite3": "^12.10.0",
+    "express": "^5.2.1",
     "html-to-image": "^1.11.13",
     "konva": "^10.3.0",
     "pdf-parse": "1.1.1",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-konva": "^18.2.10",
     "react-router-dom": "^6.27.0",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
     "uuid": "8.3.2",
     "vectra": "^0.15.0",
     "zustand": "^5.0.1"

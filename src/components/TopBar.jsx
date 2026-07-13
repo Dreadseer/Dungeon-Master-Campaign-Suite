@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import useCampaignStore from '../stores/campaignStore'
-import usePlayerStore   from '../stores/playerStore'
-import WorldSearch from './world/WorldSearch'
+import useCampaignStore    from '../stores/campaignStore'
+import usePlayerStore      from '../stores/playerStore'
+import WorldSearch         from './world/WorldSearch'
+import NetworkSessionPanel from './network/NetworkSessionPanel'
 
 const MODE_CONFIG = {
   'online':         { label: 'Claude API',          color: '#2d6a2d', text: '#8fbc5a', border: '#4a8a4a' },
@@ -11,24 +12,58 @@ const MODE_CONFIG = {
 }
 
 export default function TopBar() {
-  const [aiMode, setAiMode] = useState(null)
+  const [aiMode,       setAiMode]       = useState(null)
+  const [serverRunning, setServerRunning] = useState(false)
+  const [showNetwork,   setShowNetwork]   = useState(false)
   const navigate = useNavigate()
-  const activeCampaign    = useCampaignStore(s => s.activeCampaign)
-  const showPlayerPanel   = usePlayerStore(s => s.showPlayerPanel)
+  const activeCampaign     = useCampaignStore(s => s.activeCampaign)
+  const showPlayerPanel    = usePlayerStore(s => s.showPlayerPanel)
   const setShowPlayerPanel = usePlayerStore(s => s.setShowPlayerPanel)
-  const playerWindowOpen  = usePlayerStore(s => s.playerWindowOpen)
+  const playerWindowOpen   = usePlayerStore(s => s.playerWindowOpen)
 
   useEffect(() => {
     window.electronAPI.ai.getMode().then(({ mode }) => setAiMode(mode))
   }, [])
 
+  useEffect(() => {
+    const check = () =>
+      window.electronAPI.server.status()
+        .then(s => setServerRunning(s.isRunning))
+        .catch(() => setServerRunning(false))
+    check()
+    const id = setInterval(check, 5000)
+    return () => clearInterval(id)
+  }, [])
+
   const modeConf = aiMode ? (MODE_CONFIG[aiMode] || MODE_CONFIG['no-ai']) : null
 
   return (
+    <>
     <header style={styles.bar}>
       <span style={styles.title}>⚔ DM Campaign Suite</span>
       <div style={styles.right}>
         {activeCampaign && <WorldSearch />}
+
+        {/* Network session toggle */}
+        {activeCampaign && (
+          <button
+            style={{
+              ...styles.playerBtn,
+              background:  showNetwork ? '#0d1a0d' : 'transparent',
+              borderColor: showNetwork ? '#2d5a2d' : '#3a2a10',
+              color:       showNetwork ? '#5dc45d' : '#a89060',
+              position: 'relative',
+            }}
+            onClick={() => setShowNetwork(n => !n)}
+            title="Toggle Network Session panel"
+          >
+            🌐 Network
+            {serverRunning && (
+              <span style={{ ...styles.playerDot, background: '#27ae60',
+                boxShadow: '0 0 4px rgba(39,174,96,0.8)' }} />
+            )}
+          </button>
+        )}
 
         {/* Player View toggle */}
         {activeCampaign && (
@@ -61,6 +96,11 @@ export default function TopBar() {
         </span>
       </div>
     </header>
+
+    {showNetwork && activeCampaign && (
+      <NetworkSessionPanel onClose={() => setShowNetwork(false)} />
+    )}
+  </>
   )
 }
 

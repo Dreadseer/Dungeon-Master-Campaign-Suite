@@ -25,13 +25,23 @@ export default function DMPlayerControls({ onClose }) {
   const [statusMsg, setStatusMsg] = useState('')
   const statusRef = useRef(null)
 
-  // ── Poll player window status every 3s ────────────────────────────────────
+  // Network server status
+  const [serverRunning, setServerRunning] = useState(false)
+
+  // true when at least one broadcast target is available
+  const canBroadcast = playerWindowOpen || serverRunning
+
+  // ── Poll player window + server status every 3s ──────────────────────────
   useEffect(() => {
     async function poll() {
       try {
         const { isOpen } = await window.electronAPI.player.isOpen()
         setPlayerWindowOpen(isOpen)
       } catch { setPlayerWindowOpen(false) }
+      try {
+        const status = await window.electronAPI.server.status()
+        setServerRunning(status.isRunning)
+      } catch { setServerRunning(false) }
     }
     poll()
     const interval = setInterval(poll, 3000)
@@ -50,6 +60,16 @@ export default function DMPlayerControls({ onClose }) {
       .then(data => setCharacters(data ?? []))
       .catch(() => {})
   }, [activeCampaign?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Dual broadcast: local Electron window + WebSocket browser players ────
+  const broadcastUpdate = useCallback((type, payload) => {
+    if (playerWindowOpen) {
+      window.electronAPI.player.broadcast({ type, payload })
+    }
+    if (serverRunning && activeCampaign?.id) {
+      window.electronAPI.server.broadcast({ campaignId: activeCampaign.id, type, payload })
+    }
+  }, [playerWindowOpen, serverRunning, activeCampaign?.id])
 
   // ── Status toast helper ───────────────────────────────────────────────────
   const showStatus = useCallback((msg) => {
@@ -76,7 +96,7 @@ export default function DMPlayerControls({ onClose }) {
   async function handlePushMap() {
     const mapId = parseInt(selectedMapId, 10)
     if (!mapId) return
-    window.electronAPI.player.broadcast({ type: 'map:set', payload: { mapId } })
+    broadcastUpdate('map:set', { mapId })
     showStatus(`🗺️ Map pushed to players`)
   }
 
@@ -87,13 +107,10 @@ export default function DMPlayerControls({ onClose }) {
     try {
       const map = await window.electronAPI.db.maps.getById(mapId)
       if (!map) return
-      window.electronAPI.player.broadcast({
-        type: 'map:update',
-        payload: {
-          mapId,
-          fogData: JSON.parse(map.fog_data ?? '[]'),
-          tokens:  JSON.parse(map.tokens   ?? '[]'),
-        },
+      broadcastUpdate('map:update', {
+        mapId,
+        fogData: JSON.parse(map.fog_data ?? '[]'),
+        tokens:  JSON.parse(map.tokens   ?? '[]'),
       })
       showStatus('✅ Fog & tokens synced')
     } catch {
@@ -107,7 +124,7 @@ export default function DMPlayerControls({ onClose }) {
     if (!text) return
     setNoteSending(true)
     const payload = { text, timestamp: Date.now() }
-    window.electronAPI.player.broadcast({ type: 'session:note', payload })
+    broadcastUpdate('session:note', payload)
     setSentNotes(prev => [{ ...payload, id: Date.now() }, ...prev].slice(0, 5))
     setNoteText('')
     setNoteSending(false)
@@ -117,19 +134,13 @@ export default function DMPlayerControls({ onClose }) {
   // ── Sync all characters ───────────────────────────────────────────────────
   function handleSyncAll() {
     characters.forEach(c => {
-      window.electronAPI.player.broadcast({
-        type: 'character:sync',
-        payload: { characterId: c.id },
-      })
+      broadcastUpdate('character:sync', { characterId: c.id })
     })
     showStatus(`✅ Synced ${characters.length} character${characters.length !== 1 ? 's' : ''}`)
   }
 
   function handleSyncOne(char) {
-    window.electronAPI.player.broadcast({
-      type: 'character:sync',
-      payload: { characterId: char.id },
-    })
+    broadcastUpdate('character:sync', { characterId: char.id })
     showStatus(`✅ Synced ${char.character_name}`)
   }
 
@@ -141,11 +152,15 @@ export default function DMPlayerControls({ onClose }) {
         <button style={s.closeBtn} onClick={onClose} title="Close panel">✕</button>
       </div>
 
-      {/* Status badge */}
+      {/* Status badges */}
       <div style={s.statusRow}>
-        <span style={{ ...s.statusDot, background: playerWindowOpen ? '#4caf50' : '#e05050' }} />
-        <span style={{ ...s.statusLabel, color: playerWindowOpen ? '#8ada8a' : '#e05050' }}>
-          {playerWindowOpen ? 'OPEN' : 'CLOSED'}
+        <span style={{ ...s.statusDot, background: playerWindowOpen ? '#4caf50' : '#555' }} />
+        <span style={{ ...s.statusLabel, color: playerWindowOpen ? '#8ada8a' : '#555', marginRight: '0.75rem' }}>
+          Window {playerWindowOpen ? 'Open' : 'Closed'}
+        </span>
+        <span style={{ ...s.statusDot, background: serverRunning ? '#4caf50' : '#555' }} />
+        <span style={{ ...s.statusLabel, color: serverRunning ? '#8ada8a' : '#555' }}>
+          Server {serverRunning ? 'ON' : 'OFF'}
         </span>
       </div>
 
@@ -181,10 +196,10 @@ export default function DMPlayerControls({ onClose }) {
           {maps.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
         <div style={s.btnRow}>
-          <button style={s.btnSecondary} onClick={handlePushMap} disabled={!selectedMapId || !playerWindowOpen}>
+          <button style={s.btnSecondary} onClick={handlePushMap} disabled={!selectedMapId || !canBroadcast}>
             Push Map →
           </button>
-          <button style={s.btnSecondary} onClick={handleSyncFogTokens} disabled={!selectedMapId || !playerWindowOpen}>
+          <button style={s.btnSecondary} onClick={handleSyncFogTokens} disabled={!selectedMapId || !canBroadcast}>
             Sync Fog
           </button>
         </div>
@@ -223,7 +238,7 @@ export default function DMPlayerControls({ onClose }) {
         <button
           style={s.btnPrimary}
           onClick={handleSendNote}
-          disabled={!noteText.trim() || noteSending || !playerWindowOpen}
+          disabled={!noteText.trim() || noteSending || !canBroadcast}
         >
           Send Note
         </button>
@@ -247,7 +262,7 @@ export default function DMPlayerControls({ onClose }) {
         <button
           style={s.btnSecondary}
           onClick={handleSyncAll}
-          disabled={characters.length === 0 || !playerWindowOpen}
+          disabled={characters.length === 0 || !canBroadcast}
         >
           Sync All ({characters.length})
         </button>
@@ -256,7 +271,7 @@ export default function DMPlayerControls({ onClose }) {
             key={c.id}
             style={s.charSyncBtn}
             onClick={() => handleSyncOne(c)}
-            disabled={!playerWindowOpen}
+            disabled={!canBroadcast}
           >
             {c.character_name}
           </button>

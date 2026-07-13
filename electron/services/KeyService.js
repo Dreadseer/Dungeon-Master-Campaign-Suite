@@ -4,7 +4,8 @@ const fs   = require('fs')
 
 class KeyService {
   constructor() {
-    this.keyPath = path.join(app.getPath('userData'), 'dmcs.key')
+    this.dataPath = app.getPath('userData')
+    this.keyPath  = path.join(this.dataPath, 'dmcs.key')
   }
 
   saveKey(key) {
@@ -28,6 +29,30 @@ class KeyService {
 
   hasKey() {
     return fs.existsSync(this.keyPath)
+  }
+
+  saveNgrokToken(token) {
+    const encrypted = safeStorage.encryptString(token)
+    fs.writeFileSync(path.join(this.dataPath, 'ngrok.key'), encrypted)
+  }
+
+  loadNgrokToken() {
+    const keyFile = path.join(this.dataPath, 'ngrok.key')
+    if (!fs.existsSync(keyFile)) return null
+    try {
+      return safeStorage.decryptString(fs.readFileSync(keyFile))
+    } catch {
+      return null
+    }
+  }
+
+  hasNgrokToken() {
+    return fs.existsSync(path.join(this.dataPath, 'ngrok.key'))
+  }
+
+  deleteNgrokToken() {
+    const keyFile = path.join(this.dataPath, 'ngrok.key')
+    if (fs.existsSync(keyFile)) fs.unlinkSync(keyFile)
   }
 }
 

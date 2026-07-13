@@ -4,6 +4,13 @@ import useCampaignStore from '../stores/campaignStore'
 export default function Settings() {
   const activeCampaign = useCampaignStore(s => s.activeCampaign)
 
+  // ── ngrok token state ─────────────────────────────────────────────────────
+  const [hasNgrokToken,  setHasNgrokToken]  = useState(false)
+  const [ngrokInput,     setNgrokInput]     = useState('')
+  const [ngrokSaved,     setNgrokSaved]     = useState(false)
+  const [ngrokTestMsg,   setNgrokTestMsg]   = useState('')
+  const [ngrokTesting,   setNgrokTesting]   = useState(false)
+
   // ── API Key state ──────────────────────────────────────────────────────────
   const [keyInput,   setKeyInput]   = useState('')
   const [hasKey,     setHasKey]     = useState(false)
@@ -28,6 +35,7 @@ export default function Settings() {
   useEffect(() => {
     window.electronAPI.ai.hasKey().then(({ hasKey: h }) => setHasKey(h))
     window.electronAPI.ai.getMode().then(r => setAiMode(r?.mode ?? r))
+    window.electronAPI.server.ngrok.hasToken().then(r => setHasNgrokToken(r.hasToken)).catch(() => {})
 
     window.electronAPI.rag.getSettings().then(settings => {
       if (settings) {
@@ -112,6 +120,37 @@ export default function Settings() {
     await window.electronAPI.ai.clearUsageLog(activeCampaign?.id ?? null)
     await loadUsageStats()
     setClearingLog(false)
+  }
+
+  // ── ngrok handlers ────────────────────────────────────────────────────────
+  async function handleSaveNgrokToken() {
+    if (!ngrokInput.trim()) return
+    await window.electronAPI.server.ngrok.saveToken(ngrokInput.trim())
+    setHasNgrokToken(true)
+    setNgrokInput('')
+    setNgrokSaved(true)
+    setTimeout(() => setNgrokSaved(false), 3000)
+  }
+
+  async function handleRemoveNgrokToken() {
+    await window.electronAPI.server.ngrok.deleteToken()
+    setHasNgrokToken(false)
+  }
+
+  async function handleTestTunnel() {
+    setNgrokTesting(true); setNgrokTestMsg('Testing…')
+    try {
+      await window.electronAPI.server.start()
+      const { url } = await window.electronAPI.server.tunnel.open()
+      setNgrokTestMsg(`✅ Tunnel works: ${url}`)
+      setTimeout(async () => {
+        await window.electronAPI.server.tunnel.close()
+        setNgrokTestMsg('')
+      }, 5000)
+    } catch (err) {
+      setNgrokTestMsg(`❌ ${err.message}`)
+    }
+    setNgrokTesting(false)
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -252,6 +291,71 @@ export default function Settings() {
           </button>
         </div>
         {ragMsg && <p style={s.status}>{ragMsg}</p>}
+      </section>
+
+      {/* ── Network Play ─── */}
+      <section style={s.section}>
+        <h2 style={s.sectionTitle}>Network Play</h2>
+        <p style={s.body}>
+          ngrok lets remote players connect from anywhere over the internet.
+          Get a free auth token — no credit card required.
+        </p>
+        <button
+          style={{ ...s.btnSecondary, marginBottom: '1rem' }}
+          onClick={() => window.electronAPI.shell.openExternal('https://dashboard.ngrok.com/get-started/your-authtoken')}
+        >
+          Get your free ngrok token →
+        </button>
+
+        <div style={s.fieldGroup}>
+          <label style={s.label}>ngrok Auth Token</label>
+          {hasNgrokToken ? (
+            <div style={s.row}>
+              <input style={{ ...s.input, color: '#555', cursor: 'default' }}
+                type="password" value="••••••••••••••••" readOnly />
+              <button style={s.btnDanger} onClick={handleRemoveNgrokToken}>Remove</button>
+            </div>
+          ) : (
+            <div style={s.row}>
+              <input
+                style={s.input}
+                type="password"
+                placeholder="Paste your ngrok auth token…"
+                value={ngrokInput}
+                onChange={e => setNgrokInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSaveNgrokToken()}
+              />
+              <button style={s.btnPrimary} onClick={handleSaveNgrokToken}
+                disabled={!ngrokInput.trim()}>
+                Save Token
+              </button>
+            </div>
+          )}
+          {ngrokSaved && <p style={{ ...s.status, color: '#5dc45d' }}>Token saved securely.</p>}
+        </div>
+
+        <div style={s.row}>
+          <button style={s.btnSecondary} onClick={handleTestTunnel}
+            disabled={!hasNgrokToken || ngrokTesting}>
+            {ngrokTesting ? 'Testing…' : 'Test Tunnel'}
+          </button>
+        </div>
+        {ngrokTestMsg && (
+          <p style={{ ...s.status, color: ngrokTestMsg.startsWith('✅') ? '#5dc45d' : '#e74c3c' }}>
+            {ngrokTestMsg}
+          </p>
+        )}
+
+        <div style={{ ...s.fieldGroup, marginTop: '1rem' }}>
+          <label style={s.label}>Preferred server port</label>
+          <input
+            style={{ ...s.input, width: 100 }}
+            type="number"
+            defaultValue={localStorage.getItem('dmcs-preferred-port') ?? '3001'}
+            onChange={e => localStorage.setItem('dmcs-preferred-port', e.target.value)}
+          />
+          <span style={s.hint}>Default 3001 — auto-increments if the port is busy.</span>
+        </div>
       </section>
 
       {/* ── AI Usage Stats ─── */}
