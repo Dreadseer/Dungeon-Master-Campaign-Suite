@@ -1,9 +1,17 @@
 import { Group, Circle, Text, Line } from 'react-konva'
 import { tokenToPixel, snapToGrid } from '../../utils/tokenUtils'
 
-export default function MapToken({ token, gridSize, isSelected, onSelect, onDragEnd, mode }) {
+export default function MapToken({ token, gridSize, isSelected, onSelect, onDragEnd, mode, stageScale = 1 }) {
   const { x, y } = tokenToPixel(token.col, token.row, gridSize)
   const radius    = gridSize * 0.38
+  const label     = token.label ?? token.name ?? ''
+
+  // Keep text at a fixed screen size regardless of zoom level.
+  // At low zoom the token circles shrink but labels stay readable.
+  const scale      = Math.max(0.15, stageScale)
+  const abbrSize   = Math.round(Math.min(14, (gridSize * 0.28)) / scale)
+  const labelSize  = Math.round(11 / scale)
+  const labelW     = Math.round(90 / scale)
 
   return (
     <Group
@@ -36,27 +44,28 @@ export default function MapToken({ token, gridSize, isSelected, onSelect, onDrag
       {isSelected && (
         <Circle radius={radius + 6} stroke="#ffffff" strokeWidth={1.5} fill={null} />
       )}
-      {/* 3-char abbreviation */}
+      {/* 3-char abbreviation — scaled to stay readable at any zoom */}
       <Text
-        text={token.label.substring(0, 3).toUpperCase()}
-        fontSize={gridSize * 0.28}
+        text={label.substring(0, 3).toUpperCase()}
+        fontSize={abbrSize}
         fill="white"
         fontStyle="bold"
         align="center"
         width={radius * 2}
         offsetX={radius}
-        offsetY={gridSize * 0.1}
+        offsetY={abbrSize / 2}
         listening={false}
       />
-      {/* Full label below the circle */}
+      {/* Full label below the circle — dark pill background for legibility */}
       <Text
-        text={token.label}
-        fontSize={9}
-        fill="rgba(255,255,255,0.8)"
+        text={label}
+        fontSize={labelSize}
+        fill="#ffffff"
+        fontStyle="bold"
         align="center"
-        width={80}
-        offsetX={40}
-        y={radius + 5}
+        width={labelW}
+        offsetX={labelW / 2}
+        y={radius + 4}
         listening={false}
       />
       {/* Defeated: red X overlay */}

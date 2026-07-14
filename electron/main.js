@@ -163,7 +163,7 @@ app.whenReady().then(async () => {
   try {
     global.ragSettings = JSON.parse(fs.readFileSync(ragSettingsPath, 'utf8'))
   } catch {
-    global.ragSettings = { topK: 5, scoreThreshold: 0.5, ollamaModel: 'llama3', embedModel: 'nomic-embed-text' }
+    global.ragSettings = { topK: 5, scoreThreshold: 0.5, ollamaModel: 'llama3:latest', embedModel: 'nomic-embed-text' }
   }
 
   global.playerServer  = new PlayerServer(global.db)

@@ -1,90 +1,110 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 
 export default function MapView({ map }) {
-  const canvasRef  = useRef(null)
-  const imgRef     = useRef(null)
-  const [status,   setStatus]   = useState('waiting') // waiting | loading | ready | error
+  const canvasRef = useRef(null)
+  const imgRef    = useRef(null)
+  const [status,   setStatus]   = useState('waiting')
   const [errorMsg, setErrorMsg] = useState('')
+  const [offset,   setOffset]   = useState({ x: 0, y: 0 })
+  const [scale,    setScale]    = useState(1)
 
-  // Pan/zoom state
-  const [offset, setOffset] = useState({ x: 0, y: 0 })
-  const [scale,  setScale]  = useState(1)
-  const drag     = useRef(null)  // { startX, startY, originX, originY }
+  // Mutable ref so touch/wheel handlers never have stale closures
+  const viewRef = useRef({ offset: { x: 0, y: 0 }, scale: 1 })
+  useEffect(() => { viewRef.current = { offset, scale } }, [offset, scale])
 
-  // ── Draw the canvas whenever map data or view state changes ───────────────
+  const gesture = useRef(null)
+  // { type:'pan',   startX, startY, originX, originY }
+  // { type:'pinch', dist, midX, midY, originScale, originOffX, originOffY }
+
+  // ── Draw ─────────────────────────────────────────────────────────────────
   const draw = useCallback(() => {
     const canvas = canvasRef.current
     const img    = imgRef.current
     if (!canvas || !img || !img.complete) return
 
-    const ctx = canvas.getContext('2d')
+    const ctx      = canvas.getContext('2d')
+    const fogData  = (() => { try { return JSON.parse(map?.fog_data ?? '[]') } catch { return [] } })()
+    const tokens   = (() => { try { return JSON.parse(map?.tokens   ?? '[]') } catch { return [] } })()
+    const gridSize = map?.grid_size ?? 50
+    const numCols  = Math.ceil(img.naturalWidth  / gridSize)
+
     ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+    // ── Map + fog + token circles (all in map-space) ──────────────────────
     ctx.save()
     ctx.translate(offset.x, offset.y)
     ctx.scale(scale, scale)
 
-    // ── Base map image ──────────────────────────────────────────
     ctx.drawImage(img, 0, 0)
 
-    // ── Fog of war ───────────────────────────────────────────────
-    const fogData  = (() => { try { return JSON.parse(map.fog_data ?? '[]') } catch { return [] } })()
-    const gridSize = map.grid_size ?? 50
-
     if (fogData.length > 0) {
-      const numCols = Math.ceil(img.naturalWidth / gridSize)
       const numRows = Math.ceil(img.naturalHeight / gridSize)
       ctx.fillStyle = 'rgba(0,0,0,0.88)'
       for (let row = 0; row < numRows; row++) {
         for (let col = 0; col < numCols; col++) {
-          const revealed = fogData[row * numCols + col] === true
-          if (!revealed) {
+          if (fogData[row * numCols + col] !== true) {
             ctx.fillRect(col * gridSize, row * gridSize, gridSize, gridSize)
           }
         }
       }
     }
 
-    // ── Tokens ───────────────────────────────────────────────────
-    const tokens  = (() => { try { return JSON.parse(map.tokens ?? '[]') } catch { return [] } })()
-    const numCols = fogData.length > 0 ? Math.ceil(img.naturalWidth / gridSize) : 0
+    // Collect visible tokens while drawing circles
+    const visibleTokens = []
     tokens.forEach(token => {
       const col = token.col ?? 0
       const row = token.row ?? 0
+      if (fogData.length > 0 && fogData[row * numCols + col] !== true) return
 
-      // Hide tokens whose cell is covered by fog
-      if (fogData.length > 0) {
-        const revealed = fogData[row * numCols + col] === true
-        if (!revealed) return
-      }
-
-      const x   = col * gridSize + gridSize / 2
-      const y   = row * gridSize + gridSize / 2
-      const r   = (gridSize / 2) * 0.8
+      const cx    = col * gridSize + gridSize / 2
+      const cy    = row * gridSize + gridSize / 2
+      const r     = (gridSize / 2) * 0.8
       const color = token.color ?? '#e74c3c'
 
       ctx.beginPath()
-      ctx.arc(x, y, r, 0, Math.PI * 2)
+      ctx.arc(cx, cy, r, 0, Math.PI * 2)
       ctx.fillStyle   = color
       ctx.globalAlpha = 0.85
       ctx.fill()
       ctx.globalAlpha = 1
       ctx.strokeStyle = '#fff'
-      ctx.lineWidth   = 1.5
+      ctx.lineWidth   = Math.max(1, 1.5 / scale)
       ctx.stroke()
 
-      if (token.name) {
-        ctx.font         = `bold ${Math.max(9, gridSize * 0.22)}px Arial`
-        ctx.textAlign    = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.fillStyle    = '#fff'
-        ctx.fillText(token.name.slice(0, 8), x, y)
+      if (token.label) {
+        visibleTokens.push({
+          name: token.label,
+          // Convert to screen-space for the label pass
+          sx: offset.x + cx * scale,
+          sy: offset.y + cy * scale,
+        })
       }
     })
 
     ctx.restore()
+
+    // ── Token labels — drawn in screen-space so they're always readable ───
+    if (visibleTokens.length > 0) {
+      ctx.save()
+      ctx.font         = 'bold 11px Arial'
+      ctx.textAlign    = 'center'
+      ctx.textBaseline = 'middle'
+      visibleTokens.forEach(({ name, sx, sy }) => {
+        const label = name.slice(0, 10)
+        const tw    = ctx.measureText(label).width
+        // Dark pill behind text for legibility on any map
+        ctx.fillStyle = 'rgba(0,0,0,0.65)'
+        ctx.beginPath()
+        ctx.roundRect(sx - tw / 2 - 3, sy - 7, tw + 6, 14, 3)
+        ctx.fill()
+        ctx.fillStyle = '#fff'
+        ctx.fillText(label, sx, sy)
+      })
+      ctx.restore()
+    }
   }, [map, offset, scale])
 
-  // ── Load image when map changes ───────────────────────────────
+  // ── Load image when map ID changes ───────────────────────────────────────
   useEffect(() => {
     if (!map) { setStatus('waiting'); return }
     setStatus('loading')
@@ -94,7 +114,7 @@ export default function MapView({ map }) {
     let cancelled = false
     fetch(`/api/map-image/${map.id}?t=${Date.now()}`)
       .then(r => {
-        if (!r.ok) return r.text().then(t => { throw new Error(`Server error ${r.status}: ${t.slice(0, 200)}`) })
+        if (!r.ok) return r.text().then(t => { throw new Error(`${r.status}: ${t.slice(0, 200)}`) })
         return r.blob()
       })
       .then(blob => {
@@ -104,108 +124,145 @@ export default function MapView({ map }) {
         img.onload = () => {
           if (cancelled) { URL.revokeObjectURL(url); return }
           imgRef.current = img
-
           const canvas = canvasRef.current
           if (canvas) {
-            const container = canvas.parentElement
-            const cw = container?.clientWidth  || window.innerWidth
-            const ch = container?.clientHeight || window.innerHeight - 52
+            const cw = canvas.parentElement?.clientWidth  || window.innerWidth
+            const ch = canvas.parentElement?.clientHeight || window.innerHeight - 52
             canvas.width  = cw
             canvas.height = ch
-            const fitScale = Math.min(cw / img.naturalWidth, ch / img.naturalHeight, 1)
-            setScale(fitScale)
-            setOffset({
-              x: (cw - img.naturalWidth  * fitScale) / 2,
-              y: (ch - img.naturalHeight * fitScale) / 2,
-            })
+            const fit = Math.min(cw / img.naturalWidth, ch / img.naturalHeight, 1)
+            setScale(fit)
+            setOffset({ x: (cw - img.naturalWidth * fit) / 2, y: (ch - img.naturalHeight * fit) / 2 })
           }
           URL.revokeObjectURL(url)
           setStatus('ready')
         }
-        img.onerror = () => {
-          URL.revokeObjectURL(url)
-          setErrorMsg('Image decode failed')
-          setStatus('error')
-        }
+        img.onerror = () => { URL.revokeObjectURL(url); setErrorMsg('Image decode failed'); setStatus('error') }
         img.src = url
       })
-      .catch(err => {
-        if (cancelled) return
-        console.error('[MapView] load failed:', err.message)
-        setErrorMsg(err.message)
-        setStatus('error')
-      })
+      .catch(err => { if (!cancelled) { setErrorMsg(err.message); setStatus('error') } })
 
     return () => { cancelled = true }
   }, [map?.id]) // eslint-disable-line
 
-  // Redraw whenever draw function (= deps) changes
   useEffect(() => { draw() }, [draw])
+  useEffect(() => { draw() }, [map?.fog_data, map?.tokens, draw])
 
-  // ── Resize handler ───────────────────────────────────────────
+  // ── Resize ───────────────────────────────────────────────────────────────
   useEffect(() => {
     const onResize = () => {
       const canvas = canvasRef.current
       if (!canvas) return
-      const container = canvas.parentElement
-      canvas.width  = container?.clientWidth  || window.innerWidth
-      canvas.height = container?.clientHeight || window.innerHeight - 52
+      canvas.width  = canvas.parentElement?.clientWidth  || window.innerWidth
+      canvas.height = canvas.parentElement?.clientHeight || window.innerHeight - 52
       draw()
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [draw])
 
-  // ── Re-draw when fog/token data updates (DM sync) ────────────
-  useEffect(() => { draw() }, [map?.fog_data, map?.tokens, draw])
-
-  // ── Pan (mouse) ──────────────────────────────────────────────
-  const onMouseDown = (e) => {
-    drag.current = { startX: e.clientX, startY: e.clientY, originX: offset.x, originY: offset.y }
-  }
-  const onMouseMove = (e) => {
+  // ── Mouse pan ────────────────────────────────────────────────────────────
+  const drag = useRef(null)
+  const onMouseDown  = (e) => { drag.current = { sx: e.clientX, sy: e.clientY, ox: offset.x, oy: offset.y } }
+  const onMouseMove  = (e) => {
     if (!drag.current) return
-    setOffset({
-      x: drag.current.originX + (e.clientX - drag.current.startX),
-      y: drag.current.originY + (e.clientY - drag.current.startY),
-    })
+    setOffset({ x: drag.current.ox + e.clientX - drag.current.sx, y: drag.current.oy + e.clientY - drag.current.sy })
   }
-  const onMouseUp = () => { drag.current = null }
+  const onMouseUp    = () => { drag.current = null }
 
-  // ── Pan (touch) ──────────────────────────────────────────────
-  const touch = useRef(null)
-  const onTouchStart = (e) => {
-    if (e.touches.length === 1) {
-      touch.current = { startX: e.touches[0].clientX, startY: e.touches[0].clientY, originX: offset.x, originY: offset.y }
+  // ── Scroll-to-zoom (mouse wheel) ─────────────────────────────────────────
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+    const onWheel = (e) => {
+      e.preventDefault()
+      const { offset: { x, y }, scale } = viewRef.current
+      const factor   = e.deltaY < 0 ? 1.12 : 0.9
+      const newScale = Math.min(Math.max(scale * factor, 0.05), 10)
+      const rect = el.getBoundingClientRect()
+      const mx   = e.clientX - rect.left
+      const my   = e.clientY - rect.top
+      setOffset({ x: mx - (mx - x) * (newScale / scale), y: my - (my - y) * (newScale / scale) })
+      setScale(newScale)
     }
-  }
-  const onTouchMove = (e) => {
-    if (!touch.current || e.touches.length !== 1) return
-    e.preventDefault()
-    setOffset({
-      x: touch.current.originX + (e.touches[0].clientX - touch.current.startX),
-      y: touch.current.originY + (e.touches[0].clientY - touch.current.startY),
-    })
-  }
-  const onTouchEnd = () => { touch.current = null }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
 
-  // ── Scroll to zoom ───────────────────────────────────────────
-  const onWheel = (e) => {
-    e.preventDefault()
-    const factor  = e.deltaY < 0 ? 1.1 : 0.9
-    const newScale = Math.min(Math.max(scale * factor, 0.1), 8)
-    const rect    = canvasRef.current?.getBoundingClientRect()
-    if (!rect) return
-    const mx = e.clientX - rect.left
-    const my = e.clientY - rect.top
-    setOffset(prev => ({
-      x: mx - (mx - prev.x) * (newScale / scale),
-      y: my - (my - prev.y) * (newScale / scale),
-    }))
+  // ── Touch: pan (1 finger) + pinch-to-zoom (2 fingers) ───────────────────
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+
+    const dist = (t) => Math.hypot(t[1].clientX - t[0].clientX, t[1].clientY - t[0].clientY)
+
+    const onTouchStart = (e) => {
+      const { offset: { x, y }, scale } = viewRef.current
+      if (e.touches.length === 1) {
+        gesture.current = { type: 'pan', sx: e.touches[0].clientX, sy: e.touches[0].clientY, ox: x, oy: y }
+      } else if (e.touches.length === 2) {
+        const rect = el.getBoundingClientRect()
+        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left
+        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top
+        gesture.current = { type: 'pinch', dist: dist(e.touches), midX, midY, originScale: scale, ox: x, oy: y }
+      }
+    }
+
+    const onTouchMove = (e) => {
+      e.preventDefault()
+      const g = gesture.current
+      if (!g) return
+      if (g.type === 'pan' && e.touches.length === 1) {
+        setOffset({ x: g.ox + e.touches[0].clientX - g.sx, y: g.oy + e.touches[0].clientY - g.sy })
+      } else if (g.type === 'pinch' && e.touches.length === 2) {
+        const newDist  = dist(e.touches)
+        const factor   = newDist / g.dist
+        const newScale = Math.min(Math.max(g.originScale * factor, 0.05), 10)
+        setScale(newScale)
+        setOffset({
+          x: g.midX - (g.midX - g.ox) * (newScale / g.originScale),
+          y: g.midY - (g.midY - g.oy) * (newScale / g.originScale),
+        })
+      }
+    }
+
+    const onTouchEnd = () => { gesture.current = null }
+
+    // passive: false is required — mobile Chrome ignores preventDefault on passive listeners
+    el.addEventListener('touchstart', onTouchStart, { passive: false })
+    el.addEventListener('touchmove',  onTouchMove,  { passive: false })
+    el.addEventListener('touchend',   onTouchEnd)
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart)
+      el.removeEventListener('touchmove',  onTouchMove)
+      el.removeEventListener('touchend',   onTouchEnd)
+    }
+  }, []) // handlers read from viewRef — no deps needed
+
+  // ── Zoom buttons ─────────────────────────────────────────────────────────
+  const zoomBy = useCallback((factor) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const { offset: { x, y }, scale } = viewRef.current
+    const cx       = canvas.clientWidth  / 2
+    const cy       = canvas.clientHeight / 2
+    const newScale = Math.min(Math.max(scale * factor, 0.05), 10)
     setScale(newScale)
-  }
+    setOffset({ x: cx - (cx - x) * (newScale / scale), y: cy - (cy - y) * (newScale / scale) })
+  }, [])
 
-  // ── Waiting / no map ─────────────────────────────────────────
+  const zoomReset = useCallback(() => {
+    const canvas = canvasRef.current
+    const img    = imgRef.current
+    if (!canvas || !img) return
+    const cw  = canvas.clientWidth
+    const ch  = canvas.clientHeight
+    const fit = Math.min(cw / img.naturalWidth, ch / img.naturalHeight, 1)
+    setScale(fit)
+    setOffset({ x: (cw - img.naturalWidth * fit) / 2, y: (ch - img.naturalHeight * fit) / 2 })
+  }, [])
+
+  // ── Render ───────────────────────────────────────────────────────────────
   if (!map || status === 'waiting') {
     return (
       <div style={s.center}>
@@ -220,69 +277,63 @@ export default function MapView({ map }) {
   if (status === 'error') {
     return (
       <div style={s.center}>
-        <div style={{ color: '#e74c3c', fontSize: '1rem' }}>⚠ {errorMsg}</div>
+        <div style={{ color: '#e74c3c' }}>⚠ {errorMsg}</div>
       </div>
     )
   }
 
   return (
     <div style={s.container}
-      onMouseDown={onMouseDown}
-      onMouseMove={onMouseMove}
-      onMouseUp={onMouseUp}
-      onMouseLeave={onMouseUp}
-      onWheel={onWheel}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
+      onMouseDown={onMouseDown} onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}    onMouseLeave={onMouseUp}
     >
       {status === 'loading' && (
         <div style={s.loadingOverlay}>
           <div style={{ color: '#C9A84C', fontFamily: 'Georgia' }}>Loading map...</div>
         </div>
       )}
-      <canvas
-        ref={canvasRef}
-        style={{ display: 'block', cursor: drag.current ? 'grabbing' : 'grab', touchAction: 'none' }}
-      />
-      <div style={s.hint}>Drag to pan · Scroll to zoom</div>
+
+      <canvas ref={canvasRef} style={{ display: 'block', cursor: drag.current ? 'grabbing' : 'grab' }} />
+
+      {/* Zoom controls */}
+      <div style={s.zoomControls}>
+        <button style={s.zoomBtn} onClick={() => zoomBy(1.25)} title="Zoom in">+</button>
+        <button style={s.zoomBtn} onClick={zoomReset}          title="Fit to screen">⊙</button>
+        <button style={s.zoomBtn} onClick={() => zoomBy(0.8)}  title="Zoom out">−</button>
+      </div>
+
+      <div style={s.hint}>Drag to pan · Pinch or scroll to zoom</div>
     </div>
   )
 }
 
 const s = {
   container: {
-    position: 'relative',
-    width:    '100%',
-    height:   'calc(100vh - 52px)',
-    overflow: 'hidden',
-    background: '#0d0a05',
-    userSelect: 'none',
+    position: 'relative', width: '100%', height: 'calc(100vh - 52px)',
+    overflow: 'hidden', background: '#0d0a05', userSelect: 'none',
   },
   center: {
-    display:        'flex',
-    alignItems:     'center',
-    justifyContent: 'center',
-    height:         'calc(100vh - 52px)',
-    flexDirection:  'column',
-    gap:            '1rem',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    height: 'calc(100vh - 52px)', flexDirection: 'column', gap: '1rem',
   },
   loadingOverlay: {
-    position:       'absolute',
-    inset:          0,
-    display:        'flex',
-    alignItems:     'center',
-    justifyContent: 'center',
-    zIndex:         10,
-    background:     'rgba(13,10,5,0.7)',
+    position: 'absolute', inset: 0, display: 'flex',
+    alignItems: 'center', justifyContent: 'center', zIndex: 10,
+    background: 'rgba(13,10,5,0.7)',
+  },
+  zoomControls: {
+    position: 'absolute', bottom: '2.5rem', right: '1rem',
+    display: 'flex', flexDirection: 'column', gap: 6, zIndex: 20,
+  },
+  zoomBtn: {
+    width: 40, height: 40, borderRadius: 8,
+    background: 'rgba(13,10,5,0.85)', border: '1px solid #3a2a10',
+    color: '#c9a84c', fontSize: '1.3rem', fontWeight: 'bold',
+    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    lineHeight: 1, touchAction: 'manipulation',
   },
   hint: {
-    position:   'absolute',
-    bottom:     '0.75rem',
-    left:       '50%',
-    transform:  'translateX(-50%)',
-    fontSize:   '11px',
-    color:      '#3a2a10',
-    pointerEvents: 'none',
+    position: 'absolute', bottom: '0.75rem', left: '50%', transform: 'translateX(-50%)',
+    fontSize: '11px', color: '#3a2a10', pointerEvents: 'none',
   },
 }

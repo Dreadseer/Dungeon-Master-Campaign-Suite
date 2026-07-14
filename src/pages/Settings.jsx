@@ -22,7 +22,7 @@ export default function Settings() {
   // ── RAG settings state ─────────────────────────────────────────────────────
   const [topK,            setTopK]            = useState(5)
   const [scoreThreshold,  setScoreThreshold]  = useState(0.5)
-  const [ollamaModel,     setOllamaModel]     = useState('llama3')
+  const [ollamaModel,     setOllamaModel]     = useState('llama3:latest')
   const [embedModel,      setEmbedModel]      = useState('nomic-embed-text')
   const [ragSaving,       setRagSaving]       = useState(false)
   const [ragMsg,          setRagMsg]          = useState('')
@@ -230,7 +230,7 @@ export default function Settings() {
           <label style={s.label}>Offline Model (Ollama)</label>
           <input style={s.input} value={ollamaModel}
             onChange={e => setOllamaModel(e.target.value)}
-            placeholder="llama3" />
+            placeholder="llama3:latest" />
           <span style={s.hint}>Model name passed to Ollama. Run <code style={s.code}>ollama pull {ollamaModel}</code> first.</span>
         </div>
 

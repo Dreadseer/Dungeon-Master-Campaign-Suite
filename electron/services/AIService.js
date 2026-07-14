@@ -6,7 +6,7 @@ class AIService {
     this.mode             = 'offline'
     this.anthropicClient  = null
     this.ollamaBaseUrl    = 'http://localhost:11434'
-    this.ollamaModel      = 'llama3'
+    this.ollamaModel      = 'llama3:latest'
     this.anthropicModel   = 'claude-sonnet-4-20250514'
   }
 
@@ -37,6 +37,11 @@ class AIService {
     return { mode: this.mode }
   }
 
+  // Active model: prefer saved setting, fall back to constructor default
+  _ollamaModel() {
+    return global.ragSettings?.ollamaModel || this.ollamaModel
+  }
+
   async complete(systemPrompt, userMessage, options = {}) {
     const start = Date.now()
     let result
@@ -52,10 +57,11 @@ class AIService {
 
     } else if (this.mode === 'offline-ollama') {
       const body = await this._ollamaPost('/api/generate', {
-        model:  this.ollamaModel,
-        prompt: userMessage,
-        system: systemPrompt,
-        stream: false,
+        model:   this._ollamaModel(),
+        prompt:  userMessage,
+        system:  systemPrompt,
+        stream:  false,
+        options: { num_gpu: 0 },
       })
       result = body.response
 
@@ -106,10 +112,11 @@ class AIService {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
-          model:  this.ollamaModel,
+          model:   this._ollamaModel(),
           prompt,
-          system: systemPrompt,
-          stream: true,
+          system:  systemPrompt,
+          stream:  true,
+          options: { num_gpu: 0 },
         }),
       })
       if (!response.ok) throw new Error(`Ollama stream failed: ${response.status}`)

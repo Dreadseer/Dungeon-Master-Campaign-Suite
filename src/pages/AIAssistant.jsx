@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import useCampaignStore from '../stores/campaignStore'
+import useAiStore       from '../stores/aiStore'
 import AIToolbox     from '../components/ai/AIToolbox'
 import AnswerRenderer from '../components/ai/AnswerRenderer'
 
@@ -44,12 +45,18 @@ export default function AIAssistant() {
   const [npcs,       setNpcs]       = useState([])
   const [factions,   setFactions]   = useState([])
 
-  // Chat state
-  const [history,     setHistory]     = useState([])   // [{ role, content, sources? }]
-  const [input,       setInput]       = useState('')
-  const [isStreaming, setIsStreaming] = useState(false)
+  // Chat state — stored in aiStore so it survives page navigation
+  const history        = useAiStore(s => s.history)
+  const setHistory     = useAiStore(s => s.setHistory)
+  const input          = useAiStore(s => s.input)
+  const setInput       = useAiStore(s => s.setInput)
+  const isStreaming    = useAiStore(s => s.isStreaming)
+  const setIsStreaming = useAiStore(s => s.setIsStreaming)
+  const ragMode        = useAiStore(s => s.ragMode)
+  const setRagMode     = useAiStore(s => s.setRagMode)
+  const clearHistory   = useAiStore(s => s.clearHistory)
+
   const [aiMode,      setAiMode]      = useState(null)
-  const [ragMode,     setRagMode]     = useState(false)
   const [hasEmbedded, setHasEmbedded] = useState(false)
 
   const chatEndRef  = useRef(null)
@@ -186,10 +193,9 @@ export default function AIAssistant() {
   }, [handleSend])
 
   const handleClear = useCallback(() => {
-    setHistory([])
+    clearHistory()
     window.electronAPI.ai.offStream()
-    setIsStreaming(false)
-  }, [])
+  }, [clearHistory])
 
   const handleInsertPrompt = useCallback((prompt) => {
     setInput(prompt)

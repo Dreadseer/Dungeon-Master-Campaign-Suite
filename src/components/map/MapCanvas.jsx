@@ -330,8 +330,9 @@ export default function MapCanvas({
 
   // ── Mouse handlers (pan + fog brush) ─────────────────────────────
   const handleMouseDown = useCallback((e) => {
-    // Pan: middle or right button
-    if (e.evt.button === 1 || e.evt.button === 2) {
+    // Pan: middle/right button always; left button when pan tool is active
+    if (e.evt.button === 1 || e.evt.button === 2 ||
+        (e.evt.button === 0 && activeTool === 'pan')) {
       e.evt.preventDefault()
       setIsPanning(true)
       setLastPanPos({ x: e.evt.clientX, y: e.evt.clientY })
@@ -444,6 +445,7 @@ export default function MapCanvas({
                 onSelect={setSelectedToken}
                 onDragEnd={handleTokenDragEnd}
                 mode={mode}
+                stageScale={stageScale}
               />
             ))
           }

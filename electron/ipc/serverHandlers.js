@@ -71,10 +71,17 @@ module.exports = (playerServer, tunnelService, keyService) => {
 
 function getLocalIP() {
   const interfaces = os.networkInterfaces()
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) return iface.address
+  const candidates = []
+  for (const [name, addrs] of Object.entries(interfaces)) {
+    // Skip WSL2, Hyper-V, VMware, Docker virtual adapters — these are
+    // host-only/NAT networks that phones on Wi-Fi cannot reach.
+    if (/loopback|vethernet|wsl|hyper.v|vmware|virtualbox|docker/i.test(name)) continue
+    for (const iface of addrs) {
+      if (iface.family === 'IPv4' && !iface.internal) candidates.push(iface.address)
     }
   }
-  return 'localhost'
+  // Prefer typical LAN ranges (192.168.x.x, 10.x.x.x) over exotic ones
+  return candidates.find(ip => /^192\.168\.|^10\./.test(ip))
+      ?? candidates[0]
+      ?? 'localhost'
 }

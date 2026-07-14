@@ -5,13 +5,16 @@ import useCampaignStore from '../../stores/campaignStore'
 export default function NetworkSessionPanel({ onClose }) {
   const activeCampaign = useCampaignStore(s => s.activeCampaign)
 
-  const [status,     setStatus]     = useState(null)   // server status object
-  const [loading,    setLoading]    = useState(false)
-  const [error,      setError]      = useState('')
-  const [tab,        setTab]        = useState('lan')   // 'lan' | 'internet'
-  const [qrDataUrl,  setQrDataUrl]  = useState(null)
-  const [players,    setPlayers]    = useState([])
-  const [copied,     setCopied]     = useState(false)
+  const [status,        setStatus]        = useState(null)
+  const [loading,       setLoading]       = useState(false)
+  const [error,         setError]         = useState('')
+  const [tab,           setTab]           = useState('lan')
+  const [qrDataUrl,     setQrDataUrl]     = useState(null)
+  const [players,       setPlayers]       = useState([])
+  const [copied,        setCopied]        = useState(false)
+  const [maps,          setMaps]          = useState([])
+  const [selectedMapId, setSelectedMapId] = useState('')
+  const [pushStatus,    setPushStatus]    = useState('')
   const pollRef = useRef(null)
 
   // ── Poll server status every 4s ────────────────────────────────────────────
@@ -33,6 +36,16 @@ export default function NetworkSessionPanel({ onClose }) {
       window.electronAPI.server.offPlayersChanged(onPlayersChanged)
     }
   }, [refresh])
+
+  // ── Load maps for push-map selector ──────────────────────────────────────────
+  useEffect(() => {
+    if (!activeCampaign?.id) return
+    window.electronAPI.db.maps.getAll(activeCampaign.id)
+      .then(data => {
+        setMaps(data ?? [])
+        if (data?.length > 0 && !selectedMapId) setSelectedMapId(String(data[0].id))
+      }).catch(() => {})
+  }, [activeCampaign?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Regenerate QR whenever the active URL changes ──────────────────────────
   const activeUrl = tab === 'internet' ? status?.tunnelUrl : status?.localUrl
@@ -105,6 +118,23 @@ export default function NetworkSessionPanel({ onClose }) {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch { /* ignore */ }
+  }
+
+  async function handlePushMap() {
+    const mapId = parseInt(selectedMapId, 10)
+    if (!mapId || !activeCampaign?.id) return
+    try {
+      await window.electronAPI.server.broadcast({
+        campaignId: activeCampaign.id,
+        type:       'map:set',
+        payload:    { mapId },
+      })
+      setPushStatus('🗺️ Map pushed!')
+      setTimeout(() => setPushStatus(''), 3000)
+    } catch {
+      setPushStatus('❌ Push failed')
+      setTimeout(() => setPushStatus(''), 3000)
+    }
   }
 
   const isRunning  = status?.isRunning ?? false
@@ -221,7 +251,30 @@ export default function NetworkSessionPanel({ onClose }) {
           </div>
         )}
 
-        {/* ── Section 4: Player roster ── */}
+        {/* ── Section 4: Push map to network players ── */}
+        {isRunning && (
+          <div style={s.section}>
+            <p style={s.sectionLabel}>Push Map to Players</p>
+            <select
+              style={s.select}
+              value={selectedMapId}
+              onChange={e => setSelectedMapId(e.target.value)}
+            >
+              {maps.length === 0 && <option value="">No maps in campaign</option>}
+              {maps.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+            <button
+              style={{ ...s.btnPrimary, width: '100%', opacity: (!selectedMapId || maps.length === 0) ? 0.45 : 1 }}
+              disabled={!selectedMapId || maps.length === 0}
+              onClick={handlePushMap}
+            >
+              Push Map →
+            </button>
+            {pushStatus && <div style={s.pushToast}>{pushStatus}</div>}
+          </div>
+        )}
+
+        {/* ── Section 5: Player roster ── */}
         <div style={s.section}>
           <p style={s.sectionLabel}>
             Connected Players
@@ -310,6 +363,10 @@ const s = {
   playerChar:  { color: '#555', fontSize: '0.72rem' },
   kickBtn:     { background: 'transparent', border: '1px solid #4a1a1a', color: '#955',
     padding: '2px 8px', borderRadius: 3, cursor: 'pointer', fontSize: '0.72rem', flexShrink: 0 },
+  select:      { width: '100%', background: '#0a0805', border: '1px solid #3a2a10',
+    borderRadius: 4, color: '#e8e0d0', padding: '0.4rem 0.6rem',
+    fontSize: '0.82rem', marginBottom: '0.5rem', outline: 'none' },
+  pushToast:   { marginTop: 6, color: '#8ada8a', fontSize: '0.78rem', textAlign: 'center' },
   errorBox:    { margin: '0.5rem 1rem', background: '#2a0a00', border: '1px solid #8B0000',
     borderRadius: 4, padding: '8px 12px', color: '#f08080', fontSize: '0.8rem' },
 }
