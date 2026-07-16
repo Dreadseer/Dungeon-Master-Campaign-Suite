@@ -36,7 +36,8 @@ export default function EquipmentBrowser() {
             equipment_category:d.category ?? 'Custom',
             cost:              d.cost ?? null,
             weight:            d.weight ?? null,
-            isHomebrew:        true,
+            isHomebrew:        e.source !== 'source_book',
+            isSourceBook:      e.source === 'source_book',
             homebrew_entry:    { ...e, data_raw: e.data },
           }
         }))
@@ -69,6 +70,7 @@ export default function EquipmentBrowser() {
   }
 
   const filtered   = [...allEquipment.filter(matchesFilters), ...homebrewEquipment.filter(matchesFilters)]
+    .sort((a, b) => a.name.localeCompare(b.name))
   const totalItems = allEquipment.length + homebrewEquipment.length
   const visible    = filtered.slice(0, visibleCount)
   const isFiltered = !!(nameFilter || categoryFilter)
@@ -134,7 +136,8 @@ export default function EquipmentBrowser() {
                 >
                   <span style={s.eName}>
                     {e.name}
-                    {e.isHomebrew && <span style={s.brewDot} title="Homebrew"> ✦</span>}
+                    {e.isHomebrew   && <span style={s.brewDot}   title="Homebrew"> ✦</span>}
+                    {e.isSourceBook && <span style={s.sourceDot} title="Source Book"> +</span>}
                   </span>
                   <span style={s.eCat}>{typeof e.equipment_category === 'object' ? (e.equipment_category?.name ?? '—') : (e.equipment_category ?? '—')}</span>
                   <span style={s.eCost}>{formatCost(e.cost)}</span>
@@ -154,7 +157,7 @@ export default function EquipmentBrowser() {
 
         {selectedIndex && (() => {
           const e = [...allEquipment, ...homebrewEquipment].find(x => x.index === selectedIndex)
-          if (e?.isHomebrew) {
+          if (e?.isHomebrew || e?.isSourceBook) {
             return (
               <HomebrewCard
                 entry={e.homebrew_entry}
@@ -188,7 +191,8 @@ const s = {
   rowSelected: { background: '#1a1208', outline: '1px solid #3a2a10' },
 
   eName:   { color: '#e8e0d0', fontWeight: 600, fontSize: '0.88rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '0.2rem' },
-  brewDot: { color: '#aa7aca', fontSize: '0.65rem', flexShrink: 0 },
+  brewDot:   { color: '#aa7aca', fontSize: '0.65rem', flexShrink: 0 },
+  sourceDot: { color: '#c9a84c', fontSize: '0.65rem', flexShrink: 0 },
   eCat:    { color: '#a89060', fontSize: '0.78rem', width: 140, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   eCost:   { color: '#c9a84c', fontSize: '0.78rem', width: 70,  flexShrink: 0 },
   eWeight: { color: '#6b5a3a', fontSize: '0.75rem', width: 65,  textAlign: 'right', flexShrink: 0 },

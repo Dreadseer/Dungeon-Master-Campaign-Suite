@@ -10,8 +10,8 @@ module.exports = (embeddingService) => {
   })
 
   // Semantic similarity search across all indexed chunks
-  ipcMain.handle('embed:search', async (_, queryText, topK) => {
-    return embeddingService.search(queryText, topK ?? 5)
+  ipcMain.handle('embed:search', async (_, queryText, topK, itemName, sourceId) => {
+    return embeddingService.search(queryText, topK ?? 5, itemName ?? null, sourceId ?? null)
   })
 
   // Remove all vectra index entries for a source (called before delete or re-ingest)

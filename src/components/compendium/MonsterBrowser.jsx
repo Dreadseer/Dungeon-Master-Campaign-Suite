@@ -56,7 +56,8 @@ export default function MonsterBrowser() {
             type:             d.type ?? 'Custom',
             size:             d.size ?? '—',
             hit_points:       d.hit_points ?? '—',
-            isHomebrew:       true,
+            isHomebrew:       e.source !== 'source_book',
+            isSourceBook:     e.source === 'source_book',
             homebrew_entry:   { ...e, data_raw: e.data },
           }
         })
@@ -87,7 +88,7 @@ export default function MonsterBrowser() {
     if (typeFilter && !m.type?.toLowerCase().includes(typeFilter.toLowerCase())) return false
     if (sizeFilter && m.size?.toLowerCase() !== sizeFilter.toLowerCase())        return false
     return true
-  })
+  }).sort((a, b) => a.name.localeCompare(b.name))
 
   const visible    = filtered.slice(0, visibleCount)
   const isFiltered = !!(nameFilter || crFilter || typeFilter || sizeFilter)
@@ -156,7 +157,8 @@ export default function MonsterBrowser() {
                 >
                   <span style={s.mName}>
                     {m.name}
-                    {m.isHomebrew && <span style={s.brewDot} title="Homebrew"> ✦</span>}
+                    {m.isHomebrew   && <span style={s.brewDot}   title="Homebrew"> ✦</span>}
+                    {m.isSourceBook && <span style={s.sourceDot} title="Source Book"> +</span>}
                   </span>
                   <span style={{ ...s.crBadge, background: crColor(m.challenge_rating) }}>
                     {m.challenge_rating}
@@ -183,7 +185,7 @@ export default function MonsterBrowser() {
         {/* Detail panel — homebrew shows HomebrewCard, SRD shows MonsterStatBlock */}
         {selectedIndex && (() => {
           const m = allMonsters.find(x => x.index === selectedIndex)
-          if (m?.isHomebrew) {
+          if (m?.isHomebrew || m?.isSourceBook) {
             return (
               <HomebrewCard
                 entry={m.homebrew_entry}
@@ -228,7 +230,8 @@ const s = {
   rowSelected: { background: '#1a1208', outline: '1px solid #3a2a10' },
 
   mName:   { color: '#e8e0d0', fontWeight: 600, fontSize: '0.88rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '0.2rem' },
-  brewDot: { color: '#aa7aca', fontSize: '0.65rem', flexShrink: 0 },
+  brewDot:   { color: '#aa7aca', fontSize: '0.65rem', flexShrink: 0 },
+  sourceDot: { color: '#c9a84c', fontSize: '0.65rem', flexShrink: 0 },
   crBadge: { color: '#fff', fontSize: '0.7rem', fontWeight: 'bold', padding: '0.1rem 0.35rem', borderRadius: 3, width: 40, textAlign: 'center', flexShrink: 0 },
   mType:   { color: '#a89060', fontSize: '0.78rem', width: 100, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   mSize:   { color: '#a89060', fontSize: '0.78rem', width: 80, flexShrink: 0 },

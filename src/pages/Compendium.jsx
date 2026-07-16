@@ -1,18 +1,29 @@
 import { useState } from 'react'
-import MonsterBrowser   from '../components/compendium/MonsterBrowser'
-import SpellBrowser     from '../components/compendium/SpellBrowser'
-import EquipmentBrowser from '../components/compendium/EquipmentBrowser'
-import CustomBrowser    from '../components/compendium/CustomBrowser'
+import MonsterBrowser        from '../components/compendium/MonsterBrowser'
+import SpellBrowser          from '../components/compendium/SpellBrowser'
+import EquipmentBrowser      from '../components/compendium/EquipmentBrowser'
+import CustomBrowser         from '../components/compendium/CustomBrowser'
+import SourceBookImportModal from '../components/compendium/SourceBookImportModal'
 
 const TABS = [
-  { key: 'monsters',  label: '🐉 Monsters'  },
-  { key: 'spells',    label: '✨ Spells'     },
-  { key: 'equipment', label: '⚔ Equipment'  },
-  { key: 'custom',    label: '📜 Custom'     },
+  { key: 'monsters',  label: '🐉 Monsters',  importType: 'monster'   },
+  { key: 'spells',    label: '✨ Spells',     importType: 'spell'     },
+  { key: 'equipment', label: '⚔ Equipment',  importType: 'equipment' },
+  { key: 'custom',    label: '📜 Custom',     importType: null        },
 ]
 
 export default function Compendium() {
-  const [activeTab, setActiveTab] = useState('monsters')
+  const [activeTab,    setActiveTab]    = useState('monsters')
+  const [showImport,   setShowImport]   = useState(false)
+  const [importKey,    setImportKey]    = useState(0)  // remount modal on re-open
+
+  const activeTabDef  = TABS.find(t => t.key === activeTab)
+  const canImport     = activeTabDef?.importType != null
+
+  const openImport = () => {
+    setImportKey(k => k + 1)
+    setShowImport(true)
+  }
 
   return (
     <div style={s.page}>
@@ -30,6 +41,11 @@ export default function Compendium() {
             </button>
           ))}
         </div>
+        {canImport && (
+          <button style={s.importBtn} onClick={openImport}>
+            📥 Import from Source Book
+          </button>
+        )}
       </div>
 
       {/* Content area */}
@@ -39,6 +55,15 @@ export default function Compendium() {
         {activeTab === 'equipment' && <EquipmentBrowser />}
         {activeTab === 'custom'    && <CustomBrowser />}
       </div>
+
+      {showImport && (
+        <SourceBookImportModal
+          key={importKey}
+          initialType={activeTabDef.importType}
+          onClose={() => setShowImport(false)}
+          onImported={() => { /* browsers will refresh on next open; could add a refresh signal later */ }}
+        />
+      )}
     </div>
   )
 }
@@ -51,7 +76,7 @@ const s = {
     borderBottom: '1px solid #2a1c08', flexShrink: 0,
   },
   tabTitle: { color: '#c9a84c', fontFamily: 'Georgia, serif', fontSize: '1.1rem', fontWeight: 600, whiteSpace: 'nowrap' },
-  tabs:    { display: 'flex', gap: '0.25rem' },
+  tabs:    { display: 'flex', gap: '0.25rem', flex: 1 },
   tab: {
     background: 'transparent', border: '1px solid transparent',
     borderRadius: '4px 4px 0 0', color: '#6b5a3a',
@@ -63,5 +88,12 @@ const s = {
     background: '#1a1208', border: '1px solid #2a1c08',
     borderBottom: '1px solid #1a1208', color: '#c9a84c', fontWeight: 600,
   },
-  content:     { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' },
+  importBtn: {
+    padding: '0.35rem 0.9rem', background: 'transparent',
+    border: '1px solid #3a2a10', borderRadius: 4,
+    color: '#a89060', cursor: 'pointer', fontSize: '0.8rem',
+    whiteSpace: 'nowrap', transition: 'all 0.15s',
+    flexShrink: 0,
+  },
+  content: { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' },
 }

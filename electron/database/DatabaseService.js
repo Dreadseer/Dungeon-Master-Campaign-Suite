@@ -29,6 +29,7 @@ class DatabaseService {
       { id: 5, name: 'ai_usage_log',      sql: MIGRATION_005 },
       { id: 6, name: 'subclasses',        sql: MIGRATION_006 },
       { id: 7, name: 'encounter_map_loc_fields', sql: MIGRATION_007 },
+      { id: 8, name: 'compendium_source_book',   sql: MIGRATION_008 },
     ]
 
     for (const m of migrations) {
@@ -271,6 +272,24 @@ const MIGRATION_007 = `
   ALTER TABLE encounters  ADD COLUMN map_id      INTEGER REFERENCES maps(id);
   ALTER TABLE locations   ADD COLUMN has_own_map INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE locations   ADD COLUMN floor_number INTEGER;
+`
+
+// Migration 008 — Expand compendium_custom source CHECK to include 'source_book'
+// SQLite can't ALTER a CHECK constraint, so recreate the table with the new allowed value.
+const MIGRATION_008 = `
+  CREATE TABLE IF NOT EXISTS compendium_custom_m008 (
+    id          INTEGER PRIMARY KEY,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    type        TEXT CHECK(type IN ('item','spell','equipment','monster','lore')),
+    name        TEXT NOT NULL,
+    data        TEXT,
+    source      TEXT DEFAULT 'custom' CHECK(source IN ('custom','srd','pdf_upload','source_book')),
+    created_at  DATETIME DEFAULT (datetime('now'))
+  );
+
+  INSERT INTO compendium_custom_m008 SELECT * FROM compendium_custom;
+  DROP TABLE compendium_custom;
+  ALTER TABLE compendium_custom_m008 RENAME TO compendium_custom;
 `
 
 // Migration 006 — Subclasses catalog table; subclass_name column on characters

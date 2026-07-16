@@ -57,14 +57,15 @@ export default function SpellBrowser() {
           let d = {}
           try { d = JSON.parse(e.data ?? '{}') } catch { /* empty */ }
           return {
-            name:          e.name,
-            index:         `custom-${e.id}`,
-            level:         d.level ?? 0,
-            school:        d.school ?? 'Custom',
-            casting_time:  d.casting_time ?? '—',
-            range:         d.range ?? '—',
-            isHomebrew:    true,
-            homebrew_entry:{ ...e, data_raw: e.data },
+            name:           e.name,
+            index:          `custom-${e.id}`,
+            level:          d.level ?? 0,
+            school:         d.school ?? 'Custom',
+            casting_time:   d.casting_time ?? '—',
+            range:          d.range ?? '—',
+            isHomebrew:     e.source !== 'source_book',
+            isSourceBook:   e.source === 'source_book',
+            homebrew_entry: { ...e, data_raw: e.data },
           }
         }))
       })
@@ -123,11 +124,11 @@ export default function SpellBrowser() {
     return true
   }
 
-  // Merge SRD + homebrew, then filter
+  // Merge SRD + homebrew, filter, then sort alphabetically
   const filtered = [
     ...allSpells.filter(matchesFilters),
     ...homebrewSpells.filter(matchesFilters),
-  ]
+  ].sort((a, b) => a.name.localeCompare(b.name))
 
   const visible      = filtered.slice(0, visibleCount)
   const totalSpells  = allSpells.length + homebrewSpells.length
@@ -194,7 +195,8 @@ export default function SpellBrowser() {
                 >
                   <span style={s.spName}>
                     {sp.name}
-                    {sp.isHomebrew && <span style={s.brewDot} title="Homebrew"> ✦</span>}
+                    {sp.isHomebrew   && <span style={s.brewDot}   title="Homebrew"> ✦</span>}
+                    {sp.isSourceBook && <span style={s.sourceDot} title="Source Book"> +</span>}
                   </span>
                   <span style={{ ...s.lvlBadge, background: LEVEL_COLORS[sp.level] ?? '#5a5a5a' }}>
                     {LEVEL_LABELS[sp.level]}
@@ -217,7 +219,7 @@ export default function SpellBrowser() {
 
         {selectedIndex && (() => {
           const sp = [...allSpells, ...homebrewSpells].find(x => x.index === selectedIndex)
-          if (sp?.isHomebrew) {
+          if (sp?.isHomebrew || sp?.isSourceBook) {
             return (
               <HomebrewCard
                 entry={sp.homebrew_entry}
@@ -252,7 +254,8 @@ const s = {
   rowSelected: { background: '#1a1208', outline: '1px solid #3a2a10' },
 
   spName:   { color: '#e8e0d0', fontWeight: 600, fontSize: '0.88rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '0.2rem' },
-  brewDot:  { color: '#aa7aca', fontSize: '0.65rem', flexShrink: 0 },
+  brewDot:   { color: '#aa7aca', fontSize: '0.65rem', flexShrink: 0 },
+  sourceDot: { color: '#c9a84c', fontSize: '0.65rem', flexShrink: 0 },
   lvlBadge: { color: '#fff', fontSize: '0.68rem', fontWeight: 'bold', padding: '0.1rem 0.35rem', borderRadius: 3, width: 60, textAlign: 'center', flexShrink: 0 },
   spSchool: { color: '#a89060', fontSize: '0.78rem', width: 100, flexShrink: 0 },
   spCast:   { color: '#a89060', fontSize: '0.75rem', width: 90, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },

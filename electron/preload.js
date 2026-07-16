@@ -201,7 +201,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   embed: {
     source:       (sourceId)            => ipcRenderer.invoke('embed:source',       sourceId),
-    search:       (queryText, topK)     => ipcRenderer.invoke('embed:search',        queryText, topK),
+    search:       (queryText, topK, itemName, sourceId) => ipcRenderer.invoke('embed:search', queryText, topK, itemName, sourceId ?? null),
     deleteSource: (sourceId)            => ipcRenderer.invoke('embed:deleteSource',  sourceId),
     getStatus:    ()                    => ipcRenderer.invoke('embed:getStatus'),
     onProgress:   (callback)            => ipcRenderer.on('embed:progress',   (_event, data) => callback(data)),
