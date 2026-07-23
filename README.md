@@ -367,7 +367,7 @@ Several columns store structured data as JSON strings (SQLite has no native JSON
 
 ### Phase 4 — Compendium & Character Sheets
 
-- **`Compendium`** — Tabs for SRD Monsters, Spells, Equipment, and Custom/Homebrew entries. No `CampaignGuard` — accessible without a loaded campaign.
+- **`Compendium`** — Tabs for SRD Monsters, Spells, Equipment, and Custom/Homebrew entries. No `CampaignGuard` — accessible without a loaded campaign. Also hosts the **Source Book Importer** (📥 Single Import / 📦 Bulk Import), which turns indexed PDF passages into structured entries via AI. **This feature has its own onboarding doc: [`DMCS_Source_Book_Importer.md`](DMCS_Source_Book_Importer.md)** — start there before touching import code.
 - **`CharacterSheets`** — Lists all player characters for the active campaign; opens the full `CharacterSheet` component.
 - **`CharacterSheet`** — Tabs: Stats (ability scores, saves, skills, HP), Inventory, Spell Slots, Death Saves, Notes. Includes a level-up wizard and an AI character assistant.
 
@@ -408,8 +408,9 @@ The current mode is shown as a badge in the TopBar.
 
 ### Online Mode (Claude API)
 
-- Model: `claude-sonnet-4-20250514`
-- Used for: world builder suggestions, character assistant, encounter narration, RAG answer generation
+- Model: `claude-sonnet-5` (set in `electron/services/AIService.js`)
+- Used for: world builder suggestions, character assistant, encounter narration, RAG answer generation, Source Book import extraction
+- **Gotcha:** this model string must be a *current, non-retired* model ID. If it points at a retired snapshot, the startup key-validation ping 404s, the app silently falls back to Ollama, and online mode never engages even with a valid key. See `DMCS_Source_Book_Importer.md` → *Recent Work & Gotchas*.
 - Streaming responses use `ipcMain` events pushed to the renderer via `webContents.send`
 
 ### Offline Mode (Ollama)

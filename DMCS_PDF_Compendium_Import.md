@@ -1,6 +1,14 @@
 # ⚔ DMCS — PDF → Compendium Import
 ## Claude Code Update Prompts 01 – 02
 
+> ⚠️ **SUPERSEDED — historical build-spec, not the shipped design.** This document describes
+> an earlier approach (`PdfExtractionService`, `PdfImportPanel`, keyword/semantic toggle,
+> `pdf:extractChunk` handlers) that was **not** the version that shipped. The importer that
+> actually exists uses `SourceBookImportModal` / `BulkImportModal`, the pure
+> `compendiumExtractor.js` module, and `EmbeddingService.search`. **For the current feature,
+> read [`DMCS_Source_Book_Importer.md`](DMCS_Source_Book_Importer.md) instead.** Kept only for
+> historical context.
+
 > **Save this file as:** `DMCS_PDF_Compendium_Import.md`
 
 **Updates covered:** Chunk Search · Type Detection · Regex + AI Extraction · Review & Edit · Import to Compendium
