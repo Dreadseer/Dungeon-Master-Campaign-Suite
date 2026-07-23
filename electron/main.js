@@ -21,7 +21,7 @@ function createPlayerWindow(campaignId) {
     },
   })
   if (process.env.NODE_ENV === 'development') {
-    playerWindow.loadURL(`http://localhost:5173/player?campaign=${campaignId}`)
+    playerWindow.loadURL(`http://localhost:5173/#/player?campaign=${campaignId}`)
   } else {
     playerWindow.loadFile(
       path.join(__dirname, '../dist/renderer/index.html'),
@@ -51,7 +51,7 @@ function createEncounterMapWindow(campaignId, mapId) {
     },
   })
   if (process.env.NODE_ENV === 'development') {
-    win.loadURL(`http://localhost:5173/maps?autoMap=${mapId}`)
+    win.loadURL(`http://localhost:5173/#/maps?autoMap=${mapId}`)
   } else {
     win.loadFile(
       path.join(__dirname, '../dist/renderer/index.html'),

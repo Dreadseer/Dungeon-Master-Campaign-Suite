@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
+import { HashRouter, Routes, Route, useLocation } from 'react-router-dom'
 import Sidebar            from './components/Sidebar'
 import TopBar             from './components/TopBar'
 import SrdLoader          from './components/SrdLoader'
@@ -31,7 +31,7 @@ function Guarded({ children }) {
   return <CampaignGuard>{children}</CampaignGuard>
 }
 
-// Inner app — has access to router context (useLocation requires being inside BrowserRouter)
+// Inner app — has access to router context (useLocation requires being inside the Router)
 function AppContent() {
   const location         = useLocation()
   const isPlayer         = location.pathname.startsWith('/player')
@@ -88,9 +88,13 @@ function AppContent() {
 }
 
 export default function App() {
+  // HashRouter (not BrowserRouter): in a packaged Electron build the renderer is
+  // loaded from disk via loadFile(), so there is no web server to resolve deep
+  // paths like /player. Hash routing keeps the route in the URL fragment
+  // (index.html#/player?campaign=1), which resolves correctly from file://.
   return (
-    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AppContent />
-    </BrowserRouter>
+    </HashRouter>
   )
 }
