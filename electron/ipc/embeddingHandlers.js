@@ -9,6 +9,11 @@ module.exports = (embeddingService) => {
     })
   })
 
+  // Scan a source book's chunks for item names matching a content type
+  ipcMain.handle('embed:scanSource', async (_, sourceId, contentType) => {
+    return embeddingService.scanSource(sourceId, contentType)
+  })
+
   // Semantic similarity search across all indexed chunks
   ipcMain.handle('embed:search', async (_, queryText, topK, itemName, sourceId) => {
     return embeddingService.search(queryText, topK ?? 5, itemName ?? null, sourceId ?? null)

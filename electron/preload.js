@@ -161,7 +161,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ai: {
     initialize:    ()                              => ipcRenderer.invoke('ai:initialize'),
     getMode:       ()                              => ipcRenderer.invoke('ai:getMode'),
-    complete:      (systemPrompt, message)         => ipcRenderer.invoke('ai:complete',  systemPrompt, message),
+    complete:      (systemPrompt, message, options) => ipcRenderer.invoke('ai:complete',  systemPrompt, message, options),
     saveKey:       (key)                           => ipcRenderer.invoke('ai:saveKey',   key),
     deleteKey:     ()                              => ipcRenderer.invoke('ai:deleteKey'),
     hasKey:        ()                              => ipcRenderer.invoke('ai:hasKey'),
@@ -202,6 +202,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   embed: {
     source:       (sourceId)            => ipcRenderer.invoke('embed:source',       sourceId),
     search:       (queryText, topK, itemName, sourceId) => ipcRenderer.invoke('embed:search', queryText, topK, itemName, sourceId ?? null),
+    scanSource:   (sourceId, contentType) => ipcRenderer.invoke('embed:scanSource', sourceId, contentType),
     deleteSource: (sourceId)            => ipcRenderer.invoke('embed:deleteSource',  sourceId),
     getStatus:    ()                    => ipcRenderer.invoke('embed:getStatus'),
     onProgress:   (callback)            => ipcRenderer.on('embed:progress',   (_event, data) => callback(data)),

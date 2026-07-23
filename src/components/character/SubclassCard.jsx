@@ -46,7 +46,7 @@ export default function SubclassCard({ subclass, selected, onSelect }) {
       </div>
 
       {/* Description */}
-      <p style={{ fontSize: '13px', color: '#c0b8a8', marginTop: '8px', lineHeight: '1.5', marginBottom: 0 }}>
+      <p style={{ fontSize: '13px', color: '#c0b8a8', marginTop: '8px', lineHeight: '1.5', marginBottom: 0, whiteSpace: 'pre-wrap' }}>
         {subclass.description}
       </p>
 
@@ -77,7 +77,7 @@ export default function SubclassCard({ subclass, selected, onSelect }) {
                 <span style={{ fontWeight: 'bold', color: '#C9A84C', fontSize: '13px' }}>{f.name}</span>
                 <span style={{ fontSize: '11px', color: '#6b6b6b' }}>(Level {f.level_gained})</span>
               </div>
-              <p style={{ fontSize: '12px', color: '#c0b8a8', margin: '2px 0 0', lineHeight: '1.5' }}>
+              <p style={{ fontSize: '12px', color: '#c0b8a8', margin: '2px 0 0', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
                 {f.description}
               </p>
             </div>

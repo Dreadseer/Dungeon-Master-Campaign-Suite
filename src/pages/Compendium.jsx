@@ -4,6 +4,7 @@ import SpellBrowser          from '../components/compendium/SpellBrowser'
 import EquipmentBrowser      from '../components/compendium/EquipmentBrowser'
 import CustomBrowser         from '../components/compendium/CustomBrowser'
 import SourceBookImportModal from '../components/compendium/SourceBookImportModal'
+import BulkImportModal       from '../components/compendium/BulkImportModal'
 
 const TABS = [
   { key: 'monsters',  label: '🐉 Monsters',  importType: 'monster'   },
@@ -13,17 +14,17 @@ const TABS = [
 ]
 
 export default function Compendium() {
-  const [activeTab,    setActiveTab]    = useState('monsters')
-  const [showImport,   setShowImport]   = useState(false)
-  const [importKey,    setImportKey]    = useState(0)  // remount modal on re-open
+  const [activeTab,   setActiveTab]   = useState('monsters')
+  const [showImport,  setShowImport]  = useState(false)
+  const [showBulk,    setShowBulk]    = useState(false)
+  const [importKey,   setImportKey]   = useState(0)
+  const [bulkKey,     setBulkKey]     = useState(0)
 
-  const activeTabDef  = TABS.find(t => t.key === activeTab)
-  const canImport     = activeTabDef?.importType != null
+  const activeTabDef = TABS.find(t => t.key === activeTab)
+  const canImport    = activeTabDef?.importType != null
 
-  const openImport = () => {
-    setImportKey(k => k + 1)
-    setShowImport(true)
-  }
+  const openImport = () => { setImportKey(k => k + 1); setShowImport(true) }
+  const openBulk   = () => { setBulkKey(k => k + 1);   setShowBulk(true)  }
 
   return (
     <div style={s.page}>
@@ -42,9 +43,14 @@ export default function Compendium() {
           ))}
         </div>
         {canImport && (
-          <button style={s.importBtn} onClick={openImport}>
-            📥 Import from Source Book
-          </button>
+          <div style={s.importBtns}>
+            <button style={s.importBtn} onClick={openImport}>
+              📥 Single Import
+            </button>
+            <button style={s.importBtn} onClick={openBulk}>
+              📦 Bulk Import
+            </button>
+          </div>
         )}
       </div>
 
@@ -61,7 +67,16 @@ export default function Compendium() {
           key={importKey}
           initialType={activeTabDef.importType}
           onClose={() => setShowImport(false)}
-          onImported={() => { /* browsers will refresh on next open; could add a refresh signal later */ }}
+          onImported={() => {}}
+        />
+      )}
+
+      {showBulk && (
+        <BulkImportModal
+          key={bulkKey}
+          initialType={activeTabDef.importType}
+          onClose={() => setShowBulk(false)}
+          onImported={() => {}}
         />
       )}
     </div>
@@ -88,12 +103,12 @@ const s = {
     background: '#1a1208', border: '1px solid #2a1c08',
     borderBottom: '1px solid #1a1208', color: '#c9a84c', fontWeight: 600,
   },
+  importBtns: { display: 'flex', gap: 6, flexShrink: 0 },
   importBtn: {
     padding: '0.35rem 0.9rem', background: 'transparent',
     border: '1px solid #3a2a10', borderRadius: 4,
     color: '#a89060', cursor: 'pointer', fontSize: '0.8rem',
     whiteSpace: 'nowrap', transition: 'all 0.15s',
-    flexShrink: 0,
   },
   content: { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' },
 }

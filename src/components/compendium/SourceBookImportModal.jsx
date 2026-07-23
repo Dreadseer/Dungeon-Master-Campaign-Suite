@@ -4,11 +4,15 @@ import {
   CONTENT_TYPES,
   buildExtractionPrompt,
   parseExtraction,
+  extractionMaxTokens,
   CR_TO_XP,
 } from '../../utils/compendiumExtractor'
 
 const SPELL_LEVELS   = ['Cantrip','1st','2nd','3rd','4th','5th','6th','7th','8th','9th']
 const SEARCH_CHUNK_K = 8   // how many embedding chunks to retrieve per search
+// Subclasses and monsters can span several pages (multiple features/actions),
+// so pull more chunks for them to avoid missing later sections.
+const SEARCH_CHUNK_K_BY_TYPE = { subclass: 14, monster: 12 }
 
 // ── Main modal component ──────────────────────────────────────────────────────
 
@@ -59,7 +63,8 @@ export default function SourceBookImportModal({ initialType = 'spell', onClose, 
       const itemKeys = anchor ? `${name} ${anchor}` : name
 
       const searchQuery = `${name} ${CONTENT_TYPES[contentType].searchHint}`
-      const chunks = await window.electronAPI.embed.search(searchQuery, SEARCH_CHUNK_K, itemKeys, sourceId ? Number(sourceId) : null)
+      const chunkK = SEARCH_CHUNK_K_BY_TYPE[contentType] ?? SEARCH_CHUNK_K
+      const chunks = await window.electronAPI.embed.search(searchQuery, chunkK, itemKeys, sourceId ? Number(sourceId) : null)
 
       if (!chunks || chunks.length === 0) {
         setError('No matching passages found in your source books. Make sure the relevant book is indexed.')
@@ -79,7 +84,7 @@ export default function SourceBookImportModal({ initialType = 'spell', onClose, 
       // 2. Build extraction prompt and call AI
       setPhase('extracting')
       const { system, user } = buildExtractionPrompt(contentType, name, relevant)
-      const rawResult = await window.electronAPI.ai.complete(system, user)
+      const rawResult = await window.electronAPI.ai.complete(system, user, { maxTokens: extractionMaxTokens(contentType) })
 
       // 3. Parse and normalise
       const data = parseExtraction(contentType, rawResult)
@@ -604,7 +609,7 @@ const pv = {
   fieldValue: { color: '#c9c0a8', lineHeight: 1.4 },
   fullField:  { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 },
   longText:   { color: '#c9c0a8', fontSize: '0.8rem', lineHeight: 1.6, whiteSpace: 'pre-wrap' },
-  actionItem: { color: '#c9c0a8', fontSize: '0.8rem', lineHeight: 1.5, padding: '4px 0', borderTop: '1px solid #1a1208' },
+  actionItem: { color: '#c9c0a8', fontSize: '0.8rem', lineHeight: 1.5, padding: '4px 0', borderTop: '1px solid #1a1208', whiteSpace: 'pre-wrap' },
   abilityRow: { display: 'flex', gap: 6, margin: '4px 0' },
   abilityCell:  { flex: 1, background: '#1a1208', borderRadius: 4, padding: '4px 2px', textAlign: 'center' },
   abilityLabel: { color: '#a89060', fontSize: '0.65rem', fontWeight: 700 },
@@ -613,5 +618,5 @@ const pv = {
   featureItem:  { padding: '6px 0', borderTop: '1px solid #1a1208' },
   featureHeader:{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 },
   featureLevel: { color: '#a89060', fontSize: '0.75rem', background: '#1a1208', padding: '1px 6px', borderRadius: 3 },
-  featureDesc:  { color: '#c9c0a8', fontSize: '0.8rem', lineHeight: 1.5 },
+  featureDesc:  { color: '#c9c0a8', fontSize: '0.8rem', lineHeight: 1.5, whiteSpace: 'pre-wrap' },
 }

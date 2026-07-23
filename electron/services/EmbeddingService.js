@@ -122,13 +122,14 @@ class EmbeddingService {
     const results     = await this.index.queryItems(queryVector, topK)
 
     if (results.length > 0) {
-      return results.map(r => ({
+      const hits = results.map(r => ({
         score:       r.score,
         chunk_id:    r.item.metadata.chunk_id,
         source_id:   r.item.metadata.source_id,
         page_number: r.item.metadata.page_number,
         text:        r.item.metadata.text,
       }))
+      return this._expandContiguous(hits)
     }
 
     // Vectra index empty — fall back to SQLite keyword search.
@@ -197,35 +198,180 @@ class EmbeddingService {
       .sort((a, b) => b.score - a.score)
       .slice(0, Math.ceil(topK / 2))
 
-    // Fetch the immediately next chunk from the same source if it's on the same
-    // or adjacent page — captures multi-paragraph items without bleeding into
-    // the next entry.
-    const topSeed = ranked[0]
-    const seenIds = new Set(ranked.map(c => c.chunk_id))
-    const following = []
+    return this._expandContiguous(ranked)
+  }
 
-    if (topSeed) {
-      const nextChunk = this.db.get(
-        `SELECT id, source_id, chunk_index, page_number, text
-           FROM pdf_chunks
-          WHERE source_id = ? AND id = ?`,
-        [topSeed.source_id, topSeed.chunk_id + 1]
-      )
-      if (nextChunk && !seenIds.has(nextChunk.id) &&
-          nextChunk.page_number <= topSeed.page_number + 1) {
-        seenIds.add(nextChunk.id)
-        following.push({
-          score:       topSeed.score * 0.9,
-          chunk_id:    nextChunk.id,
-          source_id:   nextChunk.source_id,
-          chunk_index: nextChunk.chunk_index,
-          page_number: nextChunk.page_number,
-          text:        nextChunk.text,
-        })
+  // A multi-page entry (e.g. a subclass with several features, or a monster
+  // with many actions) is split across several sequential chunks in
+  // pdf_chunks. Raw top-K search only returns chunks that are individually
+  // similar to the query — a feature's opening sentence scores well (it
+  // repeats keywords from the query), but the plain-prose continuation right
+  // after it often doesn't and gets left out of the top-K, silently dropping
+  // or truncating features.
+  //
+  // Rather than walking blindly outward from a single anchor (which reaches
+  // just as far backward into the PREVIOUS entry as it does forward into the
+  // one we want, wasting the downstream character budget), we use the fact
+  // that several of the top-K hits already land at different points inside the
+  // target entry. We take the span those hits cover — from the earliest to the
+  // latest chunk near the anchor — and simply fill the gaps between them, plus
+  // a small margin (a little before to catch the heading, a little after to
+  // catch a trailing feature whose chunk didn't match the query, e.g. a
+  // subclass's capstone). This keeps the whole entry contiguous without
+  // dragging in the neighbouring one.
+  _expandContiguous(hits) {
+    if (!hits.length) return hits
+
+    const anchor = hits.reduce((best, h) => (h.score > best.score ? h : best), hits[0])
+    const srcId  = anchor.source_id
+
+    // Map each same-source hit to its chunk_index (vector hits don't carry it).
+    const sameSrc = hits.filter(h => h.source_id === srcId)
+    const idxRows = this.db.all(
+      `SELECT id, chunk_index FROM pdf_chunks
+        WHERE source_id = ? AND id IN (${sameSrc.map(() => '?').join(',')})`,
+      [srcId, ...sameSrc.map(h => h.chunk_id)]
+    )
+    const idxById   = new Map(idxRows.map(r => [r.id, r.chunk_index]))
+    const anchorIdx = idxById.get(anchor.chunk_id)
+    if (anchorIdx == null) return hits
+
+    // Only consider hits in the anchor's neighbourhood so a stray far-away
+    // match in the same book can't blow the span wide open.
+    const NEIGHBOUR = 12
+    const nearIdx = sameSrc
+      .map(h => idxById.get(h.chunk_id))
+      .filter(ci => ci != null && Math.abs(ci - anchorIdx) <= NEIGHBOUR)
+
+    const BACK_MARGIN = 2   // chunks before the first hit — catches the heading
+    const FWD_MARGIN  = 4   // chunks after the last hit — catches a capstone feature
+    const lo = Math.min(...nearIdx) - BACK_MARGIN
+    const hi = Math.max(...nearIdx) + FWD_MARGIN
+
+    const rows = this.db.all(
+      `SELECT id, source_id, chunk_index, page_number, text
+         FROM pdf_chunks
+        WHERE source_id = ? AND chunk_index BETWEEN ? AND ?
+        ORDER BY chunk_index`,
+      [srcId, lo, hi]
+    )
+
+    const scoreById = new Map(hits.map(h => [h.chunk_id, h.score]))
+    const anchorPage = anchor.page_number
+    const cluster = []
+    for (const r of rows) {
+      // Drop chunks whose page drifts too far from the anchor — a guard against
+      // the margins spilling into an adjacent entry on the next/previous page.
+      if (anchorPage != null && r.page_number != null &&
+          Math.abs(r.page_number - anchorPage) > 3) continue
+      cluster.push({
+        score:       scoreById.get(r.id) ?? anchor.score * 0.8,
+        chunk_id:    r.id,
+        source_id:   r.source_id,
+        page_number: r.page_number,
+        text:        r.text,
+      })
+    }
+
+    // Cluster goes first (already in reading order), ahead of any other-source
+    // hits, so the contiguous entry can't be crowded out of the downstream
+    // character budget by lower-relevance chunks from elsewhere.
+    const seen = new Set(cluster.map(c => c.chunk_id))
+    const rest = hits.filter(h => !seen.has(h.chunk_id))
+    return [...cluster, ...rest]
+  }
+
+  // Scan all chunks for a source book and return candidate item names by type.
+  // Uses structural patterns in PDF text (ALL_CAPS monster headers, spell level
+  // lines, cost patterns for equipment) rather than AI — fast and offline.
+  scanSource(sourceId, contentType) {
+    const chunks = this.db.all(
+      'SELECT text FROM pdf_chunks WHERE source_id = ? ORDER BY chunk_index',
+      [sourceId]
+    )
+
+    const names = new Set()
+
+    for (const { text } of chunks) {
+      const t = text.replace(/\r/g, '')
+
+      if (contentType === 'monster') {
+        // Stat block chunks always contain both "Armor Class" and "Hit Points"
+        if (!t.includes('Armor Class') || !t.includes('Hit Points')) continue
+        const acPos = t.indexOf('Armor Class')
+        const before = t.slice(0, acPos)
+        const lines = before.split('\n').map(l => l.trim()).filter(Boolean)
+        // Walk back from "Armor Class" to find the ALL_CAPS name line
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const line = lines[i]
+          if (line.length >= 3 && line.length <= 60 &&
+              /^[A-Z][A-Z\s,'\-\/]{2,}$/.test(line)) {
+            names.add(this._toTitleCase(line))
+            break
+          }
+        }
+      }
+
+      else if (contentType === 'spell') {
+        // Spell entry chunks always have "Casting Time" and "Duration"
+        if (!t.includes('Casting Time') || !t.includes('Duration')) continue
+        const lines = t.split('\n').map(l => l.trim()).filter(Boolean)
+        for (let i = 0; i < lines.length - 1; i++) {
+          const next = lines[i + 1]
+          if (/^\d+(?:st|nd|rd|th)-level\s+\w+/i.test(next) ||
+              /^\w[\w\s]+ cantrip/i.test(next)) {
+            const name = lines[i]
+            if (/^[A-Z][a-zA-Z\s'\-,]{1,49}$/.test(name) &&
+                name.split(' ').length <= 6) {
+              names.add(name)
+            }
+          }
+        }
+      }
+
+      else if (contentType === 'equipment') {
+        // Equipment entries reference a gold/silver/copper piece price
+        if (!/\d+\s*(?:gp|sp|cp)\b/i.test(t)) continue
+        const lines = t.split('\n').map(l => l.trim()).filter(Boolean)
+        if (!lines.length) continue
+        // ALL_CAPS header (some books format equipment like monsters)
+        const capsLine = lines.find(l =>
+          l.length >= 3 && l.length <= 50 && /^[A-Z][A-Z\s,'\-]{2,}$/.test(l)
+        )
+        if (capsLine) { names.add(this._toTitleCase(capsLine)); continue }
+        // Title Case first line, excluding generic section headings
+        const first = lines[0]
+        if (/^[A-Z][a-zA-Z\s'\-,+]{1,49}$/.test(first) &&
+            !/^(?:Chapter|Table|Appendix|Equipment|Weapons|Armor|Adventuring)\b/.test(first)) {
+          names.add(first)
+        }
+      }
+
+      else if (contentType === 'subclass') {
+        if (!/\bsubclass\b|\barchetype\b/i.test(t)) continue
+        const lines = t.split('\n').map(l => l.trim()).filter(Boolean)
+        for (const line of lines) {
+          if (/^[A-Z][a-zA-Z\s'\-]{3,49}$/.test(line) &&
+              line.split(' ').length >= 2 &&
+              line.split(' ').length <= 5 &&
+              !/\b(?:The|Your|You|They|When|While|This|These|That|At|If|In|On)\b/.test(line)) {
+            names.add(line)
+            break
+          }
+        }
       }
     }
 
-    return [...ranked, ...following].slice(0, topK)
+    return [...names].sort()
+  }
+
+  _toTitleCase(str) {
+    const LOWER = new Set(['of','the','a','an','and','or','in','to','for','with','by','at','from'])
+    return str.toLowerCase().split(' ').map((word, i) =>
+      i === 0 || !LOWER.has(word)
+        ? word.charAt(0).toUpperCase() + word.slice(1)
+        : word
+    ).join(' ')
   }
 
   _countOccurrences(text, phrase) {

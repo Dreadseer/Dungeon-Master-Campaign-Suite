@@ -76,7 +76,7 @@ const SCHEMAS = {
   "description": string (1-3 sentence flavor/overview),
   "unlock_level": number (level subclass is chosen, typically 1, 2, or 3),
   "features": [
-    {"name": string, "level_gained": number, "description": string}
+    {"name": string, "level_gained": number, "description": string (COMPLETE feature text verbatim — every paragraph, not just the opening sentence)}
   ]
 }`,
 }
@@ -91,7 +91,7 @@ function _ignoreHint(type) {
     case 'equipment':
       return 'Include magic items and wondrous items — they count as equipment. Ignore any spells or monsters with similar names.'
     case 'subclass':
-      return 'If the passages contain spells, equipment, or monster entries, ignore them entirely.'
+      return 'If the passages contain spells, equipment, or monster entries, ignore them entirely. Include EVERY feature the subclass grants at every level (there are often 4 or more, ending with a high-level capstone around level 14) — do not skip any feature even if the passages are long or a feature appears near the very end. Copy each feature\'s full description verbatim, not a shortened summary. A feature is a named heading followed by a line like "6th-level <Subclass> feature"; use that line to set level_gained. IMPORTANT: some features reference a creature stat block (for example a "Dancing Item" block with Armor Class, Hit Points, Speed, STR/DEX/CON scores, Senses, and its own ACTIONS list). That stat block is NOT a subclass feature — never create a feature for it and never merge its lines into a feature\'s description; extract only the class-feature prose. For the top-level "description" field use the subclass\'s introductory flavor paragraph(s) — ignore italic margin quotes, art captions, and author bylines (e.g. a "—Tasha" caption or a stray "TASHA" line).'
     default:
       return ''
   }
@@ -108,14 +108,39 @@ function _userIgnoreHint(type, name) {
 
 // Max characters of source text to send per request — keeps local models within
 // their context window (~8k tokens ≈ ~6k chars of source + prompt overhead).
+// Subclasses and monsters often span multiple features/actions across several
+// pages of source text, so they get a much larger budget than single-entry
+// types — a full subclass (4+ features, each several paragraphs verbatim) can
+// run past 12k chars of source once the surrounding chunks are stitched in.
 const MAX_PASSAGE_CHARS = 4000
+const MAX_PASSAGE_CHARS_BY_TYPE = {
+  subclass: 20000,
+  monster:  12000,
+}
+
+// Max output tokens for the extraction response. When the model senses it is
+// near this ceiling it gracefully closes the JSON early — which silently drops
+// later features and truncates long descriptions mid-sentence. A full subclass
+// copied verbatim can exceed 4k tokens, so give the multi-section types plenty
+// of headroom.
+const MAX_OUTPUT_TOKENS_BY_TYPE = {
+  subclass: 8192,
+  monster:  8192,
+  spell:    2048,
+  equipment: 2048,
+}
+
+export function extractionMaxTokens(type) {
+  return MAX_OUTPUT_TOKENS_BY_TYPE[type] ?? 1536
+}
 
 export function buildExtractionPrompt(type, name, chunks) {
   // Trim passages to fit within the local model's context window.
+  const maxPassageChars = MAX_PASSAGE_CHARS_BY_TYPE[type] ?? MAX_PASSAGE_CHARS
   let total = 0
   const cappedChunks = []
   for (const c of chunks) {
-    if (total + c.text.length > MAX_PASSAGE_CHARS) break
+    if (total + c.text.length > maxPassageChars) break
     cappedChunks.push(c)
     total += c.text.length
   }
@@ -131,6 +156,9 @@ export function buildExtractionPrompt(type, name, chunks) {
       'Return ONLY valid JSON — no markdown fences, no explanations, no extra text.',
       'If a field cannot be determined from the passages, use: "" for strings, 0 for numbers, false for booleans, [] for arrays.',
       'Do not invent or fabricate content — only extract what is explicitly stated in the passages.',
+      'Description and feature-text fields must be copied verbatim and in full — every sentence and paragraph. Never shorten, summarize, or stop after the first sentence.',
+      'Preserve the original paragraph structure in text fields: separate paragraphs with a blank line ("\\n\\n"). When a feature lists named sub-options (for example "Ability Check.", "Attack Roll.", "Saving Throw."), start each one on its own new paragraph beginning with that bold lead-in term.',
+      'The source text comes from a PDF and may contain artifacts: words split across line breaks by a hyphen (e.g. "intangi-ble" or "Cre- ation"), stray page numbers, garbled characters, and column headers/footers. Rejoin hyphen-split words into whole words, drop the stray artifacts, and otherwise keep the wording exactly as written.',
       `CRITICAL: You are extracting a ${type.toUpperCase()} entry only. ${_ignoreHint(type)} Only read the ${type} entry.`,
     ].join('\n'),
 

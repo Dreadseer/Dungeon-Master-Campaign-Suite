@@ -221,7 +221,7 @@ export default function Settings() {
         <div style={s.fieldGroup}>
           <label style={s.label}>Online Model (Claude)</label>
           <input style={{ ...s.input, color: '#666', cursor: 'not-allowed' }}
-            value="claude-sonnet-4-20250514" readOnly
+            value="claude-sonnet-5" readOnly
             title="Locked per project spec — change requires code update" />
           <span style={s.hint}>Locked — defined in AIService.js</span>
         </div>

@@ -7,7 +7,7 @@ class AIService {
     this.anthropicClient  = null
     this.ollamaBaseUrl    = 'http://localhost:11434'
     this.ollamaModel      = 'llama3:latest'
-    this.anthropicModel   = 'claude-sonnet-4-20250514'
+    this.anthropicModel   = 'claude-sonnet-5'
   }
 
   async initialize(apiKey) {
@@ -50,18 +50,31 @@ class AIService {
       const response = await this.anthropicClient.messages.create({
         model:      this.anthropicModel,
         max_tokens: options.maxTokens || 1024,
+        // Disable thinking: this is a structured extraction/chat call, and on
+        // models where thinking is on by default it would both consume the
+        // max_tokens budget and lead the content array with a thinking block.
+        thinking:   { type: 'disabled' },
         system:     systemPrompt,
         messages:   [{ role: 'user', content: userMessage }],
       })
-      result = response.content[0].text
+      // Read the first text block rather than content[0], which may be a
+      // thinking block on thinking-capable models.
+      result = response.content.find(b => b.type === 'text')?.text ?? ''
 
     } else if (this.mode === 'offline-ollama') {
+      // Ollama defaults to a 2048-token context window, which silently truncates
+      // long extraction prompts (a full subclass/monster) before the model ever
+      // sees the later features. Size the window to fit the input plus the
+      // requested output so nothing is dropped.
+      const maxOut  = options.maxTokens || 1024
+      const inputTokens = Math.ceil((systemPrompt.length + userMessage.length) / 4)
+      const numCtx  = Math.min(8192, inputTokens + maxOut + 512)
       const body = await this._ollamaPost('/api/generate', {
         model:   this._ollamaModel(),
         prompt:  userMessage,
         system:  systemPrompt,
         stream:  false,
-        options: { num_gpu: 0 },
+        options: { num_gpu: 0, num_predict: maxOut, num_ctx: numCtx },
       })
       result = body.response
 
@@ -90,6 +103,7 @@ class AIService {
       const stream = await this.anthropicClient.messages.stream({
         model:      this.anthropicModel,
         max_tokens: 1024,
+        thinking:   { type: 'disabled' },
         system:     systemPrompt,
         messages,
       })

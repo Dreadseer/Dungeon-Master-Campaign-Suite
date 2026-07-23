@@ -8,8 +8,8 @@ function registerAiHandlers(aiService, keyService) {
 
   ipcMain.handle('ai:getMode', () => ({ mode: aiService.getMode() }))
 
-  ipcMain.handle('ai:complete', async (_, systemPrompt, userMessage) => {
-    return aiService.complete(systemPrompt, userMessage)
+  ipcMain.handle('ai:complete', async (_, systemPrompt, userMessage, options) => {
+    return aiService.complete(systemPrompt, userMessage, options)
   })
 
   ipcMain.handle('ai:saveKey', async (_, key) => {
