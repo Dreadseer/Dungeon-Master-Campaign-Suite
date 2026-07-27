@@ -1,658 +1,431 @@
 # Dungeon Master's Campaign Suite (DMCS)
 
-An AI-assisted desktop application for tabletop RPG Dungeon Masters. DMCS runs as a local Electron app with a React frontend, a SQLite database, and optional AI features powered by either the Anthropic Claude API (online) or a locally-running Ollama model (offline).
+**A local-first Electron desktop app that gives a D&D 5e Dungeon Master one place to run an entire campaign — world building, maps, characters, encounters, a compendium, optional AI, and live player views.**
 
-**Version:** 1.0.0 — All 8 phases complete.
+DMCS solves the "twelve browser tabs and a stack of PDFs" problem. Everything a DM needs during prep and at the table — NPCs and factions, battle maps with fog of war, full 5e character sheets, encounter/initiative tracking, and a searchable monster/spell/item compendium — lives in a single offline desktop app backed by a local SQLite database. AI is **optional** and, when enabled, can answer rules questions from your own uploaded PDFs and import sourcebook content into the compendium. Players can connect to a read-only view of the map and their character sheet, either through a second Electron window or a browser over your LAN / an ngrok tunnel.
+
+**Version:** 1.0.0 — all 8 build phases complete.
+
+---
+
+## Screenshot
+
+> _UI/desktop app — add a screenshot of the main DM window (Campaign Manager or Map Engine) here._
+> `![DMCS main window](docs/screenshot-main.png)`
+> _(No screenshot is committed yet; the path above is a placeholder.)_
 
 ---
 
 ## Table of Contents
 
-1. [What This App Does](#what-this-app-does)
-2. [Tech Stack](#tech-stack)
-3. [Prerequisites](#prerequisites)
-4. [Installation & First Run](#installation--first-run)
-5. [Development Workflow](#development-workflow)
-6. [Project Structure](#project-structure)
-7. [Architecture Overview](#architecture-overview)
-8. [The IPC Chain](#the-ipc-chain)
+1. [Tech Stack](#tech-stack)
+2. [Prerequisites](#prerequisites)
+3. [Setup](#setup)
+4. [Environment Variables](#environment-variables)
+5. [Running the Project](#running-the-project)
+6. [Architecture](#architecture)
+7. [Project Structure](#project-structure)
+8. [Core Usage (the IPC chain)](#core-usage-the-ipc-chain)
 9. [Database Schema](#database-schema)
-10. [Module Reference](#module-reference)
+10. [Modules](#modules)
 11. [AI Layer](#ai-layer)
-12. [Player View](#player-view-phase-8)
-13. [State Management](#state-management)
-14. [Utility Libraries](#utility-libraries)
-15. [Adding a New Feature](#adding-a-new-feature)
-16. [Building for Production](#building-for-production)
-17. [Troubleshooting](#troubleshooting)
-
----
-
-## What This App Does
-
-DMCS gives Dungeon Masters a single desktop app to manage an entire campaign:
-
-| Module | What it does |
-|---|---|
-| Campaign Manager | Create, load, and switch between campaigns |
-| World Builder | Factions, Locations, NPCs, Lore, and named Connections between them |
-| Mind Map | Interactive React Flow graph of all world entities |
-| Map Engine | Upload battle maps, paint fog of war, place tokens |
-| Compendium | Browse SRD monsters/spells/equipment; create homebrew entries |
-| Character Sheets | Full D&D 5e character sheets with level-up wizard |
-| Encounter Builder | Build encounters, calculate XP, run initiative tracker with HP sync |
-| Combat Calculator | Standalone XP/CR calculator |
-| AI Assistant | RAG-powered rules Q&A with PDF source upload and streaming answers |
-| Player View | A separate Electron window for players — fog-enforced map, read-only character sheet, live DM broadcasts |
+12. [Player Views](#player-views)
+13. [Testing](#testing)
+14. [Building the Windows Installer](#building-the-windows-installer)
+15. [Troubleshooting](#troubleshooting)
+16. [Open Questions](#open-questions)
+17. [License](#license)
 
 ---
 
 ## Tech Stack
 
-| Layer | Library / Tool | Version |
-|---|---|---|
-| Desktop shell | Electron | 33 |
-| UI framework | React | 18 |
-| Build tool | Vite | 6 |
-| Routing | React Router v6 | 6 |
-| State management | Zustand | 5 |
-| Database | better-sqlite3 (SQLite) | 12 |
-| Map rendering | React-Konva | 18 |
-| Mind maps | @xyflow/react (React Flow) + @dagrejs/dagre | 12 / 3 |
-| AI — online | Anthropic Claude API (@anthropic-ai/sdk) | 0.100 |
-| AI — offline | Ollama (local HTTP) | — |
-| PDF parsing | pdf-parse | 2 |
-| Vector search | vectra | 0.15 |
-| Image export | html-to-image | 1.11 |
+Versions are transcribed from `package.json` (semver ranges as written there).
 
-> **Important:** These choices are locked for the project. Do not substitute libraries without updating this README and the spec documents.
+| Layer | Package | Version |
+|---|---|---|
+| Language | JavaScript + JSX | — (no `tsconfig.json`; `@types/*` are editor aids only) |
+| Package manager | npm | `package-lock.json` committed |
+| Node runtime | — | **Not pinned** — no `engines` field (see [Prerequisites](#prerequisites)) |
+| Desktop shell | electron | `^33.2.1` |
+| UI | react / react-dom | `^18.3.1` |
+| Build tool | vite / @vitejs/plugin-react | `^6.0.1` / `^4.3.3` |
+| Routing | react-router-dom | `^6.27.0` (**HashRouter** — see [Architecture](#architecture)) |
+| State | zustand | `^5.0.1` |
+| Database | better-sqlite3 (SQLite) | `^12.10.0` |
+| Maps / canvas | konva / react-konva | `^10.3.0` / `^18.2.10` |
+| Mind map | @xyflow/react (React Flow) / @dagrejs/dagre | `^12.11.0` / `^3.0.0` |
+| AI — online | @anthropic-ai/sdk (Claude API) | `^0.100.0` |
+| AI — offline | Ollama (local HTTP, no npm dep) | — |
+| PDF parsing | pdf-parse | `1.1.1` (pinned via `overrides`) |
+| Vector search | vectra | `^0.15.0` |
+| Remote Player Network | express / socket.io / socket.io-client | `^5.2.1` / `^4.8.3` / `^4.8.3` |
+| Tunnel / QR | @ngrok/ngrok / qrcode | `^1.7.0` / `^1.5.4` |
+| Image export | html-to-image | `^1.11.13` |
+| Packaging | electron-builder / @electron/rebuild | `^25.1.8` / `^4.0.4` |
+
+> **Note:** These library choices are treated as locked for the project. Don't substitute them without updating this README and the `DMCS_*` spec docs.
 
 ---
 
 ## Prerequisites
 
-Before you can run this project you need the following installed:
+### Required to run in development
 
-### Required
+- **Node.js 20+** and **npm 10+** — the Node version is *not* enforced by an `engines` field; 20+ is the tested baseline.
+- **Native build toolchain** for compiling `better-sqlite3` during `npm install`:
+  - **Windows:** Python 3 + Visual Studio Build Tools (C++)
+  - **macOS:** Xcode Command Line Tools
+  - These are needed only to *install/build* the app, never by end users of the packaged installer.
 
-- **Node.js 20+** — [nodejs.org](https://nodejs.org/)
-- **npm 10+** — comes with Node.js
-- **Python 3** — required by `better-sqlite3` native build (node-gyp dependency)
-- **Visual Studio Build Tools** (Windows) or **Xcode Command Line Tools** (macOS) — also required by node-gyp for native compilation
+> ⚠️ **Path-with-spaces caveat:** `node-gyp` (used during `npm install`'s native build) can fail on directories containing spaces. If `npm install` fails on `better-sqlite3`, install from a space-free path (e.g. `C:\dev\dmcs`).
 
-### Optional (for AI features)
+### Optional (only for AI features)
 
-- **Anthropic API key** — for Claude-powered AI features. Get one at [console.anthropic.com](https://console.anthropic.com)
-- **Ollama** — for fully offline AI. Download at [ollama.ai](https://ollama.ai) then pull the required models:
+- **Anthropic API key** — for online Claude features. Entered in the app's Settings (stored via Electron `safeStorage`), not as an env var.
+- **Ollama** — for fully offline AI. Install from [ollama.com](https://ollama.com), then pull the models DMCS uses:
+  ```bash
+  ollama pull llama3            # chat / extraction model
+  ollama pull nomic-embed-text  # required for PDF embedding + RAG
+  ```
+- **ngrok auth token** — only if you want remote players to connect over the internet (entered in Settings).
 
-```bash
-ollama pull llama3
-ollama pull nomic-embed-text   # required for PDF embedding
-```
+The base app is fully usable with **no AI and no network**.
 
 ---
 
-## Installation & First Run
+## Setup
 
 ```bash
-# 1. Clone the repository
-git clone <repo-url>
+# 1. Clone
+git clone git@github.com:Dreadseer/Dungeon-Master-Campaign-Suite.git
 cd "Dungeon Master Campaign Suite"
 
 # 2. Install dependencies
-#    postinstall automatically runs electron-rebuild for better-sqlite3
+#    postinstall runs: electron-rebuild -f -w better-sqlite3
+#    (rebuilds the native SQLite module for this Electron version)
 npm install
 
-# 3. Start in development mode
+# 3. Launch in development
 npm run dev
 ```
 
-`npm run dev` does two things in parallel:
-- Starts the **Vite dev server** on `http://localhost:5173`
-- Waits for that server, then launches **Electron** pointing to it
+`npm run dev` runs two processes in parallel (via `concurrently`):
+- **Vite dev server** on `http://localhost:5173`
+- **Electron** (with `NODE_ENV=development`), which waits for Vite then loads it.
 
-The app window should open within a few seconds. On first launch, DMCS will:
-1. Create the SQLite database file at your OS's app data path (`%APPDATA%\dmcs\dmcs.db` on Windows, `~/Library/Application Support/dmcs/dmcs.db` on macOS)
-2. Run all 5 database migrations automatically
-3. Seed the SRD cache (monsters, spells, equipment, conditions) from the D&D 5e API — this happens once and is stored locally
+On first launch DMCS will, automatically:
+1. Create its SQLite database under the OS user-data directory (see [Where is the database?](#where-is-the-database)).
+2. Run all **8** database migrations in order (`DatabaseService.runMigrations()`).
+3. Seed the SRD cache (monsters, spells, equipment, classes) from `https://www.dnd5eapi.co` — **once**, over the network, then cached locally.
 
-### Configure AI (optional)
-
-1. Open the app and navigate to **Settings** (bottom of the sidebar)
-2. Paste your Anthropic API key — it is stored encrypted using Electron's `safeStorage` (the OS keychain), never in plain text
-3. If you have Ollama running locally, the app will detect it automatically and offer it as a fallback
+**Verified in this environment:** `npm install` and `npm run build:renderer` (`vite build`) both succeed. The full installer build is covered in [Building the Windows Installer](#building-the-windows-installer). `npm run dev` opens a GUI and was not exercised headlessly.
 
 ---
 
-## Development Workflow
+## Environment Variables
 
-```bash
-npm run dev       # Start Electron + Vite dev server (hot reload for React)
-npm run build     # Build renderer with Vite, then package with electron-builder
-npm run electron  # Run Electron against an already-running Vite server
+DMCS uses **one** environment variable, and there is **no `.env` file** — nothing is required to run it.
+
+| Name | Required? | Purpose | Set by |
+|---|---|---|---|
+| `NODE_ENV` | No | `=== 'development'` selects the Vite dev server; otherwise the packaged renderer is loaded from disk. Read at `electron/main.js:23,53,122` and `electron/server/PlayerServer.js:25`. | Automatically by the npm scripts (`cross-env NODE_ENV=development`). You do not set it manually. |
+
+Secrets are **not** env vars: the Anthropic API key and ngrok token are entered in the app UI and encrypted with Electron `safeStorage` (`electron/services/KeyService.js`).
+
+---
+
+## Running the Project
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | DM app: Vite dev server (`:5173`) + Electron with hot reload for React. |
+| `npm run dev:player` | Browser player app dev server (Vite on `:5174`), proxying `/api` and `/socket.io` to the Express server on `:3001`. |
+| `npm run build:renderer` | Production build of both renderers → `dist/renderer/` (DM) and `dist/player/` (browser player). |
+| `npm run build` | `build:renderer`, then `electron-builder` (packages for the current OS). |
+| `npm run build:win` | `build:renderer`, then the Windows NSIS installer (`electron-builder --win nsis --x64`). See [Building the Windows Installer](#building-the-windows-installer). |
+| `npm run electron` | Runs Electron against an already-running Vite server. |
+
+**Hot reload:** Vite hot-reloads everything under `src/`. The Electron **main process does not hot-reload** — after editing anything in `electron/`, quit and restart `npm run dev`.
+
+---
+
+## Architecture
+
+### Two-process model
+
+Electron runs two isolated JavaScript environments that cannot share memory. All database, file, AI, and server work happens in the **main process**; React runs in the sandboxed **renderer** and reaches main only through a narrow `window.electronAPI` bridge exposed by `preload.js`.
+
+```mermaid
+flowchart TB
+    subgraph MAIN["MAIN PROCESS  (electron/) — Node.js, full OS access"]
+        DB["DatabaseService<br/>(better-sqlite3)"]
+        AI["AIService<br/>(Claude API / Ollama)"]
+        EMB["EmbeddingService + RAG<br/>(vectra, Ollama embeddings)"]
+        PDF["PdfIngestionService"]
+        KEY["KeyService<br/>(safeStorage)"]
+        SRV["PlayerServer<br/>(Express + Socket.IO + ngrok)"]
+        IPCH["ipc/*Handlers.js"]
+    end
+
+    subgraph PRELOAD["preload.js — contextBridge (the ONLY bridge)"]
+        API["window.electronAPI.*"]
+    end
+
+    subgraph RENDER["RENDERER  (src/) — React, no Node APIs"]
+        UI["React + HashRouter + Zustand"]
+    end
+
+    subgraph EXT["External / optional"]
+        CLAUDE["Anthropic Claude API"]
+        OLLAMA["Ollama :11434"]
+        SRD["dnd5eapi.co"]
+        BROWSER["Player browser app<br/>(player/ served over LAN / ngrok)"]
+    end
+
+    UI <-->|"ipcRenderer.invoke / on"| API
+    API <-->|"ipcMain.handle"| IPCH
+    IPCH --> DB & AI & EMB & PDF & KEY & SRV
+    AI --> CLAUDE & OLLAMA
+    EMB --> OLLAMA
+    DB -. "first-run seed" .-> SRD
+    SRV <-->|"HTTP + WebSocket"| BROWSER
 ```
 
-### Hot reload
+> **Rule:** Never `import` `better-sqlite3`, `fs`, `path`, `@anthropic-ai/sdk`, `express`, etc. inside `src/` — it crashes the renderer. Everything crosses through IPC.
 
-The Vite dev server provides hot module replacement for all React components under `src/`. Electron itself does **not** hot reload — if you change anything in `electron/` (main process, preload, database, services, or IPC handlers), you must **quit and restart** `npm run dev`.
+### Why HashRouter (not BrowserRouter)
 
-### DevTools
-
-- **DM window:** Right-click → Inspect Element, or `Ctrl+Shift+I`
-- **Player window:** Same shortcut while the player window is focused
+The renderer uses **`HashRouter`** (`src/App.jsx`). In a packaged build the renderer is loaded from disk with `loadFile(...)` (a `file://` URL), where path-style routing can't resolve deep routes like `/player`. Hash routing keeps the route in the URL fragment (`index.html#/player?campaign=1`), which resolves correctly from `file://`. The secondary windows (Player View, pop-out combat map) rely on this.
 
 ---
 
 ## Project Structure
 
+Top two levels, annotated. `dist/`, `node_modules/`, and the `DMCS_*.md` design/spec docs are omitted.
+
 ```
 Dungeon Master Campaign Suite/
+├── electron/                 # MAIN process (Node.js)
+│   ├── main.js               # Entry: window creation, service wiring, IPC registration
+│   ├── preload.js            # contextBridge → window.electronAPI (the only renderer bridge)
+│   ├── database/             # DatabaseService.js — SQLite connection, 8 migrations, CRUD
+│   ├── services/             # AIService, EmbeddingService, RAGService, PdfIngestionService,
+│   │                         #   SrdService, KeyService
+│   ├── ipc/                  # *Handlers.js — ipcMain.handle for db:/ai:/srd:/pdf:/embed:/…
+│   └── server/               # PlayerServer.js — Express + Socket.IO for the browser player
 │
-├── electron/                       # Main process (Node.js — no DOM, no React)
-│   ├── main.js                     # Electron entry: window creation, IPC registration
-│   ├── preload.js                  # contextBridge surface — the ONLY bridge to the renderer
-│   │
-│   ├── database/
-│   │   └── DatabaseService.js      # SQLite connection, migrations, all CRUD methods
-│   │
-│   ├── services/
-│   │   ├── AIService.js            # Claude API + Ollama strategy; streaming support
-│   │   ├── SrdService.js           # Fetch & cache SRD data (monsters, spells, equipment)
-│   │   ├── KeyService.js           # API key encrypt/decrypt via Electron safeStorage
-│   │   ├── PdfIngestionService.js  # PDF → text chunks → stored in pdf_chunks table
-│   │   ├── EmbeddingService.js     # Embed chunks via Ollama nomic-embed-text; vectra index
-│   │   └── RAGService.js           # Semantic search + Claude answer generation
-│   │
-│   └── ipc/
-│       ├── dbHandlers.js           # All db:* ipcMain handlers (CRUD for all tables)
-│       ├── aiHandlers.js           # All ai:* ipcMain handlers (generate, stream, RAG)
-│       ├── srdHandlers.js          # All srd:* ipcMain handlers (fetch, search cache)
-│       ├── pdfHandlers.js          # All pdf:* ipcMain handlers (upload, ingest, status)
-│       ├── embeddingHandlers.js    # All embedding:* ipcMain handlers
-│       └── fileHandlers.js         # File system helpers (image import, export)
+├── src/                      # RENDERER (React) — DM window
+│   ├── main.jsx / App.jsx    # React entry; HashRouter + routes
+│   ├── PlayerApp.jsx         # Root for the in-app Electron Player View (#/player)
+│   ├── pages/                # One file per module (CampaignManager, MapEngine, Compendium, …)
+│   ├── components/           # Feature + shared components (map/, character/, compendium/, …)
+│   ├── stores/               # Zustand: campaignStore (persisted), playerStore
+│   └── utils/                # Pure helpers: dnd5e.js, fogUtils.js, compendiumExtractor.js, …
 │
-├── src/                            # Renderer process (React — no Node.js APIs here)
-│   ├── main.jsx                    # React entry point — mounts <App />
-│   ├── App.jsx                     # BrowserRouter, AppContent, all routes
-│   ├── PlayerApp.jsx               # Standalone root for the /player route
-│   ├── index.css                   # Global styles only
-│   │
-│   ├── pages/                      # One file per top-level module
-│   │   ├── CampaignManager.jsx
-│   │   ├── WorldBuilder.jsx
-│   │   ├── world/                  # Sub-pages: Factions, Locations, NPCs, Lore, Connections
-│   │   ├── MapEngine.jsx
-│   │   ├── Compendium.jsx
-│   │   ├── CharacterSheets.jsx
-│   │   ├── EncounterBuilder.jsx
-│   │   ├── CombatCalculator.jsx
-│   │   ├── MindMap.jsx
-│   │   ├── AIAssistant.jsx
-│   │   ├── AISources.jsx
-│   │   ├── LoreConnections.jsx
-│   │   └── Settings.jsx
-│   │
-│   ├── components/                 # Shared and feature-specific components
-│   │   ├── Sidebar.jsx             # Left navigation rail
-│   │   ├── TopBar.jsx              # Header bar (DM window only)
-│   │   ├── CampaignGuard.jsx       # Redirects to / if no campaign is loaded
-│   │   ├── SrdLoader.jsx           # Triggers SRD seed on first launch
-│   │   ├── ui/
-│   │   │   └── Skeleton.jsx        # Pulsing loading placeholder bars
-│   │   ├── map/                    # MapCanvas, MapToolbar, MapToken, AddTokenModal, TokenInspector
-│   │   ├── character/              # CharacterSheet, InventoryPanel, SpellSlotsPanel, LevelUpModal, AICharacterAssistant
-│   │   ├── compendium/             # MonsterBrowser, SpellBrowser, EquipmentBrowser, stat block panels, homebrew forms
-│   │   ├── encounter/              # MonsterRoster, XPCalculator, InitiativeTracker, ConditionManager, CombatLog
-│   │   ├── mindmap/                # Nodes, edges, toolbar, detail panel, AI insights
-│   │   ├── world/                  # EntityCard, EntityModal, NPCModal, AISuggestionPanel, WorldSearch
-│   │   ├── ai/                     # PdfSourceManager, RAGQueryPanel, AnswerRenderer, AIToolbox
-│   │   └── player/                 # All player window components (see Player View section)
-│   │
-│   ├── stores/
-│   │   ├── campaignStore.js        # Active campaign (persisted — survives reload)
-│   │   └── playerStore.js          # Player panel UI state (not persisted)
-│   │
-│   └── utils/
-│       ├── dnd5e.js                # D&D 5e math: modifiers, saving throws, skills, spell slots
-│       ├── fogUtils.js             # Fog bitmask encode/decode, isCellRevealed
-│       ├── tokenUtils.js           # Token snap-to-grid helpers
-│       ├── encounterUtils.js       # XP thresholds, multipliers, difficulty rating
-│       ├── combatUtils.js          # Initiative sort, combat state helpers
-│       ├── mindMapUtils.js         # React Flow node/edge builders, Dagre layout
-│       └── crColor.js              # Challenge rating → color badge mapping
+├── player/                   # Browser player web app (separate Vite build → dist/player)
+│   ├── main.jsx / PlayerWebApp.jsx / index.html / components/
 │
-├── package.json
-├── vite.config.js
-├── DMCS_AI_Spec_Sheet.md           # Master architecture specification
-├── DMCS_Phase8_Agent_Prompts.md    # Phase 8 build prompts
-└── DMCS_Claude_Code_Rules.md       # AI coding session rules and protocols
+├── agent/                    # dmcs-agent.mjs — standalone experimental CLI (see Open Questions)
+├── ai/                       # features/ (empty — see Open Questions)
+├── scripts/                  # Manual verify-*.js scripts + screenshot driver (not a test suite)
+├── assets/                   # electron-builder buildResources (icon.png)
+├── vite.config.js            # DM renderer build (base './', outDir dist/renderer)
+├── vite.player.config.js     # Browser player build (root player/, outDir dist/player, dev :5174)
+└── package.json              # Scripts + electron-builder "build" config
 ```
 
 ---
 
-## Architecture Overview
+## Core Usage (the IPC chain)
 
-### The Two-Process Model
-
-Electron runs two completely separate JavaScript environments that **cannot share memory**:
+Every database/AI/file call from React follows the same four-layer path. To add a feature you must touch **all four layers** or it silently no-ops.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  MAIN PROCESS  (electron/)                              │
-│  Node.js — full OS access                               │
-│  • SQLite via better-sqlite3                            │
-│  • Anthropic SDK / Ollama HTTP calls                    │
-│  • File system (fs, path)                               │
-│  • Electron safeStorage (API key encryption)            │
-│  • Window creation and management                       │
-└─────────────────────────┬───────────────────────────────┘
-                           │  IPC — crosses process boundary
-                           │  (ipcMain / ipcRenderer)
-┌─────────────────────────▼───────────────────────────────┐
-│  RENDERER PROCESS  (src/)                               │
-│  Browser JS — no Node.js APIs                           │
-│  • React + Vite                                         │
-│  • window.electronAPI.* (only way to reach main)        │
-│  • Zustand stores, React Router, react-konva, etc.      │
-└─────────────────────────────────────────────────────────┘
-```
-
-> **Rule:** Never `import` `better-sqlite3`, `fs`, `path`, `@anthropic-ai/sdk`, or any other Node.js module inside `src/`. It will crash the renderer immediately. All database and AI calls must go through IPC.
-
-### The contextBridge Surface
-
-`electron/preload.js` is the **only** file that bridges the two processes. It exposes a typed `window.electronAPI` object to the renderer. Every database call, AI call, and file operation in React goes through this object.
-
-```javascript
-// From any React component:
-const campaigns = await window.electronAPI.db.campaigns.getAll()
-const result    = await window.electronAPI.ai.generate({ prompt: '...' })
-await window.electronAPI.player.openWindow(campaignId)
-```
-
----
-
-## The IPC Chain
-
-Every database call follows this exact 4-layer path. If you add a new DB feature, you **must** touch all four layers or the feature will silently not work.
-
-```
-React Component
-    │
-    │  window.electronAPI.db.characters.getAll(campaignId)
+React component
+    │  window.electronAPI.db.subclasses.create(data)
     ▼
 electron/preload.js
-    ipcRenderer.invoke("db:characters:getAll", campaignId)
+    │  ipcRenderer.invoke('db:subclasses:create', data)
     ▼
 electron/ipc/dbHandlers.js
-    ipcMain.handle("db:characters:getAll", (_, campaignId) => ...)
+    │  ipcMain.handle('db:subclasses:create', (_, data) => global.db.createSubclass(data))
     ▼
 electron/database/DatabaseService.js
-    db.prepare("SELECT * FROM characters WHERE campaign_id = ?").all(campaignId)
+    │  this.db.prepare('INSERT INTO subclasses …').run(…)
     ▼
 SQLite file on disk
 ```
+
+Real call sites from the current code (all verified in `electron/preload.js`):
+
+```javascript
+// Database CRUD
+const rows   = await window.electronAPI.db.pdf.getAll(activeCampaign.id)
+await window.electronAPI.db.subclasses.create({ class_name, name, description, unlock_level, features })
+
+// AI completion (system, user, options) — options.maxTokens is threaded through
+const raw    = await window.electronAPI.ai.complete(system, user, { maxTokens: 8192 })
+const mode   = await window.electronAPI.ai.getMode()   // { mode: 'online' | 'offline-ollama' | 'no-ai' }
+
+// Semantic search over indexed PDF chunks (used by the Source Book Importer)
+const chunks = await window.electronAPI.embed.search(query, topK, itemKeys, sourceId)
+```
+
+See [`DMCS_Source_Book_Importer.md`](DMCS_Source_Book_Importer.md) for a worked end-to-end example (search → extract → parse → save).
 
 ---
 
 ## Database Schema
 
-The database is created automatically on first launch. All 5 migrations run in order via `DatabaseService.runMigrations()` — you never need to run them manually.
+The database is created and migrated automatically on first launch — you never run migrations manually. `DatabaseService.runMigrations()` applies these in order:
 
-### Tables
-
-| Table | Purpose |
-|---|---|
-| `campaigns` | Top-level campaigns. All other tables cascade-delete when a campaign is deleted. |
-| `locations` | Places in the world. Supports parent/child hierarchy via `parent_location_id`. |
-| `factions` | Organizations, guilds, cults. |
-| `npcs` | Non-player characters — linked to a location and/or faction. |
-| `connections` | Named relationships between any two entities (NPC↔NPC, Location↔Faction, etc.). |
-| `characters` | Player characters. Stats, inventory, and spell slots are stored as JSON strings. |
-| `encounters` | Encounter records — monster list (JSON), status, XP total. |
-| `maps` | Battle maps. Image stored as base64 data URL. Fog and tokens stored as JSON. |
-| `compendium_custom` | Homebrew monsters, spells, equipment, items, and lore entries. |
-| `srd_cache` | One-time local cache of SRD data fetched from the D&D 5e API. |
-| `pdf_sources` | Uploaded PDF files and their indexing status. |
-| `pdf_chunks` | Text chunks extracted from PDFs, with embedding tracking columns. |
-| `mind_map_positions` | Saved x/y positions for each entity node in the mind map. |
-| `ai_usage_log` | Audit log for AI requests (mode, token counts, duration). |
-
-### JSON Column Conventions
-
-Several columns store structured data as JSON strings (SQLite has no native JSON type). Always `JSON.parse()` before reading and `JSON.stringify()` before writing.
-
-| Table | Column | Shape |
+| ID | Name | Adds |
 |---|---|---|
-| `characters` | `stats` | `{ str, dex, con, int, wis, cha, save_proficiencies: string[], skill_proficiencies: string[], death_saves: { successes, failures } }` |
-| `characters` | `inventory` | `Array<{ id, name, quantity, weight, equipped, description }>` |
-| `characters` | `spell_slots` | `{ used: {}, known_spells: Array<{ name, level, school }> }` |
-| `maps` | `fog_data` | `number[]` — flat bitmask array, one bit per grid cell |
-| `maps` | `tokens` | `Array<{ id, label, type, col, row, color, entityId }>` |
-| `encounters` | `monsters` | `Array<{ monsterId, name, cr, xp, count, hp_override }>` |
-
-### Migrations
-
-| ID | Name | What it adds |
-|---|---|---|
-| 001 | `core_schema` | All 12 base tables |
-| 002 | `connections_lore` | `campaign_id` on connections; `'lore'` type in compendium_custom |
-| 003 | `pdf_chunks` | `pdf_chunks` table for the RAG pipeline |
-| 004 | `embedding_columns` | `embedded` and `embedding_model` columns on `pdf_chunks` |
+| 001 | `core_schema` | Base tables (campaigns, locations, factions, npcs, connections, characters, encounters, maps, compendium_custom, srd_cache, mind_map_positions) |
+| 002 | `connections_lore` | `campaign_id` on connections; `'lore'` type in `compendium_custom` |
+| 003 | `pdf_chunks` | `pdf_sources` + `pdf_chunks` tables (RAG pipeline) |
+| 004 | `embedding_columns` | `embedded` / `embedding_model` columns on `pdf_chunks` |
 | 005 | `ai_usage_log` | `ai_usage_log` table |
+| 006 | `subclasses` | `subclasses` table (+ seed subclasses) |
+| 007 | `encounter_map_loc_fields` | Encounter ↔ map/location linking fields |
+| 008 | `compendium_source_book` | Source-book / page attribution fields on compendium entries |
+
+> Registered at `electron/database/DatabaseService.js:24-32`. Exact column definitions live in the `MIGRATION_00N` constants in that file.
+
+Several columns store JSON strings (SQLite has no JSON type) — always `JSON.parse()` on read and `JSON.stringify()` on write. Examples: `characters.stats`, `characters.inventory`, `characters.spell_slots`, `maps.fog_data`, `maps.tokens`, `encounters.monsters`, `subclasses.features`.
+
+### Where is the database?
+
+The path depends on how DMCS is running, because Electron derives the user-data folder from the app name:
+
+| Context | App name source | Windows path |
+|---|---|---|
+| **Development** (`npm run dev`) | `package.json` `"name": "dmcs"` | `%APPDATA%\dmcs\dmcs.db` |
+| **Packaged / installed** | `build.productName` `"DM Campaign Suite"` | `%APPDATA%\DM Campaign Suite\dmcs.db` |
+
+macOS/Linux follow the same pattern (`~/Library/Application Support/<name>/` and `~/.config/<name>/`). **Consequence:** campaigns created with `npm run dev` do **not** appear in the installed app — they live in different folders. Inspect either file with [DB Browser for SQLite](https://sqlitebrowser.org/).
+
+### Adding a new table (all four IPC layers)
+
+1. Add `const MIGRATION_009 = \`CREATE TABLE …\`` in `DatabaseService.js`.
+2. Append `{ id: 9, name: 'my_table', sql: MIGRATION_009 }` to the `migrations` array. **(ids 1–8 are taken.)**
+3. Add CRUD methods to `DatabaseService`.
+4. Register `ipcMain.handle('db:myTable:*', …)` in `electron/ipc/dbHandlers.js`.
+5. Expose them on `window.electronAPI.db.myTable.*` in `electron/preload.js`.
+6. Call from React: `await window.electronAPI.db.myTable.getAll(campaignId)`.
 
 ---
 
-## Module Reference
+## Modules
 
-### Phase 1 — Foundation
-
-- **`CampaignManager`** — Create, load, rename, and delete campaigns. The selected campaign object is stored in `campaignStore` (Zustand, persisted to localStorage).
-- **`CampaignGuard`** — Wraps all campaign-scoped routes. Redirects to `/` if no campaign is loaded. Use it when adding any new page that requires a campaign.
-- **`Settings`** — API key management, AI mode status badge, SRD re-seed button.
-
-### Phase 2 — World Builder
-
-- **`WorldBuilder`** — Dashboard with entity count chips, recently created entities, and AI suggestions.
-- **`Factions`, `Locations`, `NPCs`, `Lore`, `Connections`** — CRUD pages for each entity type, accessible from the World Builder submenu.
-- **`WorldSearch`** — Global search bar in the TopBar. Fuzzy-searches across all entity types at once.
-- **`AISuggestionPanel`** — Asks the AI to suggest new NPCs, factions, or plot hooks based on the current campaign's world data.
-
-### Phase 3 — Map Engine
-
-- **`MapEngine`** — The page that owns the map list, active map state, fog brush settings, and token state. Passes everything down as props to `MapCanvas`.
-- **`MapCanvas`** — The react-konva canvas. Renders 4 layers: background image → grid → fog → tokens. Accepts a `mode` prop: `"dm"` (paint fog, drag tokens) or `"player"` (read-only, solid black fog).
-- **`MapToolbar`** — Fog brush tools (reveal/hide, 3 sizes), Reveal All, Hide All, Reset View.
-- **`MapToken`** — A single draggable token on the canvas. Locked (no drag) in player mode.
-
-### Phase 4 — Compendium & Character Sheets
-
-- **`Compendium`** — Tabs for SRD Monsters, Spells, Equipment, and Custom/Homebrew entries. No `CampaignGuard` — accessible without a loaded campaign. Also hosts the **Source Book Importer** (📥 Single Import / 📦 Bulk Import), which turns indexed PDF passages into structured entries via AI. **This feature has its own onboarding doc: [`DMCS_Source_Book_Importer.md`](DMCS_Source_Book_Importer.md)** — start there before touching import code.
-- **`CharacterSheets`** — Lists all player characters for the active campaign; opens the full `CharacterSheet` component.
-- **`CharacterSheet`** — Tabs: Stats (ability scores, saves, skills, HP), Inventory, Spell Slots, Death Saves, Notes. Includes a level-up wizard and an AI character assistant.
-
-### Phase 5 — Encounter Tools
-
-- **`EncounterBuilder`** — Build encounters by searching the SRD monster list. Supports HP overrides per monster.
-- **`XPCalculator`** — Calculates encounter difficulty (Easy/Medium/Hard/Deadly) using D&D 5e XP thresholds and monster-count multipliers.
-- **`InitiativeTracker`** — Full combat lifecycle: roll initiatives, track HP, apply/remove conditions, log damage. On "End Combat", syncs each player character's final HP back to the `characters` table and broadcasts `character:sync` to the player window.
-- **`ConditionManager`** — Manages all 15 D&D 5e conditions plus concentration tracking per combatant.
-
-### Phase 6 — Mind Map
-
-- **`MindMap`** — React Flow graph of all world entities. Node types: NPC, Location, Faction, Item. Edges are loaded from the `connections` table. Features: Dagre auto-layout (Top-Bottom and Left-Right), subgraph highlighting, node position persistence, in-graph edge creation, and PNG export.
-- **`AIInsightsPanel`** — Asks the AI to generate a narrative paragraph about the relationships visible in the current graph view.
-
-### Phase 7 — AI Layer
-
-- **`AIAssistant`** — Streaming chat assistant. Campaign context (NPCs, locations, factions) is injected into every prompt. "Rules Q&A Mode" routes through the RAG pipeline instead.
-- **`AISources`** — Upload PDFs, monitor indexing status, trigger embedding.
-- **RAG pipeline** — Upload PDF → chunk text → embed with Ollama `nomic-embed-text` → store in vectra vector index → semantic search on query → Claude generates grounded answer with page-number source attribution.
-
-### Phase 8 — Player View
-
-See the dedicated section below.
+| Module (page) | Summary |
+|---|---|
+| Campaign Manager | Create / load / rename / delete campaigns; the active campaign is held in `campaignStore` (persisted to `localStorage`). |
+| World Builder | Factions, Locations, NPCs, Lore, and named Connections; optional AI suggestion panel. |
+| Mind Map | React Flow graph of all world entities with Dagre auto-layout and PNG export. |
+| Map Engine | Upload battle maps, paint fog of war, place tokens; opens a pop-out combat-map window. |
+| Compendium | Browse SRD monsters/spells/equipment + homebrew, **and** the [Source Book Importer](DMCS_Source_Book_Importer.md) (📥 Single / 📦 Bulk) that turns indexed PDF passages into structured entries via AI. |
+| Character Sheets | Full 5e sheets (stats, inventory, spell slots, death saves) with a level-up wizard and AI assistant. |
+| Encounter Builder | Build encounters from SRD monsters; XP/difficulty calculator; initiative tracker with HP sync back to characters. |
+| Combat Calculator | Standalone XP/CR calculator. |
+| AI Assistant | Streaming chat with campaign context injected; "Rules Q&A" routes through the RAG pipeline. |
+| AI Sources | Upload PDFs, monitor indexing, trigger embedding. |
+| Settings | Anthropic key (safeStorage), Ollama status, RAG settings, ngrok token, AI usage stats. |
 
 ---
 
 ## AI Layer
 
-### Mode Detection
+On startup the app picks a mode (shown as a badge in the TopBar):
 
-On startup, the app checks:
-1. Is there a valid Anthropic API key in safeStorage? → **`online`** mode (Claude API)
-2. Is Ollama running at `http://localhost:11434`? → **`offline-ollama`** mode
-3. Neither → **`no-ai`** mode (all AI features hidden; the rest of the app works fine)
+1. Valid Anthropic key in `safeStorage` → **`online`** (Claude API, model `claude-sonnet-5`).
+2. Else Ollama reachable at `http://localhost:11434` → **`offline-ollama`** (`llama3:latest` chat).
+3. Else **`no-ai`** — all AI features hide; the rest of the app works normally.
 
-The current mode is shown as a badge in the TopBar.
-
-### Online Mode (Claude API)
-
-- Model: `claude-sonnet-5` (set in `electron/services/AIService.js`)
-- Used for: world builder suggestions, character assistant, encounter narration, RAG answer generation, Source Book import extraction
-- **Gotcha:** this model string must be a *current, non-retired* model ID. If it points at a retired snapshot, the startup key-validation ping 404s, the app silently falls back to Ollama, and online mode never engages even with a valid key. See `DMCS_Source_Book_Importer.md` → *Recent Work & Gotchas*.
-- Streaming responses use `ipcMain` events pushed to the renderer via `webContents.send`
-
-### Offline Mode (Ollama)
-
-- Chat model: whichever model is available locally (tries `llama3` by default)
-- Embedding model: `nomic-embed-text` (required for PDF indexing — must be pulled before using AI Sources)
-- Ollama must be running before the app starts in order to be detected
-
-### RAG Pipeline Step-by-Step
-
-1. User uploads a PDF via **AI Sources**
-2. `PdfIngestionService` parses the file, splits it into ~500-token chunks, stores each chunk in `pdf_chunks` with its page number
-3. `EmbeddingService` calls Ollama's `nomic-embed-text` model for each chunk; stores the embedding vector in a `vectra` index file alongside the database
-4. When a question is asked in Rules Q&A mode, `RAGService` embeds the query, finds the top-k most similar chunks, and sends them to Claude as context
-5. Claude's answer includes source attribution (filename + page number)
+**RAG / PDF pipeline:** upload a PDF → `PdfIngestionService` chunks it (~400 tokens) into `pdf_chunks` → `EmbeddingService` embeds each chunk with Ollama `nomic-embed-text` into a `vectra` index → on a query, the top-k chunks are retrieved (with contiguous-chunk stitching) and sent to the model, which answers with page-number attribution. Embeddings require Ollama running even when chat is online.
 
 ---
 
-## Player View (Phase 8)
+## Player Views
 
-The player view is a **separate Electron BrowserWindow** opened by the DM. It loads the same Vite bundle but routes to `/player?campaign=<id>`, which renders `PlayerApp` instead of the DM layout.
+DMCS has **two** distinct ways for players to see content:
 
-### Opening the player window
-
-The DM clicks **👥 Player View** in the TopBar to open the `DMPlayerControls` panel, then clicks **Open Player View**.
-
-```javascript
-// Programmatically, from any DM-side component:
-await window.electronAPI.player.openWindow(activeCampaign.id)
-```
-
-### DM Broadcast Channel
-
-All communication from the DM window to the player window goes through the main process relay:
-
-```
-DM renderer  →  ipcRenderer.send('player:broadcast', message)
-                ↓
-main.js      →  playerWindow.webContents.send('player:receive', message)
-                ↓
-Player renderer  ←  ipcRenderer.on('player:receive', handler)
-```
-
-**Message types:**
-
-| Type | Payload | Effect in player window |
-|---|---|---|
-| `map:set` | `{ mapId }` | Loads and displays the specified map; resets pan/zoom |
-| `map:update` | `{ mapId, fogData, tokens }` | Updates fog and tokens on the currently active map live |
-| `character:sync` | `{ characterId }` | Re-fetches the character from the DB and refreshes the sheet |
-| `session:note` | `{ text, timestamp }` | Appends a note to the floating session notes overlay |
-| `ping` | `{}` | Resets the 15-second disconnect timer; keeps status green |
-
-### Auto-sync
-
-When the DM enables **Auto-sync** in the DMPlayerControls panel:
-- Every fog brush stroke triggers a debounced (500ms) `map:update` broadcast
-- Every token drag triggers an immediate `map:update` broadcast
-
-### Player Window Components
-
-All player-facing components live in `src/components/player/`:
-
-| File | What it does |
-|---|---|
-| `PlayerTopBar.jsx` | Campaign name, Character/Map nav toggle, connection status, full screen button |
-| `PlayerCharacterSelect.jsx` | Grid of character cards for the player to pick from |
-| `PlayerCharacterSheet.jsx` | Read-only 4-tab sheet (Stats, Inventory, Spells, Notes) with dice roll buttons |
-| `PlayerMapView.jsx` | Hosts `MapCanvas` in player mode; handles `map:set`/`map:update` broadcasts; Shift+hover distance measurement |
-| `PlayerMapControls.jsx` | Zoom in/out/reset overlay on the map |
-| `PlayerSessionNotes.jsx` | Collapsible floating overlay; gold flash animation on new notes |
-| `DMPlayerControls.jsx` | DM-side panel: open/close window, push map, auto-sync toggle, send notes, sync characters |
-| `PlayerErrorBoundary.jsx` | Class component error boundary; shows a "Try Again" screen instead of crashing |
-
-### Player-Mode Fog
-
-In `"player"` mode, `MapCanvas` renders fog as **solid black `rgba(0,0,0,1)`** — zero content visible through it. In DM mode it uses a semi-transparent dark overlay so the DM can see what is underneath while painting.
-
-Tokens on fogged cells are **filtered out entirely** in player mode — they do not appear even as outlines.
+1. **In-app Electron Player View** — a second `BrowserWindow` loading `#/player?campaign=<id>` (`electron/main.js` `createPlayerWindow`). Fog-enforced map (solid black over hidden cells), read-only character sheet, and live DM broadcasts relayed through the main process.
+2. **Remote Player Network (browser)** — `electron/server/PlayerServer.js` runs an Express + Socket.IO server (default port **3001**, auto-increments if busy, binds `0.0.0.0`) that serves the `player/` web app. Players join from a browser over the LAN, or over the internet via an **ngrok** tunnel, using a QR code. See [`DMCS_Remote_Player_Network.md`](DMCS_Remote_Player_Network.md).
 
 ---
 
-## State Management
+## Testing
 
-### `campaignStore` (persisted)
+**There is no automated test suite.** There is no `test` script in `package.json`, and no jest/vitest/playwright-test configuration.
 
-```javascript
-import useCampaignStore from './stores/campaignStore'
+What exists instead:
+- `scripts/verify-*.js` / `*-electron.js` — **manual** verification scripts run in an Electron/Node context (e.g. `verify-db-electron.js`, `verify-srd-electron.js`, `verify-ai-electron.js`). They are not wired to an npm script and must be invoked directly.
+- `scripts/screenshot-driver.mjs` — a `playwright-core`-based screenshot helper.
 
-const activeCampaign    = useCampaignStore(s => s.activeCampaign)
-const setActiveCampaign = useCampaignStore(s => s.setActiveCampaign)
-```
-
-Persisted to `localStorage` via Zustand's `persist` middleware. Survives page reloads and Vite HMR. Stores the full campaign object so components can read `activeCampaign.name` without an extra DB call.
-
-### `playerStore` (not persisted)
-
-```javascript
-import usePlayerStore from './stores/playerStore'
-
-const showPlayerPanel    = usePlayerStore(s => s.showPlayerPanel)    // boolean — DMPlayerControls panel visible
-const setShowPlayerPanel = usePlayerStore(s => s.setShowPlayerPanel)
-const playerWindowOpen   = usePlayerStore(s => s.playerWindowOpen)   // boolean — player window is open
-const autoSync           = usePlayerStore(s => s.autoSync)           // boolean — fog/token auto-broadcast
-```
-
-Used to share player panel state between `TopBar`, `App`, `MapEngine`, and `DMPlayerControls` without prop-drilling. Resets on app restart.
+**Observed pass state:** `npm run build:renderer` (Vite build) succeeds; there is no suite to report green/red on. Adding one (e.g. Vitest for `src/utils/` pure modules like `dnd5e.js` and `compendiumExtractor.js`) is a good first contribution — see [Open Questions](#open-questions).
 
 ---
 
-## Utility Libraries
+## Building the Windows Installer
 
-All D&D 5e math lives in `src/utils/`. Import from here rather than reimplementing these calculations.
-
-### `dnd5e.js` — Character math
-
-```javascript
-import {
-  abilityMod,           // (score: number) => number
-  modStr,               // (score: number) => "+2" | "-1"  (formatted string)
-  profBonus,            // (level: number) => number
-  savingThrow,          // (score, level, isProficient) => number
-  skillBonus,           // (score, level, isProficient) => number
-  passivePerception,    // (wisScore, level, isProficient) => number
-  getCasterType,        // (className: string) => "full" | "half" | "third" | null
-  spellcastingAbility,  // (className: string) => "int" | "wis" | "cha" | null
-  SPELL_SLOTS,          // Nested table: SPELL_SLOTS["full"][level] => number[]
-  SKILLS,               // Array<{ key: string, label: string, ability: string }>
-} from '../utils/dnd5e'
-```
-
-### `fogUtils.js` — Fog bitmask
-
-```javascript
-import { isCellRevealed, revealCell, hideCell } from '../utils/fogUtils'
-
-// fogData is a flat number[] bitmask — one number per cell, packed as bits
-// numCols = how many grid columns the map has
-const revealed = isCellRevealed(fogData, col, row, numCols) // => boolean
-```
-
-### `encounterUtils.js` — XP and difficulty
-
-```javascript
-import { calcEncounterDifficulty } from '../utils/encounterUtils'
-
-// Returns { totalXP, adjustedXP, difficulty: 'Easy' | 'Medium' | 'Hard' | 'Deadly' }
-const result = calcEncounterDifficulty(monsters, partyLevels)
-```
-
----
-
-## Adding a New Feature
-
-### New page / route
-
-1. Create `src/pages/MyFeature.jsx`
-2. Import it in `src/App.jsx`
-3. Add `<Route path="/myfeature" element={<Guarded><MyFeature /></Guarded>} />` inside the routes block in `AppContent`
-4. Add a nav entry in `src/components/Sidebar.jsx`
-
-### New database table
-
-You must touch all four layers of the IPC chain:
-
-1. Write the `CREATE TABLE` SQL as a new `const MIGRATION_006` in `electron/database/DatabaseService.js`
-2. Add `{ id: 6, name: 'my_table', sql: MIGRATION_006 }` to the `migrations` array
-3. Add CRUD methods to `DatabaseService` following the pattern of existing methods
-4. Register `ipcMain.handle` calls in `electron/ipc/dbHandlers.js`
-5. Expose the new handlers on `window.electronAPI.db.myTable.*` in `electron/preload.js`
-6. Call from React: `await window.electronAPI.db.myTable.getAll(campaignId)`
-
-### New AI feature
-
-1. Add a method to `electron/services/AIService.js` (or create a new service file)
-2. Register an `ipcMain.handle` in `electron/ipc/aiHandlers.js`
-3. Expose it in `electron/preload.js`
-4. For streaming responses, push chunks to the renderer with `event.sender.send('ai:chunk', text)` and listen in React with `window.electronAPI.ai.onChunk(handler)`
-
----
-
-## Building for Production
+Produces `DMCS-Setup-1.0.0.exe` for non-technical Windows users. Full detail — including checklists — is in [`DMCS_RELEASE_GUIDE.md`](DMCS_RELEASE_GUIDE.md).
 
 ```bash
-npm run build
+npm install        # first time only
+npm run build:win  # → dist/app/DMCS-Setup-1.0.0.exe  (and dist/app/win-unpacked/)
 ```
 
-This runs:
-1. `vite build` → outputs the renderer to `dist/renderer/`
-2. `electron-builder` → packages everything into `dist/app/`
+**One-time Windows prerequisite:** electron-builder extracts a `winCodeSign` toolchain that contains symlinks, which Windows only allows with **Developer Mode enabled** (Settings → System → For developers) *or* an **Administrator** terminal. Without it, `win-unpacked/` is still produced but the final installer `.exe` fails with `Cannot create symbolic link`.
 
-The built app includes the Electron binary, the React bundle, and the `electron/` source. The SQLite database is created in the user's app data directory on first run — it is **not** bundled.
-
-> **Note:** `better-sqlite3` is a native Node.js module compiled for a specific Electron + Node.js version pair. If you upgrade Electron, run `npm run postinstall` (or `npm install`) to recompile it.
+Notes:
+- Close the running DMCS app before building (avoids a file lock on `better_sqlite3.node`).
+- The build ships **unsigned**, so Windows SmartScreen shows "Windows protected your PC" — testers click **More info → Run anyway**. Code signing is a future step.
+- App icon: drop a square `assets/icon.png` (see `assets/README.md`); electron-builder generates the `.ico`.
 
 ---
 
 ## Troubleshooting
 
 ### Blank white screen on launch
+Vite wasn't ready when Electron started. Wait a moment and press `Ctrl+R`. If persistent, check the terminal for Vite errors.
 
-The Vite dev server wasn't ready when Electron started. Wait a few seconds then press `Ctrl+R` in the app window to reload. If it consistently fails, check the terminal for Vite errors.
-
-### `better-sqlite3` fails with "NODE_MODULE_VERSION mismatch"
-
-The native module was compiled for a different Node.js or Electron version. Fix:
-
+### `better-sqlite3` "NODE_MODULE_VERSION mismatch"
+The native module was built for a different Node/Electron ABI:
 ```bash
 npm run postinstall
-# or explicitly:
-./node_modules/.bin/electron-rebuild -f -w better-sqlite3
+# or: ./node_modules/.bin/electron-rebuild -f -w better-sqlite3
 ```
 
-### Where is the database file?
+### SRD never loads / compendium empty
+The first-run seed fetches from `https://www.dnd5eapi.co`. If you were offline it failed silently — Settings → **Re-seed SRD** once online.
 
-| Platform | Path |
-|---|---|
-| Windows | `%APPDATA%\dmcs\dmcs.db` |
-| macOS | `~/Library/Application Support/dmcs/dmcs.db` |
-| Linux | `~/.config/dmcs/dmcs.db` |
-
-You can open this file with [DB Browser for SQLite](https://sqlitebrowser.org/) to inspect or debug data directly.
-
-### SRD never loads / compendium is empty
-
-The SRD seed fetches from `https://www.dnd5eapi.co`. If you were offline during first launch it will have failed silently. Go to **Settings** and click **Re-seed SRD** once you have an internet connection.
-
-### AI badge shows "No AI — Check Settings"
-
-One of:
-- No API key saved — go to Settings and paste your Anthropic key
-- Ollama is not running — run `ollama serve` in a terminal and restart the app
-- The API key is invalid — open DevTools and check the console for the specific error
-
-### Player window won't open
-
-The player window requires an active campaign. Make sure the campaign name is visible in the DM window's TopBar, then click **👥 Player View**.
+### AI badge shows "No AI"
+No key saved, Ollama not running, or an invalid key. Add a key in Settings, or run `ollama serve` and restart.
 
 ### Changes to `electron/` don't take effect
-
-The main process does not hot-reload. Quit the app completely (`Ctrl+C` in the terminal) and run `npm run dev` again.
+The main process doesn't hot-reload. Quit (`Ctrl+C`) and re-run `npm run dev`.
 
 ### IPC call returns `undefined`
+The channel is missing in `dbHandlers.js`/`aiHandlers.js` or not exposed in `preload.js`. Channel names are case-sensitive and must match exactly across all three layers.
 
-Either the handler is not registered in `dbHandlers.js` / `aiHandlers.js`, or it is not exposed in `preload.js`. Check both files and verify the channel name matches exactly (case-sensitive).
+---
+
+## Open Questions
+
+Items I could **not** verify from the repository (honest unknowns, not guesses):
+
+- **No LICENSE.** There is no `LICENSE` file and no license/credits/attribution text anywhere in the repo. The project's license is therefore **unspecified** — add one (or state "all rights reserved") before any public distribution.
+- **`agent/dmcs-agent.mjs`** is a standalone CLI that talks to a local **LM Studio** server (`baseURL: 'http://localhost:1234'`, model `Llama-3.2-1B`). It is not imported by the app; its role (dev tool? experiment?) is undocumented.
+- **`ai/features/`** is an empty directory — purpose unknown.
+- **Migrations 007/008 column details** were confirmed by name only (`encounter_map_loc_fields`, `compendium_source_book`); exact columns are in the `MIGRATION_007/008` constants but were not transcribed here.
+- **`npm run dev` (GUI)** and the packaged **installer `.exe`** were not run to completion in the documentation environment (no display / symlink privilege); the underlying builds (`build:renderer`, `win-unpacked`) were verified.
+- **macOS/Linux packaging** (`dmg` / `AppImage` targets exist in `build`) is unverified — only the Windows path has been exercised.
+- **Screenshot** referenced in the Screenshot section does not exist yet.
+
+---
+
+## License
+
+**No license is currently declared** for this project (no `LICENSE` file present). Until one is added, all rights are reserved by the author. Author: **Christopher Clarke** (`package.json` `"author"`).
