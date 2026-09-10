@@ -1,5 +1,4 @@
-const { ipcMain } = require('electron')
-const { registerHandler } = require('./registerHandler')
+const { registerHandler, registerListener } = require('./registerHandler')
 
 function registerAiHandlers(aiService, keyService) {
   registerHandler('ai:initialize', async () => {
@@ -75,7 +74,7 @@ function registerAiHandlers(aiService, keyService) {
   })
 
   // Streaming chat — uses ipcMain.on (not handle) so it can push chunks back via sender.send
-  ipcMain.on('ai:stream:start', async (event, { systemPrompt, messages, requestId }) => {
+  registerListener('ai:stream:start', async (event, { systemPrompt, messages, requestId }) => {
     try {
       await aiService.stream(
         systemPrompt,

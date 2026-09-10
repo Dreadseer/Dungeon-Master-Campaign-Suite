@@ -1,4 +1,5 @@
-const { app, BrowserWindow, ipcMain, shell, safeStorage, protocol } = require('electron')
+const { app, BrowserWindow, shell, safeStorage, protocol } = require('electron')
+const { registerHandler, registerListener } = require('./ipc/registerHandler')
 const fs   = require('fs')
 const path = require('path')
 
@@ -62,21 +63,21 @@ function createEncounterMapWindow(campaignId, mapId) {
   win.on('closed', () => { delete mapWindows[key] })
 }
 
-ipcMain.handle('encounter:openMapWindow', (_, campaignId, mapId) => {
+registerHandler('encounter:openMapWindow', (_, campaignId, mapId) => {
   createEncounterMapWindow(campaignId, mapId)
   return { success: true }
 })
 
-ipcMain.handle('player:openWindow',  (_, campaignId) => { createPlayerWindow(campaignId); return { success: true } })
-ipcMain.handle('player:closeWindow', ()              => { if (playerWindow && !playerWindow.isDestroyed()) playerWindow.close(); return { success: true } })
-ipcMain.handle('player:isOpen',      ()              => ({ isOpen: !!playerWindow && !playerWindow.isDestroyed() }))
-ipcMain.handle('player:setFullScreen', (_, fullScreen) => {
+registerHandler('player:openWindow',  (_, campaignId) => { createPlayerWindow(campaignId); return { success: true } })
+registerHandler('player:closeWindow', ()              => { if (playerWindow && !playerWindow.isDestroyed()) playerWindow.close(); return { success: true } })
+registerHandler('player:isOpen',      ()              => ({ isOpen: !!playerWindow && !playerWindow.isDestroyed() }))
+registerHandler('player:setFullScreen', (_, fullScreen) => {
   if (playerWindow && !playerWindow.isDestroyed()) playerWindow.setFullScreen(fullScreen)
   return { success: true }
 })
 
 // Broadcast relay — DM window sends, player window receives
-ipcMain.on('player:broadcast', (_event, message) => {
+registerListener('player:broadcast', (_event, message) => {
   if (playerWindow && !playerWindow.isDestroyed()) {
     playerWindow.webContents.send('player:receive', message)
   }
@@ -197,6 +198,6 @@ app.on('before-quit', async () => {
   if (global.playerServer)  await global.playerServer.stop()
 })
 
-ipcMain.handle('app:version', () => app.getVersion())
+registerHandler('app:version', () => app.getVersion())
 
-ipcMain.handle('shell:openExternal', (_, url) => shell.openExternal(url))
+registerHandler('shell:openExternal', (_, url) => shell.openExternal(url))

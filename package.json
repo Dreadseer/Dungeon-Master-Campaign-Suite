@@ -19,7 +19,8 @@
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:migrations": "node scripts/verify-migration-009.mjs"
+    "test:migrations": "node scripts/verify-migration-009.mjs",
+    "test:ipc": "node scripts/verify-ipc-layers.mjs"
   },
   "build": {
     "appId": "com.dmcs.app",
