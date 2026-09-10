@@ -226,7 +226,7 @@ Dungeon Master Campaign Suite/
 ├── player/                   # Browser player web app (separate Vite build → dist/player)
 │   ├── main.jsx / PlayerWebApp.jsx / index.html / components/
 │
-├── agent/                    # dmcs-agent.mjs — standalone experimental CLI (see Open Questions)
+├── tools/                     # dmcs-agent.mjs — unrelated LM Studio experiment (see tools/README.md)
 ├── ai/                       # features/ (empty — see Open Questions)
 ├── scripts/                  # Manual verify-*.js scripts + screenshot driver (not a test suite)
 ├── assets/                   # electron-builder buildResources (icon.png)
@@ -358,13 +358,43 @@ DMCS has **two** distinct ways for players to see content:
 
 ## Testing
 
-**There is no automated test suite.** There is no `test` script in `package.json`, and no jest/vitest/playwright-test configuration.
+```bash
+npm test          # vitest run — one pass, exits non-zero on failure
+npm run test:watch
+```
 
-What exists instead:
-- `scripts/verify-*.js` / `*-electron.js` — **manual** verification scripts run in an Electron/Node context (e.g. `verify-db-electron.js`, `verify-srd-electron.js`, `verify-ai-electron.js`). They are not wired to an npm script and must be invoked directly.
+**Vitest**, configured inside the existing `vite.config.js` (`test` block) rather than a separate
+config file. Environment is `node`; suites are discovered at `src/**/__tests__/**/*.test.js`. There is
+no jsdom and no component testing yet — everything covered so far is a pure ES module.
+
+| Suite | Covers |
+|-------|--------|
+| `src/utils/__tests__/encounterUtils.test.js` | All 80 `XP_THRESHOLDS` values against DMG 2014 p. 82, the six encounter-multiplier bands, CR→XP, party thresholds, difficulty ratings, `xpBudget` |
+| `src/utils/__tests__/fogUtils.test.js` | Row-major index math, brush clamping at every map edge and corner, grid dimensions for non-divisible images, viewport culling |
+| `src/utils/__tests__/combatUtils.test.js` | Initiative sort and DEX tiebreak, monster count expansion, turn wraparound, the 15 PHB conditions |
+
+### Known bugs are recorded as tests, not comments
+
+Where a bug is known but not yet fixed, the suite holds **two** tests for it: one that passes and pins
+the current (wrong) behaviour, and one marked `it.fails` asserting the *correct* behaviour. `it.fails`
+passes only while its body throws — so when the fix lands, that test starts erroring and forces
+someone to delete the modifier. It is a tripwire, not a skip. Each is paired with a `test.todo`, which
+is why `npm test` reports a non-zero todo count.
+
+**If a test in a `KNOWN BUGS` block fails after your change, that is usually good news** — read the
+comment above it, delete the `.fails`, and remove the paired "current behaviour" test.
+
+### What is *not* covered
+
+No React component has a test. No Electron main-process code has a test — `DatabaseService`, the IPC
+handlers and the AI services are all unexercised by the suite. The manual scripts remain the only
+coverage there:
+
+- `scripts/verify-*.js` / `*-electron.js` — **manual** verification scripts run in an Electron/Node
+  context (e.g. `verify-db-electron.js`, `verify-srd-electron.js`, `verify-ai-electron.js`). They are
+  not wired to an npm script and must be invoked directly. The `*-electron.js` variants must run
+  inside Electron — see the ABI note in [Troubleshooting](#better-sqlite3-node_module_version-mismatch).
 - `scripts/screenshot-driver.mjs` — a `playwright-core`-based screenshot helper.
-
-**Observed pass state:** `npm run build:renderer` (Vite build) succeeds; there is no suite to report green/red on. Adding one (e.g. Vitest for `src/utils/` pure modules like `dnd5e.js` and `compendiumExtractor.js`) is a good first contribution — see [Open Questions](#open-questions).
 
 ---
 
@@ -440,7 +470,7 @@ The channel is missing in `dbHandlers.js`/`aiHandlers.js` or not exposed in `pre
 Items I could **not** verify from the repository (honest unknowns, not guesses):
 
 - **No LICENSE.** There is no `LICENSE` file and no license/credits/attribution text anywhere in the repo. The project's license is therefore **unspecified** — add one (or state "all rights reserved") before any public distribution.
-- **`agent/dmcs-agent.mjs`** is a standalone CLI that talks to a local **LM Studio** server (`baseURL: 'http://localhost:1234'`, model `Llama-3.2-1B`). It is not imported by the app; its role (dev tool? experiment?) is undocumented.
+- ~~**`agent/dmcs-agent.mjs`** is a standalone CLI that talks to a local **LM Studio** server…~~ **Resolved in Phase 0:** moved to `tools/dmcs-agent.mjs` and labelled in `tools/README.md` as a dev experiment unrelated to the app's AI architecture (Anthropic online / Ollama offline). Still not imported by anything.
 - **`ai/features/`** is an empty directory — purpose unknown.
 - **Migrations 007/008 column details** were confirmed by name only (`encounter_map_loc_fields`, `compendium_source_book`); exact columns are in the `MIGRATION_007/008` constants but were not transcribed here.
 - **`npm run dev` (GUI)** and the packaged **installer `.exe`** were not run to completion in the documentation environment (no display / symlink privilege); the underlying builds (`build:renderer`, `win-unpacked`) were verified.

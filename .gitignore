@@ -1,2 +1,31 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Build output
 dist/
+release/
+
+# Test / tooling scratch
+# .test-userdata is the Electron user-data dir created by scripts/screenshot-driver.mjs.
+# It holds Cache/, Code Cache/, GPUCache/, Local Storage/, Network/ — pure binary runtime
+# junk. 122 files of it were committed before this rule existed; untracked in Phase 0.
+scripts/.test-userdata/
+# Output of the screenshot driver. The 17 PNGs committed before this rule are still
+# tracked on purpose (removing existing files is the user's call); this stops new runs
+# from adding more.
+scripts/screenshots/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Secrets — nothing at runtime writes a .env (the Anthropic key goes through Electron
+# safeStorage via electron/services/KeyService.js), but this stops a hand-made one from
+# ever being committed.
+.env
+.env.*
+!.env.example
+
+# OS cruft
+.DS_Store
+Thumbs.db
