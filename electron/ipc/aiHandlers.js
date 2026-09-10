@@ -1,37 +1,38 @@
 const { ipcMain } = require('electron')
+const { registerHandler } = require('./registerHandler')
 
 function registerAiHandlers(aiService, keyService) {
-  ipcMain.handle('ai:initialize', async () => {
+  registerHandler('ai:initialize', async () => {
     const key = keyService.loadKey()
     return aiService.initialize(key)
   })
 
-  ipcMain.handle('ai:getMode', () => ({ mode: aiService.getMode() }))
+  registerHandler('ai:getMode', () => ({ mode: aiService.getMode() }))
 
-  ipcMain.handle('ai:complete', async (_, systemPrompt, userMessage, options) => {
+  registerHandler('ai:complete', async (_, systemPrompt, userMessage, options) => {
     return aiService.complete(systemPrompt, userMessage, options)
   })
 
-  ipcMain.handle('ai:saveKey', async (_, key) => {
+  registerHandler('ai:saveKey', async (_, key) => {
     keyService.saveKey(key)
     return aiService.initialize(key)
   })
 
-  ipcMain.handle('ai:deleteKey', () => {
+  registerHandler('ai:deleteKey', () => {
     keyService.deleteKey()
     aiService.initialize(null)
     return { success: true }
   })
 
-  ipcMain.handle('ai:hasKey', () => ({ hasKey: keyService.hasKey() }))
+  registerHandler('ai:hasKey', () => ({ hasKey: keyService.hasKey() }))
 
   // RAG query — routes question through vector search + grounded AI answer
-  ipcMain.handle('ai:ragQuery', async (_, question, campaignId, options) => {
+  registerHandler('ai:ragQuery', async (_, question, campaignId, options) => {
     return global.ragService.query(question, campaignId, options)
   })
 
   // AI usage stats — aggregate counts and timings from ai_usage_log
-  ipcMain.handle('ai:getUsageStats', (_, campaignId) => {
+  registerHandler('ai:getUsageStats', (_, campaignId) => {
     const filter = campaignId ? 'WHERE campaign_id = ?' : ''
     const params = campaignId ? [campaignId] : []
     const rows = global.db.all(
@@ -47,7 +48,7 @@ function registerAiHandlers(aiService, keyService) {
     return { rows, total, avgMs }
   })
 
-  ipcMain.handle('ai:clearUsageLog', (_, campaignId) => {
+  registerHandler('ai:clearUsageLog', (_, campaignId) => {
     if (campaignId) {
       global.db.run('DELETE FROM ai_usage_log WHERE campaign_id = ?', [campaignId])
     } else {
@@ -57,9 +58,9 @@ function registerAiHandlers(aiService, keyService) {
   })
 
   // RAG settings — stored in-process and persisted to userData/rag-settings.json
-  ipcMain.handle('rag:getSettings', () => global.ragSettings)
+  registerHandler('rag:getSettings', () => global.ragSettings)
 
-  ipcMain.handle('rag:saveSettings', (_, settings) => {
+  registerHandler('rag:saveSettings', (_, settings) => {
     global.ragSettings = { ...global.ragSettings, ...settings }
     const { app } = require('electron')
     const fs   = require('fs')

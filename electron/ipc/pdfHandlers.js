@@ -1,11 +1,12 @@
-const { ipcMain, dialog } = require('electron')
+const { dialog } = require('electron')
+const { registerHandler } = require('./registerHandler')
 const path = require('path')
 const fs   = require('fs')
 
 module.exports = (pdfService, db, pdfExtractionService) => {
 
   // Open OS file picker — returns array of selected file paths (or [] if cancelled)
-  ipcMain.handle('pdf:openDialog', async () => {
+  registerHandler('pdf:openDialog', async () => {
     const result = await dialog.showOpenDialog({
       title:      'Select Source Book PDF',
       filters:    [{ name: 'PDF Files', extensions: ['pdf'] }],
@@ -16,7 +17,7 @@ module.exports = (pdfService, db, pdfExtractionService) => {
 
   // Full ingest pipeline: copy PDF to storage, create source record, chunk + store
   // Returns { success, chunkCount, sourceId } so the renderer can chain embed:source
-  ipcMain.handle('pdf:ingest', async (event, campaignId, filePath) => {
+  registerHandler('pdf:ingest', async (event, campaignId, filePath) => {
     const filename   = path.basename(filePath)
     const storedPath = await pdfService.copyPdf(filePath, filename)
 
@@ -33,14 +34,14 @@ module.exports = (pdfService, db, pdfExtractionService) => {
   })
 
   // Re-ingest an existing source (clear old chunks, re-process the stored file)
-  ipcMain.handle('pdf:reIngest', async (event, sourceId) => {
+  registerHandler('pdf:reIngest', async (event, sourceId) => {
     return pdfService.reIngest(sourceId, (percent, message) => {
       event.sender.send('pdf:progress', { sourceId, percent, message })
     })
   })
 
   // Delete a source: remove db records, chunks, and the stored file from disk
-  ipcMain.handle('pdf:delete', async (_, sourceId, filePath) => {
+  registerHandler('pdf:delete', async (_, sourceId, filePath) => {
     db.run('DELETE FROM pdf_chunks WHERE source_id=?', [sourceId])
     db.run('DELETE FROM pdf_sources WHERE id=?', [sourceId])
     if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath)
@@ -50,12 +51,12 @@ module.exports = (pdfService, db, pdfExtractionService) => {
   // ── Extraction handlers — Phase 7 (Compendium Import) ───────────────────
 
   // Detect content type for an arbitrary text string (no DB lookup needed)
-  ipcMain.handle('pdf:detectChunkType', (_, text) => {
+  registerHandler('pdf:detectChunkType', (_, text) => {
     return { type: pdfExtractionService.detectType(text) }
   })
 
   // Extract structured fields from a single chunk by DB id
-  ipcMain.handle('pdf:extractChunk', async (_, chunkId, useAI) => {
+  registerHandler('pdf:extractChunk', async (_, chunkId, useAI) => {
     const chunk = db.get(
       `SELECT pc.id, pc.source_id, pc.chunk_index, pc.page_number, pc.text, ps.filename
        FROM pdf_chunks pc
@@ -68,7 +69,7 @@ module.exports = (pdfService, db, pdfExtractionService) => {
   })
 
   // Extract structured fields from multiple chunks (batch)
-  ipcMain.handle('pdf:extractChunks', async (_, chunkIds, useAI) => {
+  registerHandler('pdf:extractChunks', async (_, chunkIds, useAI) => {
     const results = []
     for (const chunkId of (chunkIds ?? [])) {
       const chunk = db.get(
@@ -89,7 +90,7 @@ module.exports = (pdfService, db, pdfExtractionService) => {
   })
 
   // Semantic (vector) search filtered to a campaign's embedded sources
-  ipcMain.handle('pdf:semanticSearch', async (_, campaignId, query, topK) => {
+  registerHandler('pdf:semanticSearch', async (_, campaignId, query, topK) => {
     return pdfExtractionService.semanticSearch(query, campaignId, topK ?? 10)
   })
 

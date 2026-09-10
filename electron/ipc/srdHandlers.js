@@ -1,14 +1,14 @@
-const { ipcMain } = require('electron')
+const { registerHandler } = require('./registerHandler')
 
 function registerSrdHandlers(db, srdService) {
-  ipcMain.handle('srd:seedAll', async (event) => {
+  registerHandler('srd:seedAll', async (event) => {
     return srdService.seedAll((percent, message) => {
       event.sender.send('srd:progress', { percent, message })
     })
   })
 
   // ── Monster handlers ─────────────────────────────────────────────────
-  ipcMain.handle('srd:getMonsters', (_, filters = {}) => {
+  registerHandler('srd:getMonsters', (_, filters = {}) => {
     const rows = db.all('SELECT slug, data FROM srd_cache WHERE resource_type = ?', ['monster'])
     let results = rows.map(r => JSON.parse(r.data))
     if (filters.name)                                   results = results.filter(m => m.name.toLowerCase().includes(filters.name.toLowerCase()))
@@ -21,13 +21,13 @@ function registerSrdHandlers(db, srdService) {
     }))
   })
 
-  ipcMain.handle('srd:getMonsterByIndex', (_, index) => {
+  registerHandler('srd:getMonsterByIndex', (_, index) => {
     const row = db.get('SELECT data FROM srd_cache WHERE resource_type = ? AND slug = ?', ['monster', index])
     return row ? JSON.parse(row.data) : null
   })
 
   // ── Spell handlers ───────────────────────────────────────────────────
-  ipcMain.handle('srd:getSpells', (_, filters = {}) => {
+  registerHandler('srd:getSpells', (_, filters = {}) => {
     const rows = db.all('SELECT slug, data FROM srd_cache WHERE resource_type = ?', ['spell'])
     let results = rows.map(r => JSON.parse(r.data))
     if (filters.name)                                      results = results.filter(s => s.name.toLowerCase().includes(filters.name.toLowerCase()))
@@ -40,13 +40,13 @@ function registerSrdHandlers(db, srdService) {
     }))
   })
 
-  ipcMain.handle('srd:getSpellByIndex', (_, index) => {
+  registerHandler('srd:getSpellByIndex', (_, index) => {
     const row = db.get('SELECT data FROM srd_cache WHERE resource_type = ? AND slug = ?', ['spell', index])
     return row ? JSON.parse(row.data) : null
   })
 
   // ── Equipment handlers ───────────────────────────────────────────────
-  ipcMain.handle('srd:getEquipment', (_, filters = {}) => {
+  registerHandler('srd:getEquipment', (_, filters = {}) => {
     const rows = db.all('SELECT slug, data FROM srd_cache WHERE resource_type = ?', ['equipment'])
     let results = rows.map(r => JSON.parse(r.data))
     if (filters.name)     results = results.filter(e => e.name.toLowerCase().includes(filters.name.toLowerCase()))
@@ -57,13 +57,13 @@ function registerSrdHandlers(db, srdService) {
     }))
   })
 
-  ipcMain.handle('srd:getEquipmentByIndex', (_, index) => {
+  registerHandler('srd:getEquipmentByIndex', (_, index) => {
     const row = db.get('SELECT data FROM srd_cache WHERE resource_type = ? AND slug = ?', ['equipment', index])
     return row ? JSON.parse(row.data) : null
   })
 
   // ── Utility ──────────────────────────────────────────────────────────
-  ipcMain.handle('srd:getCacheStats', () =>
+  registerHandler('srd:getCacheStats', () =>
     db.all(`SELECT resource_type, COUNT(*) as count FROM srd_cache GROUP BY resource_type`)
   )
 }

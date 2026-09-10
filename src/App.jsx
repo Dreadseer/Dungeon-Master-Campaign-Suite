@@ -5,11 +5,11 @@ import SrdLoader          from './components/SrdLoader'
 import CampaignGuard      from './components/CampaignGuard'
 import PlayerApp          from './PlayerApp'
 import DMPlayerControls   from './components/player/DMPlayerControls'
+import Toasts            from './components/ui/Toasts'
 import usePlayerStore     from './stores/playerStore'
 
 import CampaignManager  from './pages/CampaignManager'
 import WorldBuilder     from './pages/WorldBuilder'
-import LoreConnections  from './pages/LoreConnections'
 import MindMap          from './pages/MindMap'
 import MapEngine        from './pages/MapEngine'
 import Compendium       from './pages/Compendium'
@@ -56,6 +56,7 @@ function AppContent() {
       {showPlayerPanel && (
         <DMPlayerControls onClose={() => setShowPlayerPanel(false)} />
       )}
+      <Toasts />
       <div className="app-layout">
         <Sidebar />
         <main className="main-content">
@@ -70,7 +71,6 @@ function AppContent() {
             <Route path="/world/lore"         element={<Guarded><Lore /></Guarded>} />
             <Route path="/world/connections"  element={<Guarded><Connections /></Guarded>} />
 
-            <Route path="/lore"       element={<Guarded><LoreConnections /></Guarded>} />
             <Route path="/mindmap"    element={<Guarded><MindMap /></Guarded>} />
             <Route path="/maps"       element={<Guarded><MapEngine /></Guarded>} />
             <Route path="/characters" element={<Guarded><CharacterSheets /></Guarded>} />
