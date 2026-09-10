@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import useCampaignStore from '../stores/campaignStore'
+import { notifyError } from '../stores/toastStore'
 
 export default function Settings() {
   const activeCampaign = useCampaignStore(s => s.activeCampaign)
@@ -77,11 +78,17 @@ export default function Settings() {
   }
 
   async function handleRemove() {
-    await window.electronAPI.ai.deleteKey()
-    setHasKey(false); setKeyInput('')
-    const result = await window.electronAPI.ai.getMode()
-    setAiMode(result?.mode ?? result)
-    setStatusMsg('Key removed.')
+    try {
+      await window.electronAPI.ai.deleteKey()
+      setHasKey(false); setKeyInput('')
+      const result = await window.electronAPI.ai.getMode()
+      setAiMode(result?.mode ?? result)
+      setStatusMsg('Key removed.')
+    } catch (err) {
+      // Was silent: a failed delete left the key in place while the UI cleared
+      // the field, so the next launch looked like the key had come back.
+      notifyError(err, 'Remove API key')
+    }
   }
 
   async function handleTest() {
@@ -133,8 +140,12 @@ export default function Settings() {
   }
 
   async function handleRemoveNgrokToken() {
-    await window.electronAPI.server.ngrok.deleteToken()
-    setHasNgrokToken(false)
+    try {
+      await window.electronAPI.server.ngrok.deleteToken()
+      setHasNgrokToken(false)
+    } catch (err) {
+      notifyError(err, 'Remove ngrok token')
+    }
   }
 
   async function handleTestTunnel() {

@@ -20,6 +20,7 @@ import GraphStatsPanel                                from '../components/mindma
 import AIInsightsPanel                                from '../components/mindmap/AIInsightsPanel'
 import EdgeCreationModal                              from '../components/mindmap/EdgeCreationModal'
 import EdgeContextMenu                                from '../components/mindmap/EdgeContextMenu'
+import { notifyError, notifySuccess } from '../stores/toastStore'
 
 const nodeTypes = {
   npc:      NPCNode,
@@ -186,7 +187,12 @@ function MindMapInner({ initNodes, initEdges, reload, activeCampaign }) {
 
   const handleEdgeDelete = useCallback(async (edge) => {
     if (!edge.data?.connectionId) return
-    await window.electronAPI.db.connections.delete(edge.data.connectionId)
+    try {
+      await window.electronAPI.db.connections.delete(edge.data.connectionId)
+    } catch (err) {
+      notifyError(err, 'Delete connection')
+      return
+    }
     setEdges(eds => eds.filter(e => e.id !== edge.id))
   }, [setEdges])
 

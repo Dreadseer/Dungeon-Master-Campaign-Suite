@@ -4,6 +4,8 @@ import useCampaignStore from '../../stores/campaignStore'
 import EntityCard from '../../components/world/EntityCard'
 import EntityModal from '../../components/world/EntityModal'
 import Skeleton from '../../components/ui/Skeleton'
+import { findParentCycle } from '../../utils/locationUtils'
+import { notifyError, notifySuccess } from '../../stores/toastStore'
 
 const TYPES = ['town', 'dungeon', 'shop', 'region', 'landmark']
 const TABS  = ['All', ...TYPES]
@@ -101,9 +103,8 @@ export default function Locations() {
   async function handleSubmit(e) {
     e.preventDefault()
     if (!form.name.trim()) { setError('Location name is required.'); return }
-    if (editing && form.parent_location_id === editing.id) {
-      setError('A location cannot be its own parent.'); return
-    }
+    const cycle = editing && findParentCycle(editing.id, form.parent_location_id, locations)
+    if (cycle) { setError(cycle); return }
     setSaving(true)
     const payload = {
       ...form,
@@ -112,19 +113,29 @@ export default function Locations() {
       has_own_map: !!form.has_own_map,
       floor_number: form.floor_number !== '' ? parseInt(form.floor_number, 10) : null,
     }
-    if (editing) {
-      await window.electronAPI.db.locations.update(editing.id, payload)
-    } else {
-      await window.electronAPI.db.locations.create(payload)
+    try {
+      if (editing) {
+        await window.electronAPI.db.locations.update(editing.id, payload)
+      } else {
+        await window.electronAPI.db.locations.create(payload)
+      }
+      load()
+      closeModal()
+    } catch (err) {
+      notifyError(err, editing ? 'Save location' : 'Create location')
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
-    load()
-    closeModal()
   }
 
   async function handleDelete(loc) {
-    await window.electronAPI.db.locations.delete(loc.id)
-    load()
+    try {
+      await window.electronAPI.db.locations.delete(loc.id)
+      notifySuccess(`Deleted "${loc.name}".`)
+      load()
+    } catch (err) {
+      notifyError(err, 'Delete location')
+    }
   }
 
   // Parent picker opens edit modal for that parent

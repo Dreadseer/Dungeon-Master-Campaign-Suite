@@ -5,6 +5,7 @@ import MonsterSearchPanel  from '../components/encounter/MonsterSearchPanel'
 import XPCalculator        from '../components/encounter/XPCalculator'
 import InitiativeTracker   from '../components/encounter/InitiativeTracker'
 import { partyThresholds, difficultyRating, adjustedXP } from '../utils/encounterUtils'
+import { notifyError, notifySuccess } from '../stores/toastStore'
 
 const STATUS_TABS  = ['All', 'Planned', 'Active', 'Completed']
 
@@ -140,9 +141,13 @@ export default function EncounterBuilder() {
       await window.electronAPI.db.encounters.delete(id)
       setDeleteConfirm(null)
       if (activeEncounter?.id === id) setActiveEncounter(null)
+      notifySuccess('Encounter deleted.')
       await loadEncounters()
     } catch (err) {
+      // setLoadError alone was not enough: the banner it feeds is not rendered
+      // in the list view, which is exactly where deleting happens.
       setLoadError(err?.message ?? 'Delete failed')
+      notifyError(err, 'Delete encounter')
     }
   }
 

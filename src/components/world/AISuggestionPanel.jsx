@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { notifyError, notifySuccess } from '../../stores/toastStore'
 
 export default function AISuggestionPanel({ activeCampaign, factions, locations, npcs }) {
   const [open, setOpen]         = useState(false)
@@ -10,8 +11,17 @@ export default function AISuggestionPanel({ activeCampaign, factions, locations,
     if (!open) {
       setOpen(true)
       if (aiMode === null) {
-        const mode = await window.electronAPI.ai.getMode()
-        setAiMode(mode)
+        try {
+          // ai:getMode resolves to an OBJECT — { mode: 'no-ai' | 'online' | 'offline' }
+          // (aiHandlers.js:9). Storing it whole made `aiMode === 'no-ai'` below
+          // permanently false, so the "configure your API key" message never
+          // rendered and the Generate button was offered with no AI behind it.
+          const { mode } = await window.electronAPI.ai.getMode()
+          setAiMode(mode)
+        } catch (err) {
+          notifyError(err, 'Check AI status')
+          setAiMode('no-ai')
+        }
       }
     } else {
       setOpen(false)

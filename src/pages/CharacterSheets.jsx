@@ -3,6 +3,7 @@ import useCampaignStore from '../stores/campaignStore'
 import EntityModal      from '../components/world/EntityModal'
 import CharacterSheet   from '../components/character/CharacterSheet'
 import { modStr } from '../utils/dnd5e'
+import { notifyError, notifySuccess } from '../stores/toastStore'
 
 const CLASSES = [
   'Barbarian','Bard','Cleric','Druid','Fighter',
@@ -274,9 +275,16 @@ export default function CharacterSheets() {
   }
 
   async function handleDelete(char) {
-    await window.electronAPI.db.characters.delete(char.id)
-    setConfirmDelete(null)
-    await load()
+    try {
+      await window.electronAPI.db.characters.delete(char.id)
+      setConfirmDelete(null)
+      notifySuccess(`Deleted "${char.character_name}".`)
+      await load()
+    } catch (err) {
+      // The confirm dialog stays open on failure, so the user can see the toast
+      // and retry without hunting for the row again.
+      notifyError(err, 'Delete character')
+    }
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────

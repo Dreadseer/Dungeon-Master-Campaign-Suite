@@ -4,6 +4,7 @@ import useCampaignStore from '../../stores/campaignStore'
 import EntityCard from '../../components/world/EntityCard'
 import EntityModal from '../../components/world/EntityModal'
 import Skeleton from '../../components/ui/Skeleton'
+import { notifyError, notifySuccess } from '../../stores/toastStore'
 
 const ALIGNMENTS = [
   'Lawful Good', 'Neutral Good', 'Chaotic Good',
@@ -73,8 +74,15 @@ export default function Factions() {
   }
 
   async function handleDelete(faction) {
-    await window.electronAPI.db.factions.delete(faction.id)
-    load()
+    try {
+      await window.electronAPI.db.factions.delete(faction.id)
+      notifySuccess(`Delete factiond "${faction.name}".`)
+      load()
+    } catch (err) {
+      // Reload is deliberately skipped on failure: the row is still there, and
+      // re-fetching would make it look as though nothing was attempted.
+      notifyError(err, 'Delete faction')
+    }
   }
 
   const createdDate = (f) => new Date(f.created_at).toLocaleDateString()

@@ -7,6 +7,7 @@ import CustomSpellForm     from './forms/CustomSpellForm'
 import CustomEquipmentForm from './forms/CustomEquipmentForm'
 import CustomMonsterForm   from './forms/CustomMonsterForm'
 import PdfImportPanel      from './PdfImportPanel'
+import { notifyError, notifySuccess } from '../../stores/toastStore'
 
 const TYPE_TABS = [
   { key: 'all',       label: 'All'       },
@@ -101,7 +102,12 @@ export default function CustomBrowser() {
   }
 
   async function handleDelete(entry) {
-    await window.electronAPI.db.compendium.delete(entry.id)
+    try {
+      await window.electronAPI.db.compendium.delete(entry.id)
+    } catch (err) {
+      notifyError(err, 'Delete entry')
+      return
+    }
     setConfirmDelete(null)
     if (selected?.id === entry.id) setSelected(null)
     await load()

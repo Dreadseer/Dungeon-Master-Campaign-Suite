@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useCampaignStore from '../stores/campaignStore'
+import { notifyError, notifySuccess } from '../stores/toastStore'
 
 export default function CampaignManager() {
   const { activeCampaign, setActiveCampaign, clearActiveCampaign } = useCampaignStore()
@@ -40,18 +41,31 @@ export default function CampaignManager() {
 
   async function handleDelete(id) {
     if (!window.confirm('Delete this campaign? This cannot be undone.')) return
-    await window.electronAPI.db.campaigns.delete(id)
-    if (activeCampaign?.id === id) clearActiveCampaign()
-    loadCampaigns()
+    try {
+      await window.electronAPI.db.campaigns.delete(id)
+      if (activeCampaign?.id === id) clearActiveCampaign()
+      notifySuccess('Campaign deleted.')
+      loadCampaigns()
+    } catch (err) {
+      // The active campaign is deliberately left selected on failure — it still
+      // exists, and clearing it would strand the user on an empty screen.
+      notifyError(err, 'Delete campaign')
+    }
   }
 
   async function handleNotesBlur() {
     if (!activeCampaign) return
-    await window.electronAPI.db.campaigns.update(activeCampaign.id, {
-      name: activeCampaign.name,
-      description: notes,
-      world_setting: activeCampaign.world_setting,
-    })
+    try {
+      await window.electronAPI.db.campaigns.update(activeCampaign.id, {
+        name: activeCampaign.name,
+        description: notes,
+        world_setting: activeCampaign.world_setting,
+      })
+    } catch (err) {
+      // Silent until now, and the worst kind: the DM types session notes, tabs
+      // away, and only finds out they were never saved on the next launch.
+      notifyError(err, 'Save campaign notes')
+    }
   }
 
   if (activeCampaign?.name) {

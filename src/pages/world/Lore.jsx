@@ -4,6 +4,7 @@ import useCampaignStore from '../../stores/campaignStore'
 import EntityCard from '../../components/world/EntityCard'
 import EntityModal from '../../components/world/EntityModal'
 import Skeleton from '../../components/ui/Skeleton'
+import { notifyError, notifySuccess } from '../../stores/toastStore'
 
 const CATEGORIES = ['History', 'Faction', 'Location', 'Secret', 'Other']
 const EMPTY_FORM  = { name: '', category: 'History', content: '', is_secret: false }
@@ -81,8 +82,15 @@ export default function Lore() {
   }
 
   async function handleDelete(entry) {
-    await window.electronAPI.db.lore.delete(entry.id)
-    load()
+    try {
+      await window.electronAPI.db.lore.delete(entry.id)
+      notifySuccess(`Delete lore entryd "${entry.name}".`)
+      load()
+    } catch (err) {
+      // Reload is deliberately skipped on failure: the row is still there, and
+      // re-fetching would make it look as though nothing was attempted.
+      notifyError(err, 'Delete lore entry')
+    }
   }
 
   const countLabel = filtered.length === lore.length

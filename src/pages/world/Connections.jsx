@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import useCampaignStore from '../../stores/campaignStore'
 import EntityModal from '../../components/world/EntityModal'
 import Skeleton from '../../components/ui/Skeleton'
+import { notifyError, notifySuccess } from '../../stores/toastStore'
 
 const ENTITY_TYPES = ['npc', 'location', 'faction']
 const RELATIONSHIP_SUGGESTIONS = [
@@ -112,8 +113,15 @@ export default function Connections() {
   }
 
   async function handleDelete(conn) {
-    await window.electronAPI.db.connections.delete(conn.id)
-    load()
+    try {
+      await window.electronAPI.db.connections.delete(conn.id)
+      notifySuccess('Delete connectiond.')
+      load()
+    } catch (err) {
+      // Reload is deliberately skipped on failure: the row is still there, and
+      // re-fetching would make it look as though nothing was attempted.
+      notifyError(err, 'Delete connection')
+    }
   }
 
   return (

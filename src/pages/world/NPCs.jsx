@@ -4,6 +4,7 @@ import EntityCard from '../../components/world/EntityCard'
 import NPCModal from '../../components/world/NPCModal'
 import NPCQuickView from '../../components/world/NPCQuickView'
 import Skeleton from '../../components/ui/Skeleton'
+import { notifyError, notifySuccess } from '../../stores/toastStore'
 
 export default function NPCs() {
   const activeCampaign = useCampaignStore(s => s.activeCampaign)
@@ -79,8 +80,15 @@ export default function NPCs() {
   }
 
   async function handleDelete(npc) {
-    await window.electronAPI.db.npcs.delete(npc.id)
-    load()
+    try {
+      await window.electronAPI.db.npcs.delete(npc.id)
+      notifySuccess(`Delete NPCd "${npc.name}".`)
+      load()
+    } catch (err) {
+      // Reload is deliberately skipped on failure: the row is still there, and
+      // re-fetching would make it look as though nothing was attempted.
+      notifyError(err, 'Delete NPC')
+    }
   }
 
   const countLabel = filtered.length === npcs.length

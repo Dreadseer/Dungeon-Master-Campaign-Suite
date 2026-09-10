@@ -6,6 +6,7 @@ import EntityModal from '../components/world/EntityModal'
 import Skeleton from '../components/ui/Skeleton'
 import MapCanvas from '../components/map/MapCanvas'
 import MapToolbar from '../components/map/MapToolbar'
+import { notifyError, notifySuccess } from '../stores/toastStore'
 
 const SIDEBAR_W    = 240
 const TOPBAR_H     = 56
@@ -196,9 +197,14 @@ export default function MapEngine() {
   }
 
   async function handleDelete(map) {
-    await window.electronAPI.db.maps.delete(map.id)
-    if (activeMap?.id === map.id) setActiveMap(null)
-    load()
+    try {
+      await window.electronAPI.db.maps.delete(map.id)
+      if (activeMap?.id === map.id) setActiveMap(null)
+      notifySuccess(`Deleted "${map.name}".`)
+      load()
+    } catch (err) {
+      notifyError(err, 'Delete map')
+    }
   }
 
   async function handleDuplicate(map) {
