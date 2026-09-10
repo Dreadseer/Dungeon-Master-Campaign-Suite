@@ -5,6 +5,9 @@
   "description": "Dungeon Master's Campaign Suite — AI-assisted desktop application",
   "author": "Christopher Clarke",
   "main": "electron/main.js",
+  "engines": {
+    "node": ">=20 <23"
+  },
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
     "dev:player": "vite --config vite.player.config.js",

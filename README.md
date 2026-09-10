@@ -72,7 +72,7 @@ Versions are transcribed from `package.json` (semver ranges as written there).
 
 ### Required to run in development
 
-- **Node.js 20+** and **npm 10+** — the Node version is *not* enforced by an `engines` field; 20+ is the tested baseline.
+- **Node.js 20–22** and **npm 10+** — pinned by `.nvmrc` (`20`) and `package.json`'s `"engines": { "node": ">=20 <23" }`. The upper bound is deliberate: `better-sqlite3` is a native module and Node 23+ has not been validated against Electron 33's ABI. See [Troubleshooting](#better-sqlite3-node_module_version-mismatch) for what goes wrong.
 - **Native build toolchain** for compiling `better-sqlite3` during `npm install`:
   - **Windows:** Python 3 + Visual Studio Build Tools (C++)
   - **macOS:** Xcode Command Line Tools
@@ -392,11 +392,34 @@ Notes:
 Vite wasn't ready when Electron started. Wait a moment and press `Ctrl+R`. If persistent, check the terminal for Vite errors.
 
 ### `better-sqlite3` "NODE_MODULE_VERSION mismatch"
-The native module was built for a different Node/Electron ABI:
+
+**The cause: DMCS has two JavaScript runtimes, and `better-sqlite3` can only be compiled for one at a
+time.** It is a *native* module - a `.node` binary compiled in C++ against a specific V8 ABI, stamped
+with a `NODE_MODULE_VERSION` number. Electron 33 embeds its own V8 and reports ABI **130**; the Node
+24 you may have on your `PATH` reports **137**. A binary built for one refuses to load in the other,
+which is why the same install can work under `npm run dev` (Electron loads it) and fail under a plain
+`node script.js` (Node loads it) - or the reverse, depending on which runtime it was last built for.
+
+`npm install` compiles it against **Node**. The `postinstall` hook then runs `electron-rebuild`, which
+recompiles it against **Electron**. So after a successful install the binary is Electron-flavoured, and
+any `scripts/verify-*.js` run under bare `node` will fail - that is expected. The `*-electron.js`
+variants exist precisely because they run inside Electron, where the ABI matches.
+
+To rebuild for Electron (the normal case - the app won't start):
 ```bash
 npm run postinstall
 # or: ./node_modules/.bin/electron-rebuild -f -w better-sqlite3
 ```
+
+To rebuild for Node (only if you need `better-sqlite3` from a bare `node` script):
+```bash
+npm rebuild better-sqlite3
+```
+...then re-run `npm run postinstall` before launching the app again.
+
+**Prevention:** use the pinned runtime. `.nvmrc` contains `20` and `package.json` declares
+`"engines": { "node": ">=20 <23" }`. Node 23+ has not been validated against this Electron version's
+ABI, and Node 24 is the exact configuration that produces the 130-vs-137 mismatch above.
 
 ### SRD never loads / compendium empty
 The first-run seed fetches from `https://www.dnd5eapi.co`. If you were offline it failed silently — Settings → **Re-seed SRD** once online.
