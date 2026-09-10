@@ -30,16 +30,66 @@ class DatabaseService {
       { id: 6, name: 'subclasses',        sql: MIGRATION_006 },
       { id: 7, name: 'encounter_map_loc_fields', sql: MIGRATION_007 },
       { id: 8, name: 'compendium_source_book',   sql: MIGRATION_008 },
+      // foreignKeysOff: recreates six tables that reference each other. SQLite
+      // requires foreign keys disabled for the create/copy/drop/rename procedure,
+      // and PRAGMA foreign_keys is a no-op inside a transaction — so the runner
+      // has to toggle it around the transaction rather than the SQL doing it.
+      { id: 9, name: 'referential_integrity', sql: MIGRATION_009, foreignKeysOff: true },
     ]
 
     for (const m of migrations) {
       if (ran.has(m.id)) continue
-      this.db.exec(m.sql)
-      this.db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(m.id, m.name)
+      if (m.foreignKeysOff) this.runGuardedMigration(m)
+      else                  this.runSimpleMigration(m)
     }
 
     // Seed reference data — each method is idempotent (checks before inserting)
     this.seedSubclasses()
+  }
+
+  // The original path: statements auto-commit one at a time. Correct for
+  // migrations 001-008, all of which are additive.
+  runSimpleMigration(m) {
+    this.db.exec(m.sql)
+    this.db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(m.id, m.name)
+  }
+
+  // Table-recreate migrations, which must run with foreign keys disabled and
+  // atomically. Follows sqlite.org/lang_altertable.html section 7 exactly:
+  // disable FKs, begin, do the work, foreign_key_check, commit, re-enable.
+  //
+  // PRAGMA foreign_keys is silently ignored inside a transaction, so the toggle
+  // has to happen out here rather than in the migration SQL. On any failure the
+  // whole thing rolls back and the _migrations row is never written, so the next
+  // launch retries against the untouched schema.
+  runGuardedMigration(m) {
+    this.db.pragma('foreign_keys = OFF')
+    try {
+      this.db.exec('BEGIN')
+      try {
+        this.db.exec(m.sql)
+
+        const violations = this.db.pragma('foreign_key_check')
+        if (violations.length > 0) {
+          const sample = violations.slice(0, 5)
+            .map(v => `${v.table}.rowid=${v.rowid} -> ${v.parent}`)
+            .join(', ')
+          throw new Error(
+            `Migration ${m.id} (${m.name}) left ${violations.length} foreign key ` +
+            `violation(s); rolled back. First few: ${sample}`
+          )
+        }
+
+        this.db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(m.id, m.name)
+        this.db.exec('COMMIT')
+      } catch (err) {
+        this.db.exec('ROLLBACK')
+        throw err
+      }
+    } finally {
+      // Restore the constructor's setting even if the migration threw.
+      this.db.pragma('foreign_keys = ON')
+    }
   }
 
   get(sql, params = []) {
@@ -306,6 +356,164 @@ const MIGRATION_008 = `
   INSERT INTO compendium_custom_m008 SELECT * FROM compendium_custom;
   DROP TABLE compendium_custom;
   ALTER TABLE compendium_custom_m008 RENAME TO compendium_custom;
+`
+
+// Migration 009 — Referential integrity rebuild.
+//
+// Six tables carried foreign keys with no ON DELETE action, which in SQLite
+// means RESTRICT: deleting a location that any NPC, map or encounter referenced
+// raised "FOREIGN KEY constraint failed" and the UI, which had no catch, simply
+// did nothing. Rebuilt here with ON DELETE SET NULL so a delete succeeds and the
+// dependants are orphaned cleanly rather than blocking it. connections.campaign_id
+// gains ON DELETE CASCADE (added by 002 as a bare reference, so deleting a
+// campaign with any connection row failed). pdf_sources.status gains 'embedded',
+// which EmbeddingService.js:108 has always written and the CHECK always rejected.
+//
+// SQLite cannot ALTER a foreign key or a CHECK, so each table follows the
+// documented recreate procedure (sqlite.org/lang_altertable.html section 7):
+// create new, copy, drop old, rename new. The old table is NEVER renamed —
+// renaming it would make SQLite rewrite every child table's REFERENCES clause to
+// point at the temporary name. Same reason the new tables are created with their
+// final REFERENCES targets already spelled the way they will be after the renames.
+//
+// This migration must run with foreign keys OFF and inside a transaction, which
+// PRAGMA cannot do from inside; see the foreignKeysOff flag on its entry in the
+// migrations array, and runMigrations' handling of it.
+//
+// Column lists are explicit rather than SELECT *, so a future ALTER that appends
+// a column to one of these tables fails loudly here instead of silently shifting
+// every value one position left.
+const MIGRATION_009 = `
+  -- locations: parent_location_id RESTRICT -> SET NULL.
+  -- Deleting a parent region now orphans its children instead of being refused.
+  CREATE TABLE locations_m009 (
+    id                 INTEGER PRIMARY KEY,
+    campaign_id        INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    name               TEXT NOT NULL,
+    type               TEXT CHECK(type IN ('town','dungeon','shop','region','landmark')),
+    description        TEXT,
+    lore               TEXT,
+    parent_location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+    created_at         DATETIME DEFAULT (datetime('now')),
+    has_own_map        INTEGER NOT NULL DEFAULT 0,
+    floor_number       INTEGER
+  );
+  INSERT INTO locations_m009
+    (id, campaign_id, name, type, description, lore, parent_location_id, created_at, has_own_map, floor_number)
+  SELECT
+     id, campaign_id, name, type, description, lore, parent_location_id, created_at, has_own_map, floor_number
+  FROM locations;
+  DROP TABLE locations;
+  ALTER TABLE locations_m009 RENAME TO locations;
+
+  -- npcs: location_id and faction_id RESTRICT -> SET NULL.
+  CREATE TABLE npcs_m009 (
+    id          INTEGER PRIMARY KEY,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    race        TEXT,
+    class       TEXT,
+    role        TEXT,
+    location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+    faction_id  INTEGER REFERENCES factions(id)  ON DELETE SET NULL,
+    notes       TEXT,
+    secrets     TEXT,
+    motivation  TEXT,
+    is_alive    BOOLEAN DEFAULT 1,
+    created_at  DATETIME DEFAULT (datetime('now'))
+  );
+  INSERT INTO npcs_m009
+    (id, campaign_id, name, race, class, role, location_id, faction_id, notes, secrets, motivation, is_alive, created_at)
+  SELECT
+     id, campaign_id, name, race, class, role, location_id, faction_id, notes, secrets, motivation, is_alive, created_at
+  FROM npcs;
+  DROP TABLE npcs;
+  ALTER TABLE npcs_m009 RENAME TO npcs;
+
+  -- maps: location_id RESTRICT -> SET NULL.
+  CREATE TABLE maps_m009 (
+    id          INTEGER PRIMARY KEY,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    name        TEXT,
+    location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+    image_path  TEXT,
+    grid_size   INTEGER DEFAULT 50,
+    fog_data    TEXT,
+    tokens      TEXT,
+    created_at  DATETIME DEFAULT (datetime('now'))
+  );
+  INSERT INTO maps_m009
+    (id, campaign_id, name, location_id, image_path, grid_size, fog_data, tokens, created_at)
+  SELECT
+     id, campaign_id, name, location_id, image_path, grid_size, fog_data, tokens, created_at
+  FROM maps;
+  DROP TABLE maps;
+  ALTER TABLE maps_m009 RENAME TO maps;
+
+  -- encounters: location_id and map_id (added by 007) RESTRICT -> SET NULL.
+  CREATE TABLE encounters_m009 (
+    id          INTEGER PRIMARY KEY,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    name        TEXT,
+    location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+    monsters    TEXT,
+    status      TEXT DEFAULT 'planned' CHECK(status IN ('planned','active','completed')),
+    xp_total    INTEGER,
+    notes       TEXT,
+    created_at  DATETIME DEFAULT (datetime('now')),
+    map_id      INTEGER REFERENCES maps(id) ON DELETE SET NULL
+  );
+  INSERT INTO encounters_m009
+    (id, campaign_id, name, location_id, monsters, status, xp_total, notes, created_at, map_id)
+  SELECT
+     id, campaign_id, name, location_id, monsters, status, xp_total, notes, created_at, map_id
+  FROM encounters;
+  DROP TABLE encounters;
+  ALTER TABLE encounters_m009 RENAME TO encounters;
+
+  -- connections: campaign_id gains ON DELETE CASCADE.
+  -- 002 added it as a bare ALTER TABLE ... REFERENCES, so deleting a campaign
+  -- that had any connection row failed outright.
+  -- entity_a_id / entity_b_id stay unconstrained: they are polymorphic (the row
+  -- names its own target table in entity_a_type), which SQLite cannot express.
+  -- Those are cleaned up handler-side in dbHandlers.js instead.
+  CREATE TABLE connections_m009 (
+    id            INTEGER PRIMARY KEY,
+    entity_a_type TEXT NOT NULL,
+    entity_a_id   INTEGER NOT NULL,
+    entity_b_type TEXT NOT NULL,
+    entity_b_id   INTEGER NOT NULL,
+    relationship  TEXT,
+    notes         TEXT,
+    campaign_id   INTEGER REFERENCES campaigns(id) ON DELETE CASCADE
+  );
+  INSERT INTO connections_m009
+    (id, entity_a_type, entity_a_id, entity_b_type, entity_b_id, relationship, notes, campaign_id)
+  SELECT
+     id, entity_a_type, entity_a_id, entity_b_type, entity_b_id, relationship, notes, campaign_id
+  FROM connections;
+  DROP TABLE connections;
+  ALTER TABLE connections_m009 RENAME TO connections;
+
+  -- pdf_sources: status CHECK gains 'embedded'.
+  -- EmbeddingService.js writes this value on success; the CHECK rejected it, so
+  -- every completed embedding run ended in "CHECK constraint failed".
+  CREATE TABLE pdf_sources_m009 (
+    id          INTEGER PRIMARY KEY,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    filename    TEXT,
+    file_path   TEXT,
+    status      TEXT DEFAULT 'pending' CHECK(status IN ('pending','indexed','embedded','failed')),
+    chunk_count INTEGER,
+    indexed_at  DATETIME
+  );
+  INSERT INTO pdf_sources_m009
+    (id, campaign_id, filename, file_path, status, chunk_count, indexed_at)
+  SELECT
+     id, campaign_id, filename, file_path, status, chunk_count, indexed_at
+  FROM pdf_sources;
+  DROP TABLE pdf_sources;
+  ALTER TABLE pdf_sources_m009 RENAME TO pdf_sources;
 `
 
 // ── SRD Subclass Seed Data — 27 subclasses (2–3 per class × 12 classes) ────────
