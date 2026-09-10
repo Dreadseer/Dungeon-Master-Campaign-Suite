@@ -1,0 +1,193 @@
+# DMCS Build Status
+
+Running log of the phased rebuild described in `docs/DMCS_Build_Plan.md`, against the findings in
+`docs/DMCS_CAPABILITY_REVIEW.md`. Newest entry last. Each entry records what shipped, what changed
+verdict, what was deferred, and what is still unknown.
+
+---
+
+## Phase 0 — Environment, test harness, repo hygiene
+
+**Date:** 2026-09-10
+**Branch:** `phase-0-foundation` (from `main` @ `08a8f94`)
+**Verdict changes:** none — Phase 0 changes no application behaviour.
+
+### What shipped
+
+**1. Runtime pinned** — `3d3db01`
+- `package.json` gains `"engines": { "node": ">=20 <23" }`; `.nvmrc` contains `20`.
+- README Troubleshooting's `NODE_MODULE_VERSION` entry rewritten to explain the **cause**, not just
+  the fix: `better-sqlite3` is a native module compiled against one V8 ABI, Electron 33 reports 130
+  and Node 24 reports 137, `npm install` builds for Node and the `postinstall` hook rebuilds for
+  Electron — which is why the same tree can work under `npm run dev` and fail under bare `node`.
+  Both rebuild directions are now documented.
+- The Prerequisites line that read "the Node version is *not* enforced by an `engines` field" was
+  corrected.
+
+**2. Vitest harness** — `59f88aa`
+- `npm i -D vitest` (the one devDependency the phase rules permit). No runtime dependency added.
+- Scripts: `"test": "vitest run"`, `"test:watch": "vitest"`.
+- Configured inside the existing `vite.config.js` via a `test` block rather than a second config
+  file: `environment: 'node'`, `include: ['src/**/__tests__/**/*.test.js']`. Adding the block does
+  not affect `vite build` (verified — see Acceptance).
+- **`.npmrc` with `legacy-peer-deps=true` added.** Unrelated to Vitest, and not a change I would have
+  made unprompted: `react-konva@18.2.10` declares a peer range of `konva` ^7/^8/^9 while
+  `package.json` pins `konva` ^10.3.0, so **any** clean `npm install` fails with `ERESOLVE`. The
+  already-installed tree violates this too (konva 10.3.0 sits next to react-konva 18.2.10 and
+  works). The flag makes the existing state reproducible; it does not fix the mismatch. See Open
+  Questions.
+
+**3-5. Three test suites** — `a166d4e`
+| Suite | Tests | Notes |
+|-------|-------|-------|
+| `src/utils/__tests__/encounterUtils.test.js` | 118 pass, 4 expected-fail, 3 todo | |
+| `src/utils/__tests__/fogUtils.test.js` | 39 pass | |
+| `src/utils/__tests__/combatUtils.test.js` | 38 pass, 1 expected-fail, 2 todo | |
+
+- **All 80 `XP_THRESHOLDS` values match DMG 2014 p. 82.** The expected values are transcribed from
+  the book into the test file, not read from the module under test. All 20 levels × 4 tiers pass, as
+  named individual assertions. This independently confirms the review's finding.
+- All six `monsterMultiplier` bands pass, including the boundary cases (6→×2 / 7→×2.5, 10→×2.5 /
+  11→×3, 14→×3 / 15→×4).
+- `partyThresholds` for four level-5 PCs = `[1000, 2000, 3000, 4400]` ✅
+- Both end-to-end ratings from the review reproduce: 1 × CR 5 vs four L5 = **Easy** (1800 adjusted);
+  4 × CR 2 vs four L5 = **Hard** (3600 adjusted).
+- `fogUtils`: brush clamping verified at all four edges *and* all four corners, including the case
+  that would wrap a brush from column 0 onto the last cell of the previous row if the clamp were
+  missing. `getMapDimensions` covered for non-divisible image sizes (1024×768 @ 50 → 21×16) and the
+  blank-map 3000×3000 fallback. Note: the phase brief calls this function `getGridDimensions`; the
+  actual export is `getMapDimensions` and it was tested under its real name — renaming an export is
+  a behaviour change and out of scope for Phase 0.
+- `combatUtils`: initiative DEX tiebreak, count expansion producing "Goblin 1"/"Goblin 2", per-copy
+  HP isolation, `nextTurn` wraparound, and all 15 PHB conditions.
+
+**How known bugs are recorded.** Each gets *two* tests: one that passes and pins the current wrong
+behaviour, and one marked `it.fails` asserting the correct behaviour. `it.fails` passes only while
+its body throws — so the moment the fix lands, that test starts erroring and forces someone to delete
+the modifier. It is a tripwire, not a skip. A `test.todo` accompanies each, which is why `npm test`
+prints a non-zero todo count. Recorded this phase:
+
+| Bug | Current behaviour (pinned) | Fixed in |
+|-----|----------------------------|----------|
+| `CR_XP` missing CR 25–29 | `crToXP(25..29)` returns `0` | Phase 1 |
+| `parseCR` unguarded `parseFloat` | `parseCR('bogus')` returns `NaN`, which reaches `crToXP` and silently becomes a 0-XP monster | Phase 1 |
+| No party-size multiplier shift | `monsterMultiplier` ignores party size entirely | Phase 1 |
+| Monsters have no AC | `createMonsterEntry` never writes `ac`, so every monster enters combat at AC 10 regardless of stat block | Phase 5 |
+
+A fifth todo notes that player AC is `10 + dexMod`, ignoring armour (also Phase 5).
+
+**6. Repo hygiene** — `a1c20b3`
+- `git rm -r --cached scripts/.test-userdata` — **122 files** of Electron runtime cache untracked.
+  Every file remains on disk; git simply stops tracking them.
+- `.gitignore` replaced (was two lines): `node_modules/`, `dist/`, `release/`,
+  `scripts/.test-userdata/`, `scripts/screenshots/`, `*.log`, `.env` / `.env.*`, `.DS_Store`,
+  `Thumbs.db`. The `.env` entries matter most — nothing previously stopped an API key being
+  committed. (At runtime the app already does the right thing, storing the Anthropic key via
+  Electron `safeStorage` in `electron/services/KeyService.js`.)
+- `agent/dmcs-agent.mjs` → `tools/dmcs-agent.mjs`, **kept not deleted**, with `tools/README.md`
+  stating it is an LM Studio experiment unrelated to the app's Anthropic-online/Ollama-offline
+  architecture and imported by nothing. Kept because it is a working reference for driving a local
+  OpenAI-compatible endpoint through the Anthropic SDK.
+- `ai/features/` deleted. It was never tracked by git (git does not track empty directories), so it
+  existed only on disk.
+- README Testing section rewritten — it claimed "There is no automated test suite", no longer true.
+  README project tree and Open Questions updated.
+
+**7. Migration constants reordered** — `7ae47da`
+- `MIGRATION_006` now defined before 007 and 008. Readability only; execution order was already
+  correct via the id-ordered array at `DatabaseService.js:24-33`. A pure move — 16 insertions, 16
+  deletions, with the script asserting the sorted character multiset was unchanged before writing.
+  No `MIGRATION_00N` constant was edited, per the append-only rule.
+
+**8. This file.**
+
+### Migration verification
+
+No migration was added this phase, but the reorder touches the file that holds them, so both halves
+of the standing migration rule were exercised. `DatabaseService` cannot be imported under bare
+`node` (its `better-sqlite3` is built for a different ABI), so the `MIGRATION_00N` template literals
+were extracted from the source and run against Node's built-in `node:sqlite` — the same SQLite
+engine executing the same DDL.
+
+**Fresh database:** all 8 migrations applied in order. 16 tables created (`_migrations`,
+`ai_usage_log`, `campaigns`, `characters`, `compendium_custom`, `connections`, `encounters`,
+`factions`, `locations`, `maps`, `mind_map_positions`, `npcs`, `pdf_chunks`, `pdf_sources`,
+`srd_cache`, `subclasses`). Confirmed present: `characters.subclass_name` (006),
+`encounters.map_id`, `locations.has_own_map`, `locations.floor_number` (007), and the widened
+`compendium_custom` CHECK (008).
+
+**Database already containing rows:** applied 1–7, inserted three `compendium_custom` rows
+(`custom`, `srd`, `pdf_upload`), confirmed the pre-008 CHECK rejects `'source_book'`
+(`CHECK constraint failed: source IN ('custom','srd','pdf_upload')`), then applied 008:
+
+```
+OK   all 3 rows preserved byte-for-byte across the table recreate
+OK   post-008 accepts source='source_book'
+OK   the CHECK still rejects an unknown source value
+OK   FK to campaigns with ON DELETE CASCADE survived the recreate
+```
+
+### Acceptance
+
+| Check | Result |
+|-------|--------|
+| `npm test` green with ≥ 3 suites | **PASS** — 3 files, 205 tests: **195 passed, 5 expected-fail, 5 todo**, 271 ms |
+| Known-bug tests visibly pending, not deleted | **PASS** — 5 `it.fails` tripwires + 5 `test.todo` entries, both counted in the summary line |
+| `npm run build:renderer` succeeds | **PASS** — renderer 438 modules → 1,359.05 kB (gzip 388.47 kB) in 7.67 s; player 63 modules → 213.36 kB (gzip 67.47 kB) in 688 ms. The pre-existing >500 kB chunk warning is unchanged. |
+| `git status` shows no tracked files under `scripts/.test-userdata/` | **PASS** — `git ls-files scripts/.test-userdata` returns 0 |
+| `node -e "require('./package.json').engines"` | **PASS** — prints `{ node: '>=20 <23' }` |
+
+**Not run, and why:**
+
+- **`npm install` on Node 20 or 22.** This machine has **Node v24.13.1 only**, with no `nvm` or
+  `fnm` installed. Nothing was verified on the pinned version. Everything above ran on Node 24.
+- **A full clean `npm install`.** Deliberately not run. Its `postinstall` hook force-rebuilds
+  `better-sqlite3`, and a failed rebuild would leave the working tree without a loadable binary —
+  a hard-to-reverse change to the user's environment. A `--dry-run` was used instead, which proved:
+  dependency **resolution succeeds** with the new `.npmrc` and still fails with `ERESOLVE` without
+  it. The dry run then reached the `postinstall` step and `electron-rebuild` failed at node-gyp
+  (`node-gyp failed to rebuild ... better-sqlite3`); the underlying gyp output was swallowed by
+  electron-rebuild and is not in the npm log, so the cause is **not diagnosed**. The existing
+  `better_sqlite3.node` was left untouched (still dated 12 May) — nothing was broken.
+- **The GUI (`npm run dev`) and the packaged installer.** Not launched. Related measurement below.
+
+### Findings
+
+**The checked-in `better-sqlite3` is currently built for Node, not Electron.** Measured, not read:
+`node -e "require('better-sqlite3')"` **succeeds** under bare Node 24, which means the binary is ABI
+137. Electron 33 needs 130 and would reject it. This is the *opposite* of the state the capability
+review recorded ("the checked-in build targets NODE_MODULE_VERSION 130"), and it means `npm run dev`
+would hit the mismatch from this tree until `npm run postinstall` succeeds — which, per the previous
+section, currently fails. This is pre-existing and untouched by Phase 0, but it is the first thing
+that will block Phase 1 if Phase 1 needs to run the app.
+
+### Deferred
+
+- **The 17 PNGs already tracked under `scripts/screenshots/`** stay tracked. The new `.gitignore`
+  entry stops more accumulating; removing the existing ones deletes committed content and is the
+  user's call. One line if wanted: `git rm -r --cached scripts/screenshots`.
+- **No LICENSE file** — flagged by the review, unchanged. Out of Phase 0's stated scope.
+- **The systemic unhandled-IPC-error problem** (review: `ai:ragQuery`, `embed:source`, ~100 channels
+  with no wrapper) is Phase 1's `registerHandler` work, not Phase 0's.
+- **No React component or Electron main-process code has a test.** `DatabaseService`, the IPC
+  handlers and the AI services remain unexercised by the suite; the manual `scripts/verify-*.js`
+  files are still the only coverage there. A reusable migration-test harness would need either a
+  correctly-built `better-sqlite3` or a commitment to `node:sqlite` (still flagged experimental in
+  Node 24) — worth deciding before a phase actually adds a migration.
+
+### Open questions for the next session
+
+1. **konva / react-konva peer mismatch.** `react-konva@18.2.10` wants `konva` ^7/^8/^9; the project
+   runs ^10.3.0. Papered over with `legacy-peer-deps=true`. Real fix is to downgrade konva to ^9 or
+   move to a react-konva release accepting ^10 — both runtime dependency changes, so both need your
+   call under the locked-stack rule.
+2. **Why does `electron-rebuild` fail here?** Two documented candidates, neither confirmed: the
+   repository path contains spaces (`Dungeon Master Campaign Suite`, which the README already flags
+   as a node-gyp hazard), and the Windows native toolchain (Python 3 + VS Build Tools C++) may be
+   incomplete. Worth resolving before any phase that needs to launch the app.
+3. **Should the pinned Node range be honoured on this machine?** Everything in Phase 0 ran fine on
+   Node 24 because none of it touches native code. The moment the app itself needs to run, the ABI
+   question becomes real. Installing Node 20 via nvm-windows would settle both this and (2).
+4. **If Phase 1 changes `monsterMultiplier`'s signature,** the two `it.fails` tripwires in
+   `encounterUtils.test.js` assume `monsterMultiplier(count, partySize)`. A different signature means
+   updating those tests rather than deleting them — the comment in the file says so.
