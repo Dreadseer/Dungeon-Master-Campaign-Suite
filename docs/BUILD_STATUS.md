@@ -191,3 +191,240 @@ that will block Phase 1 if Phase 1 needs to run the app.
 4. **If Phase 1 changes `monsterMultiplier`'s signature,** the two `it.fails` tripwires in
    `encounterUtils.test.js` assume `monsterMultiplier(count, partySize)`. A different signature means
    updating those tests rather than deleting them — the comment in the file says so.
+
+---
+
+## Phase 1 — Silent failures, referential integrity, IPC error handling
+
+**Date:** 2026-09-10
+**Branch:** `phase-1-integrity`, branched from **`phase-0-foundation`**, not `main`.
+**Verdict changes:** none by the review's scale, as the phase brief anticipated.
+
+> **Branch note.** Standing rule 1 says to branch from the current main branch. Phase 1 needs Phase 0's
+> Vitest harness and the three `it.fails` tripwires it is required to flip, and Phase 0 is unmerged, so
+> `main` does not have them. Branched from `phase-0-foundation` instead. Merge Phase 0 first, or merge
+> this branch and get both.
+
+### What shipped
+
+**1. Global IPC error wrapper** — `3f86277`, `1d69095`
+
+`electron/ipc/registerHandler.js` exports `registerHandler(channel, fn)` and `registerListener(channel, fn)`.
+Every handler now logs `[ipc] <channel> failed:` with the full error in the main process, then rethrows
+a plain `Error` carrying the underlying message plus a `[channel]` tag.
+
+| File | Channels |
+|---|---|
+| `dbHandlers.js` | 96 |
+| `aiHandlers.js` | 11 + 1 listener |
+| `serverHandlers.js` | 11 + 1 listener |
+| `pdfHandlers.js` | 8 |
+| `srdHandlers.js` | 8 |
+| `fileHandlers.js` | 6 |
+| `embeddingHandlers.js` | 5 |
+| `main.js` | 7 + 1 listener |
+| **Total** | **152 handlers, 3 listeners** |
+
+The two the brief named specifically — `ai:ragQuery` and `embed:source` — forwarded service exceptions
+straight to the renderer with nothing around them. Both are covered.
+
+**`main.js` was not in the brief's list and had eight unwrapped channels** (`app:version`,
+`shell:openExternal`, `encounter:openMapWindow`, four `player:*`, and the `player:broadcast` listener).
+The audit script found them after the first sweep looked complete. All are wrapped; no raw `ipcMain`
+call remains anywhere in the codebase.
+
+**2. Renderer error surface** — `3f86277`, `1621be3`
+
+- `src/utils/ipcError.js` — `parseIpcError` strips Electron's `Error invoking remote method '<channel>':`
+  envelope (which cannot be suppressed from the main process), any stacked `Error: ` prefixes, and the
+  channel tag. `friendlyIpcError` rewrites the seven failure modes users actually hit — `FOREIGN KEY`,
+  `UNIQUE`, `NOT NULL`, `CHECK`, `SQLITE_BUSY`, `ENOENT`, `EACCES` — into plain language, keeping the
+  database wording behind a "Show details" toggle. Unrecognised messages pass through verbatim.
+  **18 tests.**
+- `src/stores/toastStore.js` — Zustand queue, not persisted, with `notifyError` / `notifySuccess` /
+  `notifyInfo` as plain functions rather than hooks so they work inside a `catch` in a non-component
+  function. `notifyError` always logs the raw error too.
+- `src/components/ui/Toasts.jsx` — mounted once in `App.jsx`.
+
+**Twelve renderer call sites wrapped**, reloading the list only on success: Locations, NPCs, Factions,
+Lore, Connections, CampaignManager (delete *and* the session-notes autosave), MapEngine,
+CharacterSheets, MindMap edge delete, CustomBrowser, and Settings' two key-removal buttons.
+
+Two were worse than a missing message:
+
+- `CampaignManager.handleNotesBlur` saved session notes on blur with nothing around it. The DM typed,
+  tabbed away, and found out on the next launch that nothing had been written.
+- `EncounterBuilder` had a `catch`, but it wrote to a page-level banner the list view does not render —
+  and the list view is the only place deletes happen.
+
+Successful deletes now show a confirmation naming what went, because "the button does nothing" was true
+in both directions.
+
+**3. Migration 009 — integrity rebuild** — `7f093ea`
+
+| Table.column | Was | Now |
+|---|---|---|
+| `locations.parent_location_id` | RESTRICT | `ON DELETE SET NULL` |
+| `npcs.location_id` | RESTRICT | `ON DELETE SET NULL` |
+| `npcs.faction_id` | RESTRICT | `ON DELETE SET NULL` |
+| `maps.location_id` | RESTRICT | `ON DELETE SET NULL` |
+| `encounters.location_id` | RESTRICT | `ON DELETE SET NULL` |
+| `encounters.map_id` | RESTRICT | `ON DELETE SET NULL` |
+| `connections.campaign_id` | RESTRICT | `ON DELETE CASCADE` |
+| `pdf_sources.status` | CHECK rejects `'embedded'` | CHECK accepts it |
+
+No existing `MIGRATION_00N` was touched. Data is copied, never deleted: create new, `INSERT ... SELECT`
+with an **explicit column list**, then drop the old. Explicit lists so that a future `ALTER` appending a
+column fails loudly here instead of silently shifting every value one position left. The old table is
+never renamed — renaming it would make SQLite rewrite every child table's `REFERENCES` clause to point
+at the temporary name.
+
+**Runner change.** The recreate procedure needs foreign keys disabled *and* atomicity, and
+`PRAGMA foreign_keys` is silently ignored inside a transaction, so the SQL cannot do it itself. Migration
+entries may now carry `foreignKeysOff: true`, routing them to `runGuardedMigration`: disable FKs, `BEGIN`,
+exec, `PRAGMA foreign_key_check`, `COMMIT`, re-enable in a `finally`. On failure it rolls back and never
+writes the `_migrations` row, so the next launch retries against an untouched schema. Migrations 001–008
+keep their original auto-commit path via `runSimpleMigration`.
+
+**4. Handler-side cleanup for polymorphic refs** — `95bb0d1`
+
+`connections` and `mind_map_positions` store references whose target table is named in a sibling column,
+which SQLite cannot express as a foreign key — so 009 leaves them unconstrained and the cleanup lives in
+`dbHandlers.js`. `db:npcs:delete`, `db:locations:delete`, `db:factions:delete` and `db:lore:delete` now
+route through `deleteWithPolymorphicRefs()`, which clears matching `connections` rows on **either** side
+plus the `mind_map_positions` row, then deletes the entity, all inside one `db.transaction()`. Lore is
+included ahead of Phase 4 because `db:world:search` already emits `'lore'` as an entity type.
+
+**5. `no-ai` guard** — `1621be3`
+
+`AISuggestionPanel` stored the whole result of `ai.getMode()`, which resolves to an **object**
+(`aiHandlers.js:9`). `aiMode === 'no-ai'` was therefore permanently false, so the "configure your API key
+in Settings" message never rendered and the Generate button was offered with no AI behind it. Now
+destructured, with a `catch` that falls back to `'no-ai'` — if the mode cannot be determined, hiding the
+feature is the safe direction.
+
+**6. Orphaned vectors** — `95bb0d1`
+
+`pdf:delete` dropped the chunk rows but left their vectra embeddings in the index, so RAG kept retrieving
+and citing a book the DM had deleted. `embeddingService.deleteSource(sourceId)` now runs first, while the
+chunk rows it keys off still exist, in a `try`/`catch`. `registerPdfHandlers` takes `embeddingService` as
+a fourth argument; `main.js` constructs it at line 157, well before the handlers register at line 175.
+
+**7. Map file cleanup** — `95bb0d1`
+
+`db:maps:delete` removed the row and left the image in `userData/maps/` and the thumbnail in
+`userData/maps/thumbs/` forever. Both are unlinked now, each in its own `try`/`catch`: a missing or locked
+file must not block the database delete, or the map becomes undeletable.
+
+**8. Encounter math** — `617cd10`
+
+- **CR 25–29 added** (75000 / 90000 / 105000 / 120000 / 135000). The symptom was that a CR 27 threat
+  contributed nothing to the difficulty rating, so an encounter that should read Deadly read Trivial.
+- **`parseCR` NaN guard.** `parseFloat(cr) ?? 0` only catches null/undefined, so `parseCR('bogus')`
+  returned `NaN`, which hit `CR_XP[NaN]` → `undefined` → `0` one layer later: a silent 0-XP monster
+  rather than a visible error. Now `Number.isFinite`-guarded on both paths, so `NaN` and `Infinity` are
+  caught too.
+- **Party-size multiplier shift.** Reimplemented as an index into an exported
+  `MULTIPLIER_LADDER = [0.5, 1, 1.5, 2, 2.5, 3, 4]`, shifted +1 when `partySize < 3` and −1 when
+  `partySize >= 6`, clamped. Signature is `monsterMultiplier(count, partySize = 4)`, so every existing
+  single-argument call keeps its old result.
+- **`adjustedXP` also takes `partySize`.** Beyond the brief's wording, and deliberate: `adjustedXP` calls
+  `monsterMultiplier` internally, and the UI shows the multiplier beside a difficulty derived from
+  `adjustedXP`. Threading party size through only one of them would put two contradicting numbers on the
+  same screen. A test asserts they cannot disagree.
+
+Call sites updated: `XPCalculator.jsx`, `CombatCalculator.jsx` (both with `partySize` hoisted above the
+math block and added to the `useMemo` deps), and both `adjustedXP` calls in `EncounterBuilder.jsx`.
+
+**The three Phase 0 tripwires did their job.** Each `it.fails` began erroring the moment its fix landed,
+forcing the modifier off. All three are now plain assertions; the encounter suite is 136 tests with no
+pending and no todo.
+
+**9. Dead sidebar link** — `3f86277`
+
+`/lore` removed from `Sidebar.jsx`, the route removed from `App.jsx`, `src/pages/LoreConnections.jsx`
+deleted. No reference survives anywhere in `src/`.
+
+**10. Parent-cycle guard** — `1621be3`
+
+New `src/utils/locationUtils.js` walks the `parent_location_id` chain with a visited set and a 50-hop
+bound, rejecting a cycle of any length. The old check compared `parent === self`, so A-under-B-under-A
+and every longer loop were accepted; nothing in the database prevents it, because SQLite cannot express
+"this self-reference must be acyclic". The message names both locations. The location form's save path is
+wrapped too, and `setSaving` moved into a `finally` so a failed save no longer leaves the dialog stuck on
+"Saving…". **25 tests.**
+
+One of those tests found a real gap while being written: `wouldCreateCycle` ignored the `cyclic` flag
+from the ancestor walk, so attaching a location to an already-broken hierarchy was allowed. Both `cyclic`
+and `truncated` now reject.
+
+### New verification scripts
+
+Both run on plain Node — neither needs a working native `better-sqlite3` build.
+
+- **`npm run test:migrations`** (`scripts/verify-migration-009.mjs`) — extracts the real `MIGRATION_00N`
+  literals from `DatabaseService.js` and replays them on Node's built-in `node:sqlite`.
+- **`npm run test:ipc`** (`scripts/verify-ipc-layers.mjs`) — cross-references `preload.js`'s
+  `ipcRenderer.invoke`/`send` literals against the `registerHandler`/`registerListener` literals in
+  `electron/ipc/*.js` and `main.js`, failing on a channel present on only one side. This is standing
+  rule 2 made checkable; it is what found the eight unwrapped `main.js` channels.
+
+### Acceptance
+
+| Check | Result |
+|---|---|
+| `npm test` green, including the formerly-pending encounter math | **PASS** — 5 files, 259 tests: **256 passed**, 1 expected-fail, 2 todo. The remaining tripwire + todos are the Phase 5 monster-AC bug, not Phase 1's. |
+| Scripted migration test 001→009 on a populated DB | **PASS** — `npm run test:migrations`, **51/51** |
+| … delete a location with an NPC, a map and an encounter attached → succeeds, dependents `NULL` | **PASS** — all four dependants asserted, including the child location's `parent_location_id` |
+| … delete a campaign with connections → succeeds | **PASS** — connections cascade; all seven child tables cascade; the second campaign is untouched |
+| … delete an NPC → its connections and mind-map position rows are gone | **PASS** — covered by `deleteWithPolymorphicRefs`; see the caveat below |
+| `UPDATE pdf_sources SET status='embedded'` succeeds | **PASS** — and refused before 009, confirming the defect was real |
+| `npm run build:renderer` | **PASS** — renderer 6.0 s, player 0.6 s |
+| `npm run test:ipc` | **PASS** — 152 handlers, 3 listeners, 152 invokes, 3 sends, zero unwrapped, zero orphans |
+
+**Caveat on the NPC-delete check.** The migration harness proves the *SQL* — that no foreign key blocks
+the delete and the `connections` / `mind_map_positions` rows can be removed in one transaction. It does
+**not** execute `deleteWithPolymorphicRefs` itself, because that function lives in `dbHandlers.js` behind
+`better-sqlite3` and `electron`. The function is nine lines of parameterised SQL and its channel wiring is
+verified by `test:ipc`, but it has not been *run*. Stated plainly rather than counted as a full pass.
+
+**Not run, and why:**
+
+- **The manual UI check** ("delete a location with NPCs from the UI — either it succeeds or a toast
+  appears"). **Not performed.** A display is available; the blocker is the one Phase 0 recorded. Measured
+  again just now: `node -e "require('better-sqlite3')"` still **succeeds** under bare Node 24, so the
+  binary is ABI 137 (Node-flavoured) while Electron 33 needs 130. The app cannot open its database from
+  this tree, and `npm run postinstall` — which would fix it — still fails at node-gyp. Force-rebuilding
+  would delete a working binary with no guarantee of replacing it, which is your call, not mine.
+  **Everything in this phase that touches the running UI is therefore verified by reading and by unit
+  test, not by use.**
+- **AI-mode behaviour with a real key or a running Ollama.** No API key, no Ollama. The `no-ai` fix is a
+  one-line destructure verified by reading `aiHandlers.js:9`; the *rendered* result is unverified.
+
+### Deferred
+
+- **`db:pdf:delete` in `dbHandlers.js`** is a second, database-only path to the same table and does not
+  drop vectors or files. Nothing in `src/` calls it — the UI uses `pdf:delete` — so it is annotated with
+  a pointer rather than rewired, since handing `dbHandlers` an `embeddingService` for an unused channel is
+  the wrong trade. Either delete the channel or wire it properly in a later phase.
+- **`ai_usage_log.campaign_id`** still has no `ON DELETE` action. It was not in the brief's list for 009,
+  and migrations are append-only, so it would need a 010. Low impact: the rows are diagnostic.
+- **No component tests.** The toast queue, `<Toasts/>` and every page remain unexercised by Vitest. That
+  needs jsdom and a testing-library, i.e. new devDependencies beyond the one Phase 0 was permitted.
+- **`scripts/screenshots/`** — still 17 tracked PNGs, unchanged from Phase 0.
+
+### Open questions for the next session
+
+1. **The `better-sqlite3` ABI is now blocking verification, not just convenience.** Phase 0 could route
+   around it; Phase 1's UI work could not be exercised because of it, and Phase 2 onward will be worse.
+   Resolving it — Node 20 via nvm-windows, or fixing the node-gyp failure — is the highest-value thing to
+   do before more feature work.
+2. **Should the toast helpers replace the per-page error banners?** Several pages keep their own
+   `setError` / `setLoadError` state alongside the new toast. `EncounterBuilder` now writes to both.
+   Consolidating is a small refactor but changes how errors read on every page, so it is worth a decision
+   rather than drift.
+3. **`monsterMultiplier`'s second parameter defaults to 4.** Every caller now passes a real party size,
+   but the default silently applies DMG "no shift" behaviour if a future caller forgets. Consider making
+   it required once all callers are known.
+4. **konva / react-konva peer mismatch** — unchanged from Phase 0, still papered over by
+   `legacy-peer-deps=true` in `.npmrc`.

@@ -227,8 +227,8 @@ Dungeon Master Campaign Suite/
 │   ├── main.jsx / PlayerWebApp.jsx / index.html / components/
 │
 ├── tools/                     # dmcs-agent.mjs — unrelated LM Studio experiment (see tools/README.md)
-├── ai/                       # features/ (empty — see Open Questions)
-├── scripts/                  # Manual verify-*.js scripts + screenshot driver (not a test suite)
+├── scripts/                  # verify-migration-009.mjs + verify-ipc-layers.mjs (npm-wired),
+│                             # plus manual verify-*.js scripts and the screenshot driver
 ├── assets/                   # electron-builder buildResources (icon.png)
 ├── vite.config.js            # DM renderer build (base './', outDir dist/renderer)
 ├── vite.player.config.js     # Browser player build (root player/, outDir dist/player, dev :5174)
@@ -241,6 +241,8 @@ Dungeon Master Campaign Suite/
 
 Every database/AI/file call from React follows the same four-layer path. To add a feature you must touch **all four layers** or it silently no-ops.
 
+`npm run test:ipc` checks the two layers that can be checked statically — it cross-references every `ipcRenderer.invoke` literal in `preload.js` against every `registerHandler` literal in `electron/ipc/*.js` and `electron/main.js`, and fails on a channel that exists on only one side. Run it after adding a channel.
+
 ```
 React component
     │  window.electronAPI.db.subclasses.create(data)
@@ -249,7 +251,7 @@ electron/preload.js
     │  ipcRenderer.invoke('db:subclasses:create', data)
     ▼
 electron/ipc/dbHandlers.js
-    │  ipcMain.handle('db:subclasses:create', (_, data) => global.db.createSubclass(data))
+    │  registerHandler('db:subclasses:create', (_, data) => global.db.createSubclass(data))
     ▼
 electron/database/DatabaseService.js
     │  this.db.prepare('INSERT INTO subclasses …').run(…)
@@ -266,11 +268,42 @@ await window.electronAPI.db.subclasses.create({ class_name, name, description, u
 
 // AI completion (system, user, options) — options.maxTokens is threaded through
 const raw    = await window.electronAPI.ai.complete(system, user, { maxTokens: 8192 })
-const mode   = await window.electronAPI.ai.getMode()   // { mode: 'online' | 'offline-ollama' | 'no-ai' }
+// getMode resolves to an OBJECT, not a string. Destructure it — comparing the
+// whole result to 'no-ai' is silently always false, which is exactly the bug
+// Phase 1 fixed in AISuggestionPanel.
+const { mode } = await window.electronAPI.ai.getMode()  // 'online' | 'offline-ollama' | 'no-ai'
 
 // Semantic search over indexed PDF chunks (used by the Source Book Importer)
 const chunks = await window.electronAPI.embed.search(query, topK, itemKeys, sourceId)
 ```
+
+### Errors
+
+Every `window.electronAPI.*` call must be wrapped. Main-process handlers all run
+through `registerHandler` (`electron/ipc/registerHandler.js`), which logs
+`[ipc] <channel> failed:` with the full error and rethrows a clean message; the
+renderer turns that into a toast:
+
+```javascript
+import { notifyError, notifySuccess } from '../stores/toastStore'
+
+try {
+  await window.electronAPI.db.locations.delete(loc.id)
+  notifySuccess(`Deleted "${loc.name}".`)
+  load()                       // reload ONLY on success
+} catch (err) {
+  notifyError(err, 'Delete location')
+}
+```
+
+`notifyError` parses Electron's `Error invoking remote method '<channel>':`
+wrapper off the message and rewrites the common database failures into plain
+language (`FOREIGN KEY constraint failed` → "Something else still refers to
+this. Remove or reassign it first."), keeping the raw text behind a "Show
+details" toggle. Unrecognised messages pass through verbatim.
+
+Do not reload the list in the `catch`. The row is still there, and re-fetching
+makes a failed delete look like nothing was attempted.
 
 See [`DMCS_Source_Book_Importer.md`](DMCS_Source_Book_Importer.md) for a worked end-to-end example (search → extract → parse → save).
 
@@ -308,12 +341,23 @@ macOS/Linux follow the same pattern (`~/Library/Application Support/<name>/` and
 
 ### Adding a new table (all four IPC layers)
 
-1. Add `const MIGRATION_009 = \`CREATE TABLE …\`` in `DatabaseService.js`.
-2. Append `{ id: 9, name: 'my_table', sql: MIGRATION_009 }` to the `migrations` array. **(ids 1–8 are taken.)**
+1. Add `const MIGRATION_010 = \`CREATE TABLE …\`` in `DatabaseService.js`. **(ids 1–9 are taken.)** Never edit an existing `MIGRATION_00N` — migrations are append-only.
+2. Append `{ id: 10, name: 'my_table', sql: MIGRATION_010 }` to the `migrations` array.
 3. Add CRUD methods to `DatabaseService`.
-4. Register `ipcMain.handle('db:myTable:*', …)` in `electron/ipc/dbHandlers.js`.
+4. Register `registerHandler('db:myTable:*', …)` in `electron/ipc/dbHandlers.js`.
 5. Expose them on `window.electronAPI.db.myTable.*` in `electron/preload.js`.
-6. Call from React: `await window.electronAPI.db.myTable.getAll(campaignId)`.
+6. Call from React: `await window.electronAPI.db.myTable.getAll(campaignId)`, in a `try`/`catch`.
+7. Run `npm run test:ipc` to confirm the channel names match across layers.
+
+**Changing a foreign key or a CHECK constraint** is different: SQLite cannot
+`ALTER` either one, so the table has to be recreated (create new, `INSERT ...
+SELECT` with an explicit column list, drop old, rename new — never rename the
+*old* table, or SQLite rewrites every child table's `REFERENCES` clause to point
+at your temporary name). That procedure needs foreign keys disabled and has to be
+atomic, and `PRAGMA foreign_keys` is silently ignored inside a transaction — so
+mark the entry `foreignKeysOff: true` and the runner handles the toggle,
+transaction and `PRAGMA foreign_key_check` for you. `MIGRATION_009` is the worked
+example.
 
 ---
 
@@ -322,7 +366,7 @@ macOS/Linux follow the same pattern (`~/Library/Application Support/<name>/` and
 | Module (page) | Summary |
 |---|---|
 | Campaign Manager | Create / load / rename / delete campaigns; the active campaign is held in `campaignStore` (persisted to `localStorage`). |
-| World Builder | Factions, Locations, NPCs, Lore, and named Connections; optional AI suggestion panel. |
+| World Builder | Factions, Locations, NPCs, Lore, and named Connections; optional AI suggestion panel. The separate "Lore & Connections" page was removed in Phase 1 — it duplicated `/world/lore` and `/world/connections`. |
 | Mind Map | React Flow graph of all world entities with Dagre auto-layout and PNG export. |
 | Map Engine | Upload battle maps, paint fog of war, place tokens; opens a pop-out combat-map window. |
 | Compendium | Browse SRD monsters/spells/equipment + homebrew, **and** the [Source Book Importer](DMCS_Source_Book_Importer.md) (📥 Single / 📦 Bulk) that turns indexed PDF passages into structured entries via AI. |
@@ -359,9 +403,14 @@ DMCS has **two** distinct ways for players to see content:
 ## Testing
 
 ```bash
-npm test          # vitest run — one pass, exits non-zero on failure
+npm test              # vitest run — one pass, exits non-zero on failure
 npm run test:watch
+npm run test:migrations   # replays migrations 001-009 on a fresh AND a populated database
+npm run test:ipc          # cross-checks channel names across the preload/handler layers
 ```
+
+The two `node` scripts run on Node's built-in `node:sqlite` and on plain source
+parsing respectively, so neither needs a working native `better-sqlite3` build.
 
 **Vitest**, configured inside the existing `vite.config.js` (`test` block) rather than a separate
 config file. Environment is `node`; suites are discovered at `src/**/__tests__/**/*.test.js`. There is
@@ -372,6 +421,8 @@ no jsdom and no component testing yet — everything covered so far is a pure ES
 | `src/utils/__tests__/encounterUtils.test.js` | All 80 `XP_THRESHOLDS` values against DMG 2014 p. 82, the six encounter-multiplier bands, CR→XP, party thresholds, difficulty ratings, `xpBudget` |
 | `src/utils/__tests__/fogUtils.test.js` | Row-major index math, brush clamping at every map edge and corner, grid dimensions for non-divisible images, viewport culling |
 | `src/utils/__tests__/combatUtils.test.js` | Initiative sort and DEX tiebreak, monster count expansion, turn wraparound, the 15 PHB conditions |
+| `src/utils/__tests__/ipcError.test.js` | Unwrapping Electron's IPC rejection envelope; plain-language rewrites of the seven common database/filesystem failures |
+| `src/utils/__tests__/locationUtils.test.js` | Ancestor-chain walking, cycle detection at any depth, the 50-hop bound |
 
 ### Known bugs are recorded as tests, not comments
 
@@ -386,9 +437,10 @@ comment above it, delete the `.fails`, and remove the paired "current behaviour"
 
 ### What is *not* covered
 
-No React component has a test. No Electron main-process code has a test — `DatabaseService`, the IPC
-handlers and the AI services are all unexercised by the suite. The manual scripts remain the only
-coverage there:
+No React component has a test — the toast queue, the error surfaces and every page are unexercised by
+Vitest. Electron main-process *code* has no unit tests either, though the migration SQL and the IPC
+channel wiring are now checked by the two `node` scripts above. The manual scripts remain the only
+coverage for the services:
 
 - `scripts/verify-*.js` / `*-electron.js` — **manual** verification scripts run in an Electron/Node
   context (e.g. `verify-db-electron.js`, `verify-srd-electron.js`, `verify-ai-electron.js`). They are
@@ -471,7 +523,6 @@ Items I could **not** verify from the repository (honest unknowns, not guesses):
 
 - **No LICENSE.** There is no `LICENSE` file and no license/credits/attribution text anywhere in the repo. The project's license is therefore **unspecified** — add one (or state "all rights reserved") before any public distribution.
 - ~~**`agent/dmcs-agent.mjs`** is a standalone CLI that talks to a local **LM Studio** server…~~ **Resolved in Phase 0:** moved to `tools/dmcs-agent.mjs` and labelled in `tools/README.md` as a dev experiment unrelated to the app's AI architecture (Anthropic online / Ollama offline). Still not imported by anything.
-- ~~**`ai/features/`** is an empty directory—~~ **Resolved in Phase 0:** deleted. It was never tracked by git (git does not track empty directories), so it existed only on disk.
 - ~~**Migrations 007/008 column details** were confirmed by name only…~~ **Resolved in Phase 0:** all 8 migrations were executed against a fresh database and against one already holding rows. 007 adds `encounters.map_id`, `locations.has_own_map` and `locations.floor_number`; 008 recreates `compendium_custom` to widen its `source` CHECK to include `'source_book'`, preserving existing rows. See `docs/BUILD_STATUS.md`.
 - **`npm install`'s `postinstall` (`electron-rebuild`) fails on the development machine** at the node-gyp step, so `better-sqlite3` is currently compiled for **Node** (ABI 137), not Electron (ABI 130) — meaning `npm run dev` will hit the mismatch until the rebuild succeeds. Two documented candidates: this repository's path contains spaces, and the native toolchain may be incomplete. Not diagnosed further in Phase 0.
 - **`react-konva@18.2.10` declares a peer range of `konva` ^7/^8/^9 while the project runs `konva` ^10.** The installed tree works, but a clean `npm install` fails with `ERESOLVE` without `legacy-peer-deps` (now set in `.npmrc`). Whether to downgrade konva or move react-konva is unresolved.
