@@ -1,4 +1,37 @@
+const { app } = require('electron')
 const { registerHandler } = require('./registerHandler')
+const fs   = require('fs')
+const path = require('path')
+
+// Entity types that can appear in `connections` (either side) and in
+// `mind_map_positions`. Both tables store a polymorphic reference — the row
+// names its own target table in entity_a_type / entity_type — which SQLite
+// cannot express as a foreign key, so migration 009 leaves them unconstrained
+// and the cleanup happens here instead.
+const POLYMORPHIC_TYPES = ['npc', 'location', 'faction', 'lore']
+
+// Delete an entity and everything that points at it polymorphically, atomically.
+// Without this, deleting an NPC left its connection rows behind pointing at an
+// id that no longer exists; the Connections page then rendered them as
+// "Unknown", and the Mind Map kept a position row for a node it could not draw.
+function deleteWithPolymorphicRefs(db, table, entityType, id) {
+  if (!POLYMORPHIC_TYPES.includes(entityType)) {
+    throw new Error(`Unknown polymorphic entity type: ${entityType}`)
+  }
+  return db.transaction(() => {
+    db.run(
+      `DELETE FROM connections
+       WHERE (entity_a_type = ? AND entity_a_id = ?)
+          OR (entity_b_type = ? AND entity_b_id = ?)`,
+      [entityType, id, entityType, id]
+    )
+    db.run(
+      'DELETE FROM mind_map_positions WHERE entity_type = ? AND entity_id = ?',
+      [entityType, id]
+    )
+    return db.run(`DELETE FROM ${table} WHERE id = ?`, [id])
+  })
+}
 
 function registerDbHandlers(db) {
   // Campaigns
@@ -78,8 +111,9 @@ function registerDbHandlers(db) {
   registerHandler('db:npcs:toggleAlive', (_, id, isAlive) =>
     db.run('UPDATE npcs SET is_alive = ? WHERE id = ?', [isAlive ? 1 : 0, id]))
 
+  // Also clears the NPC's connections (either side) and mind-map position.
   registerHandler('db:npcs:delete', (_, id) =>
-    db.run('DELETE FROM npcs WHERE id = ?', [id]))
+    deleteWithPolymorphicRefs(db, 'npcs', 'npc', id))
 
   // Locations — Phase 2: upgraded getAll with parent join, parent_location_id in update,
   //             new getById and getByType channels
@@ -113,8 +147,10 @@ function registerDbHandlers(db) {
        data.has_own_map ? 1 : 0, data.floor_number ?? null, id]
     ))
 
+  // Also clears the location's connections and mind-map position. NPCs, maps
+  // and encounters that referenced it survive with location_id NULL (migration 009).
   registerHandler('db:locations:delete', (_, id) =>
-    db.run('DELETE FROM locations WHERE id = ?', [id]))
+    deleteWithPolymorphicRefs(db, 'locations', 'location', id))
 
   // Factions — Phase 2: all new
   registerHandler('db:factions:getAll', (_, campaignId) =>
@@ -136,8 +172,10 @@ function registerDbHandlers(db) {
       [data.name, data.description, data.alignment, data.notes, id]
     ))
 
+  // Also clears the faction's connections and mind-map position. Member NPCs
+  // survive with faction_id NULL (migration 009).
   registerHandler('db:factions:delete', (_, id) =>
-    db.run('DELETE FROM factions WHERE id = ?', [id]))
+    deleteWithPolymorphicRefs(db, 'factions', 'faction', id))
 
   // Connections — Phase 2 Prompt 03 (replaces Phase 1 stub)
   registerHandler('db:connections:getAll', (_, campaignId) =>
@@ -198,8 +236,11 @@ function registerDbHandlers(db) {
        JSON.stringify({ content: data.content, category: data.category, is_secret: data.is_secret ?? false }),
        id]))
 
+  // Lore is not yet selectable in the Connections UI (Phase 4), but world:search
+  // already emits 'lore' as an entity_type and the mind map can position one, so
+  // the same cleanup applies.
   registerHandler('db:lore:delete', (_, id) =>
-    db.run('DELETE FROM compendium_custom WHERE id=?', [id]))
+    deleteWithPolymorphicRefs(db, 'compendium_custom', 'lore', id))
 
   // Global world search
   registerHandler('db:world:search', (_, campaignId, query) => {
@@ -256,8 +297,30 @@ function registerDbHandlers(db) {
   registerHandler('db:maps:updateTokens', (_, id, tokens) =>
     db.run('UPDATE maps SET tokens=? WHERE id=?', [JSON.stringify(tokens), id]))
 
-  registerHandler('db:maps:delete', (_, id) =>
-    db.run('DELETE FROM maps WHERE id=?', [id]))
+  // Deleting a map also removes its image and thumbnail from disk. Both are
+  // best-effort: a missing or locked file must not block the database delete,
+  // or the map becomes undeletable. Same pattern as pdf:delete.
+  registerHandler('db:maps:delete', (_, id) => {
+    const map = db.get('SELECT image_path FROM maps WHERE id = ?', [id])
+    const result = db.run('DELETE FROM maps WHERE id=?', [id])
+
+    if (map?.image_path) {
+      try {
+        if (fs.existsSync(map.image_path)) fs.unlinkSync(map.image_path)
+      } catch (err) {
+        console.error(`[db:maps:delete] could not remove image ${map.image_path}:`, err.message)
+      }
+    }
+
+    try {
+      const thumb = path.join(app.getPath('userData'), 'maps', 'thumbs', `thumb_${id}.png`)
+      if (fs.existsSync(thumb)) fs.unlinkSync(thumb)
+    } catch (err) {
+      console.error(`[db:maps:delete] could not remove thumbnail for map ${id}:`, err.message)
+    }
+
+    return result
+  })
 
   // ── Custom Compendium (items, spells, equipment, monsters) ──────────
   // Note: type='lore' entries are managed separately via db:lore:* handlers.
@@ -544,6 +607,12 @@ function registerDbHandlers(db) {
       UPDATE pdf_sources SET status=?, chunk_count=?, indexed_at=datetime('now') WHERE id=?`,
       [status, chunkCount ?? 0, id]))
 
+  // NOTE: this is the database-only delete and it does NOT drop the source's
+  // vectra embeddings or its file on disk. Nothing in src/ calls it — the UI
+  // uses the `pdf:delete` channel in pdfHandlers.js, which does both. Kept as-is
+  // rather than rewired, because giving dbHandlers an embeddingService just for
+  // an unused channel is the wrong trade; see docs/BUILD_STATUS.md (Phase 1,
+  // deferred). Use pdf:delete.
   registerHandler('db:pdf:delete', (_, id) => {
     db.run('DELETE FROM pdf_chunks WHERE source_id = ?', [id])
     return db.run('DELETE FROM pdf_sources WHERE id = ?', [id])

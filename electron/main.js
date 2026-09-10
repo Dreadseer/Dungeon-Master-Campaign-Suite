@@ -172,7 +172,7 @@ app.whenReady().then(async () => {
   registerDbHandlers(global.db)
   registerSrdHandlers(global.db, global.srdService)
   registerAiHandlers(global.aiService, global.keyService)
-  registerPdfHandlers(global.pdfService, global.db, global.pdfExtractionService)
+  registerPdfHandlers(global.pdfService, global.db, global.pdfExtractionService, global.embeddingService)
   registerEmbedHandlers(global.embeddingService)
   registerServerHandlers(global.playerServer, global.tunnelService, global.keyService)
 

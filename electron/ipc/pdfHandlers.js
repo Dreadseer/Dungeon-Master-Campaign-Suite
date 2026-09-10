@@ -3,7 +3,7 @@ const { registerHandler } = require('./registerHandler')
 const path = require('path')
 const fs   = require('fs')
 
-module.exports = (pdfService, db, pdfExtractionService) => {
+module.exports = (pdfService, db, pdfExtractionService, embeddingService) => {
 
   // Open OS file picker — returns array of selected file paths (or [] if cancelled)
   registerHandler('pdf:openDialog', async () => {
@@ -40,11 +40,31 @@ module.exports = (pdfService, db, pdfExtractionService) => {
     })
   })
 
-  // Delete a source: remove db records, chunks, and the stored file from disk
+  // Delete a source: remove its vectors, db records, chunks, and stored file.
+  //
+  // The vectra index is a separate store keyed by chunk id, so dropping the
+  // chunk rows without dropping the vectors left orphaned embeddings that RAG
+  // would still retrieve and cite — answers quoting a book the DM had deleted.
+  // It runs first, while the chunk rows it keys off still exist.
+  //
+  // Every filesystem/index step is best-effort: none of them may block the
+  // database delete, or the source becomes undeletable.
   registerHandler('pdf:delete', async (_, sourceId, filePath) => {
+    try {
+      await embeddingService.deleteSource(sourceId)
+    } catch (err) {
+      console.error(`[pdf:delete] could not drop vectors for source ${sourceId}:`, err.message)
+    }
+
     db.run('DELETE FROM pdf_chunks WHERE source_id=?', [sourceId])
     db.run('DELETE FROM pdf_sources WHERE id=?', [sourceId])
-    if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath)
+
+    try {
+      if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath)
+    } catch (err) {
+      console.error(`[pdf:delete] could not remove file ${filePath}:`, err.message)
+    }
+
     return { success: true }
   })
 
