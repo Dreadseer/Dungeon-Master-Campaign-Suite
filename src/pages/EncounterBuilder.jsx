@@ -357,7 +357,7 @@ export default function EncounterBuilder() {
     try { completedMonsters = JSON.parse(activeEncounter.monsters ?? '[]') } catch { /* empty */ }
 
     const rawTotalXP = completedMonsters.reduce((sum, m) => sum + (m.xp ?? 0) * m.count, 0)
-    const adjXP      = adjustedXP(completedMonsters)
+    const adjXP      = adjustedXP(completedMonsters, campaignChars.length || 4)
     const xpPerPlayer = campaignChars.length > 0
       ? Math.round(rawTotalXP / campaignChars.length)
       : null
@@ -437,8 +437,10 @@ export default function EncounterBuilder() {
   // VIEW A — Encounter List
   // ════════════════════════════════════════════════════════════════════════════
 
-  // Pre-compute party thresholds for difficulty badges
+  // Pre-compute party thresholds for difficulty badges. partySize also drives
+  // the DMG encounter-multiplier shift inside adjustedXP.
   const thresholds = partyThresholds(campaignChars)
+  const partySize = campaignChars.length || 4
   const showDiffBadge = campaignChars.length > 0
 
   return (
@@ -501,7 +503,7 @@ export default function EncounterBuilder() {
             // Difficulty badge: compute adjusted XP from monsters JSON
             let diffBadge = null
             if (showDiffBadge && monsterList.length > 0) {
-              const adj  = adjustedXP(monsterList)
+              const adj  = adjustedXP(monsterList, partySize)
               const diff = difficultyRating(adj, thresholds)
               diffBadge  = diff
             }

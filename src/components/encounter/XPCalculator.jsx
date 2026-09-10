@@ -45,13 +45,15 @@ export default function XPCalculator({ encounter, monsters, onDifficultyChange }
   }, [useChars, campaignChars, selectedIds, manualCount, manualLevel])
 
   // ── XP math ───────────────────────────────────────────────────────────────
+  // partySize feeds monsterMultiplier: the DMG shifts the encounter multiplier
+  // one rung up for a party under 3 and one rung down for a party of 6+.
+  const partySize    = party.length || 1
   const thresholds   = useMemo(() => partyThresholds(party), [party])
   const raw          = useMemo(() => rawXP(monsters), [monsters])
-  const adjusted     = useMemo(() => adjustedXP(monsters), [monsters])
+  const adjusted     = useMemo(() => adjustedXP(monsters, partySize), [monsters, partySize])
   const totalCount   = useMemo(() => monsters.reduce((s, m) => s + m.count, 0), [monsters])
-  const multiplier   = useMemo(() => monsterMultiplier(totalCount), [totalCount])
+  const multiplier   = useMemo(() => monsterMultiplier(totalCount, partySize), [totalCount, partySize])
   const difficulty   = useMemo(() => difficultyRating(adjusted, thresholds), [adjusted, thresholds])
-  const partySize    = party.length || 1
   const xpPerPlayer  = partySize > 0 ? Math.floor(raw / partySize) : 0
   const avgLevel     = party.length > 0
     ? Math.round(party.reduce((s, c) => s + c.level, 0) / party.length)

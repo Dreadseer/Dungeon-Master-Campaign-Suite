@@ -1,10 +1,11 @@
-import { describe, it, expect, test } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import {
   parseCR,
   crToXP,
   XP_THRESHOLDS,
   partyThresholds,
   monsterMultiplier,
+  MULTIPLIER_LADDER,
   adjustedXP,
   rawXP,
   difficultyRating,
@@ -260,83 +261,168 @@ describe('xpBudget', () => {
   })
 })
 
+
 // ─────────────────────────────────────────────────────────────────────────────
-// KNOWN BUGS — documented here, fixed in Phase 1.
-//
-// Each is written twice:
-//   - a passing test pinning the *current, wrong* behaviour, so the bug is a
-//     recorded fact rather than folklore;
-//   - an `it.fails` test asserting the *correct* behaviour. `it.fails` passes
-//     only while its body throws, so the moment Phase 1 lands the fix that test
-//     errors and forces the modifier to be removed. It is a tripwire, not a
-//     skipped test.
-// A `test.todo` accompanies each, so `npm test` prints a visible todo count.
+// FIXED IN PHASE 1 — these three were `it.fails` tripwires through Phase 0.
+// The tripwires did their job: each started erroring the moment the fix landed,
+// and each is now a plain assertion of correct behaviour.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('KNOWN BUGS (fixed in Phase 1)', () => {
-  describe('BUG 1: CR_XP has no entries for CR 25-29', () => {
-    it('currently returns 0 for CR 25 through 29', () => {
-      for (const cr of [25, 26, 27, 28, 29]) {
-        expect(crToXP(cr)).toBe(0)
-      }
-    })
-
-    it.fails('should return the DMG values for CR 25-29', () => {
-      const dmg = { 25: 75000, 26: 90000, 27: 105000, 28: 120000, 29: 135000 }
-      for (const [cr, xp] of Object.entries(dmg)) {
-        expect(crToXP(Number(cr))).toBe(xp)
-      }
-    })
-
-    test.todo('Phase 1: add CR 25-29 to CR_XP (75000/90000/105000/120000/135000)')
+describe('CR 25-29 (fixed in Phase 1)', () => {
+  it('returns the DMG values for CR 25 through 29', () => {
+    const dmg = { 25: 75000, 26: 90000, 27: 105000, 28: 120000, 29: 135000 }
+    for (const [cr, xp] of Object.entries(dmg)) {
+      expect(crToXP(Number(cr))).toBe(xp)
+    }
   })
 
-  describe('BUG 2: parseCR returns NaN for unparseable input', () => {
-    it('currently returns NaN, because ?? only catches null and undefined', () => {
-      expect(parseCR('bogus')).toBeNaN()
-      expect(parseCR('')).toBeNaN()
-      expect(parseCR(undefined)).toBeNaN()
-    })
-
-    it('the NaN reaches crToXP and silently becomes a 0-XP monster', () => {
-      // CR_XP[NaN] is undefined, so `?? 0` catches it one layer later — the
-      // encounter undercounts rather than displaying NaN. Silent, which is worse.
-      expect(crToXP('bogus')).toBe(0)
-    })
-
-    it.fails('should fall back to 0 for unparseable input', () => {
-      expect(parseCR('bogus')).toBe(0)
-    })
-
-    test.todo('Phase 1: parseCR should Number.isNaN-guard its parseFloat result')
+  it('the CR ladder is now unbroken from 0 to 30', () => {
+    const ratings = [0, 0.125, 0.25, 0.5, ...Array.from({ length: 30 }, (_, i) => i + 1)]
+    for (const cr of ratings) {
+      expect(crToXP(cr)).toBeGreaterThan(0)
+    }
   })
 
-  describe('BUG 3: no party-size multiplier shift (DMG p. 82)', () => {
-    // The DMG: a party of fewer than three characters uses the NEXT HIGHER
-    // multiplier; a party of six or more uses the NEXT LOWER. The ladder is
-    // [0.5, 1, 1.5, 2, 2.5, 3, 4]. monsterMultiplier takes only the monster
-    // count, so both shifts are simply absent.
-    //
-    // The `it.fails` cases below assume Phase 1 adds an optional second
-    // parameter, monsterMultiplier(count, partySize). If Phase 1 chooses a
-    // different signature, update these rather than deleting them.
-    it('currently ignores any second argument', () => {
-      expect(monsterMultiplier(1, 2)).toBe(1)
-      expect(monsterMultiplier(1, 6)).toBe(1)
-      expect(monsterMultiplier(4, 2)).toBe(2)
-      expect(monsterMultiplier(4, 6)).toBe(2)
-    })
+  it('XP still increases monotonically across the whole range', () => {
+    const ladder = Array.from({ length: 31 }, (_, cr) => crToXP(cr))
+    for (let i = 1; i < ladder.length; i++) {
+      expect(ladder[i]).toBeGreaterThan(ladder[i - 1])
+    }
+  })
 
-    it.fails('should step UP one rung for a party of fewer than 3', () => {
-      expect(monsterMultiplier(1, 2)).toBe(1.5)
-      expect(monsterMultiplier(4, 2)).toBe(2.5)
-    })
+  it('a CR 27 monster is no longer worth zero XP in an encounter', () => {
+    // The practical symptom: a legendary threat contributed nothing to the
+    // difficulty rating, so the encounter read "Trivial".
+    const monsters = [{ xp: crToXP(27), count: 1 }]
+    const party = Array.from({ length: 4 }, () => ({ level: 20 }))
+    expect(adjustedXP(monsters)).toBe(105000)
+    expect(difficultyRating(adjustedXP(monsters), partyThresholds(party)).label).toBe('Deadly')
+  })
+})
 
-    it.fails('should step DOWN one rung for a party of 6 or more', () => {
-      expect(monsterMultiplier(1, 6)).toBe(0.5)
-      expect(monsterMultiplier(4, 6)).toBe(1.5)
-    })
+describe('parseCR NaN guard (fixed in Phase 1)', () => {
+  it('falls back to 0 for unparseable input', () => {
+    for (const bad of ['bogus', '', '  ', 'CR five', undefined, null, {}, []]) {
+      expect(parseCR(bad)).toBe(0)
+    }
+  })
 
-    test.todo('Phase 1: monsterMultiplier(count, partySize) with the DMG shift')
+  it('never returns NaN', () => {
+    for (const input of ['bogus', '', undefined, null, NaN, Infinity, -Infinity, '1/4', '12', 7]) {
+      expect(Number.isNaN(parseCR(input))).toBe(false)
+    }
+  })
+
+  it('rejects non-finite numbers too', () => {
+    expect(parseCR(NaN)).toBe(0)
+    expect(parseCR(Infinity)).toBe(0)
+    expect(parseCR(-Infinity)).toBe(0)
+  })
+
+  it('still parses everything it parsed before', () => {
+    expect(parseCR(5)).toBe(5)
+    expect(parseCR('1/8')).toBe(0.125)
+    expect(parseCR('1/4')).toBe(0.25)
+    expect(parseCR('1/2')).toBe(0.5)
+    expect(parseCR('12')).toBe(12)
+    expect(parseCR('0.5')).toBe(0.5)
+    expect(parseCR(0)).toBe(0)
+  })
+
+  it('parses a numeric prefix the way parseFloat always did', () => {
+    // Not a behaviour change — recorded so a future tightening is a deliberate choice.
+    expect(parseCR('5 (1,800 XP)')).toBe(5)
+  })
+})
+
+describe('party-size multiplier shift (fixed in Phase 1)', () => {
+  it('exposes the DMG ladder, with the x0.5 rung below x1', () => {
+    expect(MULTIPLIER_LADDER).toEqual([0.5, 1, 1.5, 2, 2.5, 3, 4])
+  })
+
+  it('a party of 3, 4 or 5 gets no shift', () => {
+    for (const partySize of [3, 4, 5]) {
+      expect(monsterMultiplier(1, partySize)).toBe(1)
+      expect(monsterMultiplier(4, partySize)).toBe(2)
+      expect(monsterMultiplier(15, partySize)).toBe(4)
+    }
+  })
+
+  it('a party of fewer than 3 steps UP one rung', () => {
+    expect(monsterMultiplier(1, 2)).toBe(1.5)
+    expect(monsterMultiplier(2, 2)).toBe(2)
+    expect(monsterMultiplier(4, 2)).toBe(2.5)
+    expect(monsterMultiplier(8, 2)).toBe(3)
+    expect(monsterMultiplier(12, 2)).toBe(4)
+  })
+
+  it('a party of 6 or more steps DOWN one rung', () => {
+    expect(monsterMultiplier(1, 6)).toBe(0.5)
+    expect(monsterMultiplier(2, 6)).toBe(1)
+    expect(monsterMultiplier(4, 6)).toBe(1.5)
+    expect(monsterMultiplier(8, 7)).toBe(2)
+    expect(monsterMultiplier(12, 10)).toBe(2.5)
+  })
+
+  it('clamps at both ends of the ladder', () => {
+    expect(monsterMultiplier(15, 2)).toBe(4)    // already top rung, cannot go higher
+    expect(monsterMultiplier(1, 8)).toBe(0.5)   // already bottom rung, cannot go lower
+  })
+
+  it('defaults to a party of four when the argument is omitted', () => {
+    for (const count of [1, 2, 4, 8, 12, 20]) {
+      expect(monsterMultiplier(count)).toBe(monsterMultiplier(count, 4))
+    }
+  })
+
+  it('a shift never skips a rung', () => {
+    for (const count of [1, 2, 4, 8, 12, 20]) {
+      const base = MULTIPLIER_LADDER.indexOf(monsterMultiplier(count, 4))
+      expect(MULTIPLIER_LADDER.indexOf(monsterMultiplier(count, 2)))
+        .toBe(Math.min(base + 1, MULTIPLIER_LADDER.length - 1))
+      expect(MULTIPLIER_LADDER.indexOf(monsterMultiplier(count, 6)))
+        .toBe(Math.max(base - 1, 0))
+    }
+  })
+
+  it('a head count of 0 is treated as the x1 rung', () => {
+    expect(monsterMultiplier(0)).toBe(1)
+  })
+})
+
+describe('adjustedXP threads partySize through (fixed in Phase 1)', () => {
+  const monsters = [{ xp: 450, count: 4 }]   // 4 x CR 2 = 1800 raw
+
+  it('defaults to a party of four', () => {
+    expect(adjustedXP(monsters)).toBe(3600)          // x2
+  })
+
+  it('a duo faces a harder encounter for the same monsters', () => {
+    expect(adjustedXP(monsters, 2)).toBe(4500)       // x2.5
+  })
+
+  it('a party of six faces an easier one', () => {
+    expect(adjustedXP(monsters, 6)).toBe(2700)       // x1.5
+  })
+
+  it('the multiplier shown and the multiplier applied cannot disagree', () => {
+    // The reason adjustedXP takes partySize at all: the UI displays
+    // monsterMultiplier(count, partySize) beside a difficulty derived from
+    // adjustedXP. If only one of them knew the party size, they would contradict
+    // each other on screen.
+    for (const partySize of [1, 2, 3, 4, 5, 6, 8]) {
+      const shown = monsterMultiplier(4, partySize)
+      expect(adjustedXP(monsters, partySize)).toBe(Math.round(1800 * shown))
+    }
+  })
+
+  it('changes the difficulty verdict for the same monsters', () => {
+    const party5 = (n) => Array.from({ length: n }, () => ({ level: 5 }))
+    const verdict = (n) =>
+      difficultyRating(adjustedXP(monsters, n), partyThresholds(party5(n))).label
+
+    expect(verdict(4)).toBe('Hard')     // 3600 vs [1000,2000,3000,4400]
+    expect(verdict(2)).toBe('Deadly')   // 4500 vs [500,1000,1500,2200]
+    expect(verdict(6)).toBe('Easy')     // 2700 vs [1500,3000,4500,6600]
   })
 })

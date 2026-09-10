@@ -7,13 +7,19 @@ export const CR_XP = {
   6: 2300, 7: 2900, 8: 3900, 9: 5000, 10: 5900,
   11: 7200, 12: 8400, 13: 10000, 14: 11500, 15: 13000,
   16: 15000, 17: 18000, 18: 20000, 19: 22000, 20: 25000,
-  21: 33000, 22: 41000, 23: 50000, 24: 62000, 30: 155000,
+  21: 33000, 22: 41000, 23: 50000, 24: 62000, 25: 75000,
+  26: 90000, 27: 105000, 28: 120000, 29: 135000, 30: 155000,
 }
 
 export const parseCR = (cr) => {
-  if (typeof cr === 'number') return cr
+  if (typeof cr === 'number') return Number.isFinite(cr) ? cr : 0
   const map = { '1/8': 0.125, '1/4': 0.25, '1/2': 0.5 }
-  return map[String(cr)] ?? parseFloat(cr) ?? 0
+  const mapped = map[String(cr)]
+  if (mapped !== undefined) return mapped
+  // `??` only catches null/undefined, so an unparseable string used to leak NaN
+  // out of here and become a silent 0-XP monster one layer later in crToXP.
+  const parsed = parseFloat(cr)
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 export const crToXP = (cr) => CR_XP[parseCR(cr)] ?? 0
@@ -56,21 +62,40 @@ export const partyThresholds = (characters) =>
     characters.reduce((sum, c) => sum + (XP_THRESHOLDS[c.level]?.[tier] ?? 0), 0)
   )
 
-// Monster count multiplier per 5e DMG
-export const monsterMultiplier = (totalMonsterCount) => {
-  if (totalMonsterCount === 1)  return 1
-  if (totalMonsterCount === 2)  return 1.5
-  if (totalMonsterCount <= 6)   return 2
-  if (totalMonsterCount <= 10)  return 2.5
-  if (totalMonsterCount <= 14)  return 3
-  return 4
+// The DMG "Encounter Multipliers" ladder (p. 82). Index 0 (x0.5) is not
+// reachable by monster count alone — it exists only as the rung a party of six
+// or more steps down onto.
+export const MULTIPLIER_LADDER = [0.5, 1, 1.5, 2, 2.5, 3, 4]
+
+// Rung on MULTIPLIER_LADDER for a given head count, before any party-size shift.
+const ladderIndexForCount = (totalMonsterCount) => {
+  if (totalMonsterCount <= 1)   return 1   // x1
+  if (totalMonsterCount === 2)  return 2   // x1.5
+  if (totalMonsterCount <= 6)   return 3   // x2
+  if (totalMonsterCount <= 10)  return 4   // x2.5
+  if (totalMonsterCount <= 14)  return 5   // x3
+  return 6                                 // x4
 }
 
-// Adjusted XP = raw XP × multiplier
-export const adjustedXP = (monsters) => {
+// Monster count multiplier per 5e DMG p. 82, including the party-size
+// adjustment the table's footnote requires: a party of fewer than three
+// characters uses the next HIGHER multiplier, a party of six or more the next
+// LOWER one. Defaults to a party of four, where no shift applies.
+export const monsterMultiplier = (totalMonsterCount, partySize = 4) => {
+  let index = ladderIndexForCount(totalMonsterCount)
+  if (partySize < 3)        index += 1
+  else if (partySize >= 6)  index -= 1
+  const clamped = Math.min(Math.max(index, 0), MULTIPLIER_LADDER.length - 1)
+  return MULTIPLIER_LADDER[clamped]
+}
+
+// Adjusted XP = raw XP x multiplier. partySize is threaded through to
+// monsterMultiplier so the difficulty rating and the multiplier shown in the UI
+// can never disagree.
+export const adjustedXP = (monsters, partySize = 4) => {
   const totalCount = monsters.reduce((sum, m) => sum + m.count, 0)
   const raw        = monsters.reduce((sum, m) => sum + (m.xp * m.count), 0)
-  return Math.round(raw * monsterMultiplier(totalCount))
+  return Math.round(raw * monsterMultiplier(totalCount, partySize))
 }
 
 // Raw XP — used for player reward (no multiplier)
