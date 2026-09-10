@@ -267,6 +267,22 @@ const MIGRATION_005 = `
   )
 `
 
+// Migration 006 — Subclasses catalog table; subclass_name column on characters
+// ALTER TABLE runs exactly once (tracked by _migrations); IF NOT EXISTS guards the table.
+const MIGRATION_006 = `
+  CREATE TABLE IF NOT EXISTS subclasses (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    class_name   TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    description  TEXT,
+    unlock_level INTEGER NOT NULL DEFAULT 3,
+    features     TEXT NOT NULL DEFAULT '[]',
+    source       TEXT DEFAULT 'srd'
+  );
+
+  ALTER TABLE characters ADD COLUMN subclass_name TEXT;
+`
+
 // Migration 007 — Add map_id to encounters; add has_own_map + floor_number to locations
 const MIGRATION_007 = `
   ALTER TABLE encounters  ADD COLUMN map_id      INTEGER REFERENCES maps(id);
@@ -290,22 +306,6 @@ const MIGRATION_008 = `
   INSERT INTO compendium_custom_m008 SELECT * FROM compendium_custom;
   DROP TABLE compendium_custom;
   ALTER TABLE compendium_custom_m008 RENAME TO compendium_custom;
-`
-
-// Migration 006 — Subclasses catalog table; subclass_name column on characters
-// ALTER TABLE runs exactly once (tracked by _migrations); IF NOT EXISTS guards the table.
-const MIGRATION_006 = `
-  CREATE TABLE IF NOT EXISTS subclasses (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    class_name   TEXT NOT NULL,
-    name         TEXT NOT NULL,
-    description  TEXT,
-    unlock_level INTEGER NOT NULL DEFAULT 3,
-    features     TEXT NOT NULL DEFAULT '[]',
-    source       TEXT DEFAULT 'srd'
-  );
-
-  ALTER TABLE characters ADD COLUMN subclass_name TEXT;
 `
 
 // ── SRD Subclass Seed Data — 27 subclasses (2–3 per class × 12 classes) ────────
