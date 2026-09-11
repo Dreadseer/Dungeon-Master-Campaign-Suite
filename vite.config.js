@@ -12,7 +12,7 @@ export default defineConfig({
   // DOM dependency, so the default 'node' environment is enough — no jsdom.
   test: {
     environment: 'node',
-    include: ['src/**/__tests__/**/*.test.js'],
+    include: ['src/**/__tests__/**/*.test.js', 'electron/**/__tests__/**/*.test.js'],
     globals: false,
   },
 })
