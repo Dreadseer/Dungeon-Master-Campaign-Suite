@@ -428,3 +428,177 @@ verified by `test:ipc`, but it has not been *run*. Stated plainly rather than co
    it required once all callers are known.
 4. **konva / react-konva peer mismatch** — unchanged from Phase 0, still papered over by
    `legacy-peer-deps=true` in `.npmrc`.
+
+---
+
+## Phase 2 — Player server security and map lifecycle
+
+**Date:** 2026-09-11
+**Branch:** `phase-2-player-security`, branched from **`phase-1-integrity`**, not `main`.
+**Verdict changes:** Q5 PARTIAL → stronger PARTIAL, as the brief anticipated.
+
+> **Branch note, same as last phase.** Phase 2's rule 5 requires the toast helper Phase 1 introduced,
+> and Phase 1 is still unmerged, so `main` does not have it. The branch chain is now
+> `main → phase-0-foundation → phase-1-integrity → phase-2-player-security`. Merging the newest gets
+> all three.
+
+### What shipped
+
+**1. Auth middleware** — `7f09790`
+
+`_requireSession` gates everything under `/api/` except `POST /api/join`, accepting the join token as
+`Authorization: Bearer <token>` or `?token=`. The query fallback is not laziness — `<img>` cannot set
+headers, and the map image is loaded by one. Missing or unknown token → **401**.
+
+The Socket.IO handshake is gated too, via `io.use()`. Previously *any* socket could connect and only
+`player:identify` checked the token, so an unidentified socket sat connected indefinitely. The campaign
+room is now derived from the token rather than from anything the client sends, and `player:identify` no
+longer carries a token at all — it only records which character was picked.
+
+**Campaign scoping.** Every route compares the row's `campaign_id` against the token's. A token for
+campaign 3 cannot read campaign 4's maps, characters, character lists or map images. The refusal is
+**404 rather than 403**, deliberately: "that exists but is not yours" leaks the existence and id range
+of another campaign's content.
+
+**2. CORS tightened** — `7f09790`
+
+`Access-Control-Allow-Origin: *` is gone. Allowed now: no `Origin` at all (same-origin, curl, native
+fetch), any `*.ngrok-free.app` / `.ngrok.io` / `.ngrok.dev` host, any LAN address this machine answers
+on, and `localhost` **only** when `NODE_ENV=development`. Anything else gets no CORS headers at all.
+The caller's origin is echoed rather than `*`, with `Vary: Origin`.
+
+**3. Server-side fog filtering** — `f079c1b`, `7f09790`
+
+This was the real hole. Fog was a rendering decision: the server sent every token and
+`player/components/MapView.jsx` declined to draw the hidden ones. Devtools, or one `curl`, showed every
+ambush on the board.
+
+- `electron/server/fogFilter.js` — a deliberate CommonJS duplicate of the index maths in
+  `src/utils/fogUtils.js` (the renderer copy is an ES module in the Vite bundle). The test suite imports
+  **both** and asserts they agree: `getCellIndex` across a whole grid, `isCellRevealed` against a mask
+  painted with the renderer's own `setBrushRevealed`, and `gridDimensions` against `getMapDimensions`
+  including the 3000×3000 blank-map fallback. A divergence between the two copies is a fog leak nothing
+  else would catch.
+- `GET /api/map/:id` filters before responding. The mask is still sent — the client draws the fog, it
+  just no longer receives what is under it.
+- `broadcast()` filters `map:update` payloads through `filterBroadcastPayload`, looking the map row up
+  under the broadcasting campaign's id. Without this, fog would be enforced on load and leak on the next
+  sync.
+
+**Everything fails closed.** Tokens are withheld entirely when the grid cannot be determined, when the
+mask length ≠ `numCols × numRows`, when the image cannot be measured, or when a token has no usable
+integer position. A token wrongly hidden is a DM re-syncing; a token wrongly shown is the encounter
+spoiled.
+
+**An unplanned dependency, worth flagging.** Filtering needs `numCols`, which is
+`ceil(imageWidth / gridSize)`. The renderer gets `imageWidth` free from a loaded `<img>`; the main
+process does not, and the stack is locked so there is no image library. So **`electron/server/imageSize.js`**
+reads pixel dimensions from PNG, JPEG, GIF and WebP header bytes — every format the file picker accepts.
+This was not in the brief and is not optional: without it, server-side fog filtering cannot be correct.
+It returns `null` when it cannot measure, and callers fail closed, because guessing the size means
+guessing which cells are revealed. No dependency was added.
+
+**4. Player web app** — `7f09790`
+
+New `player/api.js` holds the token and is the single place the app talks to the server — scattering
+`Authorization` headers across four components is how one gets forgotten. The token is restored from
+`sessionStorage` **before** any child mounts, or the first request after a page reload 401s. The socket
+handshake sends it via `auth.token`. Two new error surfaces explain the one thing players will actually
+hit: tokens live in memory, so a DM restart ends every session and the fix is to reload and re-join.
+
+**5. Fog/grid coupling** — `ec2ae59`
+
+A fog mask is `numCols × numRows` booleans where `numCols` depends on grid size, so changing the grid
+makes every index mean a different cell. `MapCanvas` already noticed and started the mask over
+(`MapCanvas.jsx:104`) — but silently. A DM nudging the grid 50px → 55px to line it up watched an evening
+of painted fog vanish with no warning.
+
+New `src/utils/mapGridUtils.js` (`paintedCellCount`, `hasPaintedFog`, `describeGridChange`).
+`MapToolbar.handleSaveGridSize` now asks first and clears the stored mask on confirm. Clearing matters
+beyond tidiness: a stale mask makes the server fail closed and withhold every token with nothing on
+screen explaining why. `MapEngine` updates `fog_data` in the same `setState` as `grid_size`, because
+`MapCanvas` re-initialises from both.
+
+Both of `MapToolbar`'s `window.electronAPI` calls are now wrapped and report through the Phase 1 toast —
+neither was.
+
+**6. Docs** — README gained a "Player server security" section under Player Views; the testing section
+lists the new suites and `npm run test:server`. `DMCS_Remote_Player_Network.md` gained a "Security model"
+section immediately after the prompt index, marked as **superseding** the prompts below it, since those
+describe the pre-Phase-2 server.
+
+### Two bugs the tests found while being written
+
+Both are the same shape, and worth remembering: **`Number()` coerces `null`, `''`, `false` and `[]` to
+`0`**, and `0` is finite.
+
+1. `filterTokensByFog` used `Number(token.col)`, so a token with no position became a token at column 0
+   — and on a revealed top-left corner, that is a leak. Coordinates must now already *be* integers.
+2. `describeGridChange` used `Number.isFinite(Number(next))`, so a half-typed or missing grid input read
+   as a real change to 0px — and a "change" is what destroys the mask. Grid sizes must now be positive
+   numbers, with numeric strings accepted because `<input type="number">` returns them.
+
+Both sets of coercion cases are pinned as regressions.
+
+### Acceptance
+
+| Check | Result |
+|---|---|
+| `curl /api/map/1` with no token → 401 | **PASS** |
+| … with a valid token for the wrong campaign → 403/404 | **PASS** — 404, chosen over 403 so existence is not disclosed |
+| … with the right token → 200, no tokens on unrevealed cells | **PASS** — seeded map has one revealed cell (5,5) and one hidden (15,12); the guard comes back, the assassin does not |
+| Unit tests for `fogFilter.js` | **PASS** — 35 tests, plus 31 for `imageSize.js` |
+| `npm test` green | **PASS** — 9 files, 344 tests: **341 passed**, 1 expected-fail, 2 todo (the Phase 5 monster-AC tripwire) |
+| `npm run test:server` | **PASS** — **47/47** |
+| `npm run test:migrations` | **PASS** — 51/51 (unchanged) |
+| `npm run test:ipc` | **PASS** — 0 problems (unchanged) |
+| `npm run build:renderer` | **PASS** |
+
+`npm run test:server` starts a **real** `PlayerServer` on a real port with a stub database and makes real
+HTTP requests. Express, the auth middleware, the CORS policy, the campaign scoping and the fog filter all
+run exactly as they do in the app — only `DatabaseService` is stubbed. `PlayerServer` touches `electron`
+only inside `_notifyDM` and the production branch of `_getPlayerBundlePath`, so `NODE_ENV=development`
+keeps it runnable under bare node.
+
+**Not run, and why:**
+
+- **The app itself, again.** Unchanged from Phases 0 and 1: `require('better-sqlite3')` still succeeds
+  under bare Node 24, so the binary is ABI 137 while Electron 33 needs 130, and `npm run postinstall`
+  still fails at node-gyp. Nothing in this phase was exercised through the running UI. The server-side
+  work is covered by the 47-check harness, which is stronger than a manual click-through; **the
+  renderer-side work — the grid-size confirm dialog and the player app's token handling — is verified by
+  unit test and by reading, not by use.**
+- **A real browser against a real tunnel.** No ngrok token, and the harness uses `fetch`, not a browser.
+  CORS headers are asserted on the response; whether a browser *enforces* them as expected is standard
+  behaviour but untested here.
+- **The Socket.IO handshake end-to-end.** `io.use()` rejection is verified by reading; the harness
+  exercises `broadcast()` directly rather than connecting a client, because a connecting socket calls
+  `_notifyDM`, which requires `electron`.
+
+### Deferred
+
+- **`/api/join` is still open.** Anyone who reaches the port can join any campaign by id and get a
+  working token. That is how players get in without per-player credentials, so the tunnel URL is the
+  shared secret. A DM-set session passphrase is the obvious next step and is **not** implemented. Both
+  README and the network doc say so plainly rather than implying the server is now safe to expose.
+- **No rate limiting on `/api/join`.** Campaign ids are small integers, so a script could enumerate them
+  and mint tokens for every campaign on the server. Mitigated in practice by the tunnel URL being
+  unguessable, not by the code.
+- **Tokens never expire.** They die with the server, which for a game night is close enough, but a DM
+  who leaves the app running for a week has week-old tokens still working.
+- **`fog_cols`** remains Phase 8's. The mask-length check is the best available substitute and is why the
+  filter can only fail closed on a mismatch rather than reindex.
+
+### Open questions for the next session
+
+1. **The `better-sqlite3` ABI is now three phases old as a blocker.** It has stopped being an
+   inconvenience and become the reason each phase's acceptance section has a "not verified by use"
+   paragraph. Node 20 via nvm-windows, or diagnosing the node-gyp failure, before more feature work.
+2. **Should `/api/join` take a passphrase?** It is the one remaining gap between "authenticated" and
+   "safe to expose", and it is a small change — a field on the join screen, a comparison in the handler,
+   and a place for the DM to set it. Worth deciding rather than leaving as a known hole.
+3. **`imageSize.js` is now load-bearing for a security property.** If a DM uses a format it cannot read,
+   their tokens silently stop appearing for players. The file picker restricts to png/jpg/jpeg/webp so
+   this should not happen, but a clearer signal in the DM UI ("players cannot see tokens on this map —
+   the image could not be measured") would beat silence.
+4. **konva / react-konva peer mismatch** — unchanged since Phase 0.

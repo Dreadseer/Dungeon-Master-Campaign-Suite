@@ -368,7 +368,7 @@ example.
 | Campaign Manager | Create / load / rename / delete campaigns; the active campaign is held in `campaignStore` (persisted to `localStorage`). |
 | World Builder | Factions, Locations, NPCs, Lore, and named Connections; optional AI suggestion panel. The separate "Lore & Connections" page was removed in Phase 1 — it duplicated `/world/lore` and `/world/connections`. |
 | Mind Map | React Flow graph of all world entities with Dagre auto-layout and PNG export. |
-| Map Engine | Upload battle maps, paint fog of war, place tokens; opens a pop-out combat-map window. |
+| Map Engine | Upload battle maps, paint fog of war, place tokens; opens a pop-out combat-map window. Changing a map's grid size re-indexes the fog mask, so saving a new size on a painted map asks for confirmation and then clears the fog. |
 | Compendium | Browse SRD monsters/spells/equipment + homebrew, **and** the [Source Book Importer](DMCS_Source_Book_Importer.md) (📥 Single / 📦 Bulk) that turns indexed PDF passages into structured entries via AI. |
 | Character Sheets | Full 5e sheets (stats, inventory, spell slots, death saves) with a level-up wizard and AI assistant. |
 | Encounter Builder | Build encounters from SRD monsters; XP/difficulty calculator; initiative tracker with HP sync back to characters. |
@@ -398,6 +398,45 @@ DMCS has **two** distinct ways for players to see content:
 1. **In-app Electron Player View** — a second `BrowserWindow` loading `#/player?campaign=<id>` (`electron/main.js` `createPlayerWindow`). Fog-enforced map (solid black over hidden cells), read-only character sheet, and live DM broadcasts relayed through the main process.
 2. **Remote Player Network (browser)** — `electron/server/PlayerServer.js` runs an Express + Socket.IO server (default port **3001**, auto-increments if busy, binds `0.0.0.0`) that serves the `player/` web app. Players join from a browser over the LAN, or over the internet via an **ngrok** tunnel, using a QR code. See [`DMCS_Remote_Player_Network.md`](DMCS_Remote_Player_Network.md).
 
+### Player server security
+
+Every `/api/` route except `POST /api/join` requires the session token minted at
+join time, sent as `Authorization: Bearer <token>` or `?token=` (the query form
+exists for `<img>`, which cannot set headers). The Socket.IO handshake requires
+it too — an unauthenticated socket is refused before it connects.
+
+**Tokens are scoped to one campaign.** A token for campaign 3 cannot read a map,
+character, character list or map image belonging to campaign 4. The refusal is
+`404`, not `403`: whether a resource exists in someone else's campaign is itself
+information.
+
+**Fog of war is enforced on the server.** `/api/map/:id` strips tokens standing
+on unrevealed cells before responding, and the `map:update` socket broadcast gets
+the same filter, so a live sync cannot leak what the REST route hides. Before
+this, the server sent every token and the player's browser merely declined to
+draw the hidden ones — devtools, or a single `curl`, showed the whole board.
+
+The filter (`electron/server/fogFilter.js`) **fails closed**: if the map image
+cannot be measured, or the saved fog mask's length does not match the current
+grid, *every* token is withheld rather than guessed at.
+
+**Tokens live in memory only.** They are never written to disk and die when the
+server stops, so restarting the app ends every player session and everyone must
+re-join. The player app says so when it happens.
+
+**CORS is no longer `*`.** The allowed set is: same-origin (the player bundle is
+served by this same Express instance), any `*.ngrok-free.app` / `.ngrok.io` /
+`.ngrok.dev` host, any LAN address this machine answers on, and `localhost` only
+when `NODE_ENV=development`. Anything else gets no CORS headers at all.
+
+Run `npm run test:server` to verify all of the above against a real running
+server.
+
+> **Still true:** anyone who reaches the port can `POST /api/join` with a campaign
+> id and a name, and receive a token for that campaign. Join is deliberately
+> open — it is how players get in — so the tunnel URL is the shared secret. Do
+> not post it publicly, and stop the server when the session ends.
+
 ---
 
 ## Testing
@@ -407,10 +446,12 @@ npm test              # vitest run — one pass, exits non-zero on failure
 npm run test:watch
 npm run test:migrations   # replays migrations 001-009 on a fresh AND a populated database
 npm run test:ipc          # cross-checks channel names across the preload/handler layers
+npm run test:server       # starts a real player server and checks auth, scoping and fog
 ```
 
-The two `node` scripts run on Node's built-in `node:sqlite` and on plain source
-parsing respectively, so neither needs a working native `better-sqlite3` build.
+None of the three `node` scripts need a working native `better-sqlite3` build:
+they use Node's built-in `node:sqlite`, plain source parsing, and a stub database
+respectively.
 
 **Vitest**, configured inside the existing `vite.config.js` (`test` block) rather than a separate
 config file. Environment is `node`; suites are discovered at `src/**/__tests__/**/*.test.js`. There is
@@ -423,6 +464,9 @@ no jsdom and no component testing yet — everything covered so far is a pure ES
 | `src/utils/__tests__/combatUtils.test.js` | Initiative sort and DEX tiebreak, monster count expansion, turn wraparound, the 15 PHB conditions |
 | `src/utils/__tests__/ipcError.test.js` | Unwrapping Electron's IPC rejection envelope; plain-language rewrites of the seven common database/filesystem failures |
 | `src/utils/__tests__/locationUtils.test.js` | Ancestor-chain walking, cycle detection at any depth, the 50-hop bound |
+| `src/utils/__tests__/mapGridUtils.test.js` | Counting painted fog cells; deciding when a grid-size change destroys a mask |
+| `electron/server/__tests__/fogFilter.test.js` | Server-side fog enforcement, asserted against the renderer's own `fogUtils` so the two copies cannot drift |
+| `electron/server/__tests__/imageSize.test.js` | PNG/JPEG/GIF/WebP header parsing, including the JPEG markers that are not frame headers |
 
 ### Known bugs are recorded as tests, not comments
 

@@ -14,6 +14,135 @@
 
 **Total estimated time: 6 – 9 hours**
 
+---
+
+## ⚠ Security model (updated in Phase 2 — supersedes the prompts below)
+
+The prompts in this document describe the server as it was originally built: no
+authentication, `Access-Control-Allow-Origin: *`, and fog of war enforced only by
+the player's browser declining to draw hidden tokens. **All three were changed in
+Phase 2.** Where a prompt below contradicts this section, this section is correct.
+
+### Authentication
+
+`POST /api/join` is the only public API route. It takes a campaign id and a
+player name and returns a token:
+
+```json
+{ "token": "3f2b…", "campaignName": "Saltmarsh" }
+```
+
+Every other `/api/` route requires that token, as either:
+
+```
+Authorization: Bearer 3f2b…
+```
+
+or `?token=3f2b…` in the query string. The query form exists because `<img>` and
+other browser-initiated loads cannot set headers.
+
+Missing or unrecognised token → **401**.
+
+The Socket.IO handshake requires it too, via `auth.token`:
+
+```js
+io(window.location.origin, { auth: { token: session.token } })
+```
+
+A socket without a valid token is rejected before it connects. `player:identify`
+no longer carries a token — the handshake already established who the caller is,
+and the campaign room is derived from the token rather than from anything the
+client sends.
+
+### Campaign scoping
+
+A token belongs to exactly one campaign. Every route compares the row's
+`campaign_id` against the token's before answering:
+
+| Request | Result |
+|---|---|
+| `GET /api/map/1` with no token | `401` |
+| `GET /api/map/7` with a token for campaign 3, where map 7 is in campaign 4 | `404` |
+| `GET /api/map/1` with a token for campaign 3, where map 1 is in campaign 3 | `200` |
+
+**404, not 403.** Telling a player "that exists but is not yours" leaks the
+existence and id range of another campaign's content. "Not found" is the honest
+answer to give someone with no right to know either way.
+
+### Fog of war is enforced server-side
+
+Fog used to be a rendering decision: the server sent every token and
+`player/components/MapView.jsx` declined to draw the ones on unrevealed cells.
+Anyone who opened devtools, or ran one `curl`, saw every ambush on the map.
+
+`GET /api/map/:id` now strips those tokens before responding, and the
+`map:update` socket broadcast is filtered the same way — otherwise fog would be
+enforced on load and leak on the next sync. The fog mask itself is still sent:
+the client draws the fog, it just no longer receives what is under it.
+
+`electron/server/fogFilter.js` **fails closed**. Tokens are withheld entirely
+when:
+
+- the map image cannot be measured (missing, corrupt, or an unsupported format);
+- the saved mask's length does not equal `numCols × numRows`, meaning it was
+  painted at a different grid size;
+- a token has no usable integer `col`/`row`.
+
+A token wrongly hidden costs the DM a re-sync. A token wrongly shown costs them
+the encounter. Those are not symmetric, so the tie goes to hiding.
+
+Because the mask is indexed by grid size, changing a map's grid size invalidates
+it. The Map Engine now asks before saving a new size on a painted map, and clears
+the mask on confirm — a stale mask would make the server withhold every token
+with nothing on screen explaining why.
+
+### CORS
+
+`Access-Control-Allow-Origin: *` is gone. The player bundle is served by the same
+Express instance as the API, so same-origin requests need nothing wider. Allowed:
+
+- no `Origin` header at all (same-origin, `curl`, native `fetch`);
+- any `*.ngrok-free.app`, `*.ngrok.io` or `*.ngrok.dev` host — that is what the
+  tunnel is for;
+- any LAN address this machine answers on, since players join by IP;
+- `localhost` / `127.0.0.1`, **only** when `NODE_ENV=development` (the Vite dev
+  server on :5174).
+
+Anything else receives no CORS headers, so the browser blocks the response.
+
+### Session lifetime
+
+Tokens are held in a `Map` in the server process. They are never written to disk,
+never expire on a timer, and are cleared when the server stops. Restarting the DM
+app therefore ends every player session; players see "Your session has ended.
+Reload the page and join again."
+
+### What this does *not* protect against
+
+**Join is open by design.** Anyone who can reach the port can `POST /api/join`
+with a campaign id and any name, and get a working token for that campaign. That
+is how players get in without the DM issuing credentials one by one.
+
+The practical consequence: **the tunnel URL is the shared secret.** An ngrok URL
+is publicly routable and unguessable, not private. Share it with your table, do
+not post it anywhere public, and stop the server when the session ends.
+
+If you want a stronger guarantee than that, the next step would be a DM-set
+session passphrase checked by `/api/join` — not yet implemented.
+
+### Verifying
+
+```bash
+npm run test:server
+```
+
+Starts a real `PlayerServer` on a real port with a stub database and makes real
+HTTP requests: join, the three map cases above, every route's scoping, the CORS
+policy, and the broadcast filter. 47 checks.
+
+---
+
+
 > **⚔ PREREQUISITE:** Phase 8 (Player View) must be complete before running these prompts. The Phase 8 `DMPlayerControls` and `PlayerCharacterSheet` components are referenced and extended here. Run Prompt 01, verify the server API works in a browser, then Prompt 02, then Prompt 03.
 
 > **ℹ NGROK ACCOUNT:** ngrok requires a free account to get an auth token. Sign up at ngrok.com — no credit card required. The free tier gives one tunnel at a time, which is all DMCS needs. The token is stored securely via Electron `safeStorage`, never in plain text.
