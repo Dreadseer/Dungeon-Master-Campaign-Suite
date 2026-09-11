@@ -20,7 +20,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:migrations": "node scripts/verify-migration-009.mjs",
-    "test:ipc": "node scripts/verify-ipc-layers.mjs"
+    "test:ipc": "node scripts/verify-ipc-layers.mjs",
+    "test:server": "node scripts/verify-player-server.mjs"
   },
   "build": {
     "appId": "com.dmcs.app",

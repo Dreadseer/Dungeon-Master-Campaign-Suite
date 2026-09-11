@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { setToken } from '../api'
 
 export default function JoinScreen({ onJoin }) {
   const [campaignId, setCampaignId] = useState('')
@@ -25,6 +26,8 @@ export default function JoinScreen({ onJoin }) {
         throw new Error(`Server error (${res.status}): ${text.slice(0, 200) || 'empty response'}`)
       }
       if (!res.ok) throw new Error(data.error ?? 'Join failed')
+      // Every later request needs this; set it before any component mounts.
+      setToken(data.token)
       onJoin({
         token:        data.token,
         campaignId:   parseInt(campaignId),

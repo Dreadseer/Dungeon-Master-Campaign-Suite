@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { authHeaders } from '../api'
 
 export default function MapView({ map }) {
   const canvasRef = useRef(null)
@@ -112,7 +113,7 @@ export default function MapView({ map }) {
     setScale(1)
 
     let cancelled = false
-    fetch(`/api/map-image/${map.id}?t=${Date.now()}`)
+    fetch(`/api/map-image/${map.id}?t=${Date.now()}`, { headers: authHeaders() })
       .then(r => {
         if (!r.ok) return r.text().then(t => { throw new Error(`${r.status}: ${t.slice(0, 200)}`) })
         return r.blob()

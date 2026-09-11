@@ -1,29 +1,30 @@
 import { useState, useEffect } from 'react'
 import { calculateAC }         from '../../src/utils/acUtils'
 import { abilityMod, profBonus, modStr } from '../../src/utils/dnd5e'
+import { apiFetch } from '../api'
 
 const ABILITY_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' }
 
 export default function CharacterSheet({ campaignId, character, onSelectCharacter }) {
   const [characters, setCharacters] = useState([])
   const [activeTab,  setActiveTab]  = useState('stats')
+  const [loadError,  setLoadError]  = useState('')
 
   useEffect(() => {
     if (character) return
-    fetch(`/api/campaign/${campaignId}/characters`)
-      .then(r => r.json())
+    apiFetch(`/api/campaign/${campaignId}/characters`)
       .then(setCharacters)
-      .catch(() => {})
+      .catch(err => setLoadError(err.message))
   }, [campaignId, character])
 
   const handleSelectCharacter = (char) => {
-    fetch(`/api/character/${char.id}`)
-      .then(r => r.json())
+    apiFetch(`/api/character/${char.id}`)
       .then(full => {
         setCharacters([])
+        setLoadError('')
         onSelectCharacter(full)
       })
-      .catch(() => {})
+      .catch(err => setLoadError(err.message))
   }
 
   // ── Character selection screen ─────────────────────────────────────────────
@@ -33,7 +34,17 @@ export default function CharacterSheet({ campaignId, character, onSelectCharacte
         <h2 style={{ color: '#C9A84C', fontFamily: 'Georgia', marginBottom: '1rem' }}>
           Choose Your Character
         </h2>
-        {characters.length === 0 && (
+        {loadError && (
+          <div style={{ color: '#e05050', fontSize: '14px', marginBottom: '1rem' }}>
+            {loadError}
+            {/* Tokens live in the server's memory, so a DM restart ends every
+                session and the only fix is to join again. */}
+            <div style={{ color: '#6b6b6b', fontSize: '12px', marginTop: '0.35rem' }}>
+              If your DM restarted the app, reload this page and join again.
+            </div>
+          </div>
+        )}
+        {characters.length === 0 && !loadError && (
           <div style={{ color: '#6b6b6b', fontSize: '14px' }}>Loading characters...</div>
         )}
         {characters.map(char => (

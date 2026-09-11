@@ -5,6 +5,7 @@ import CharacterSheet      from './components/CharacterSheet'
 import MapView             from './components/MapView'
 import TopBar              from './components/TopBar'
 import SessionNotesOverlay from './components/SessionNotesOverlay'
+import { apiFetch, setToken } from './api'
 
 export default function PlayerWebApp() {
   const [session,      setSession]   = useState(null)
@@ -14,29 +15,56 @@ export default function PlayerWebApp() {
   const [activeView,   setView]      = useState('character')
   const [socket,       setSocket]    = useState(null)
   const [connected,    setConnected] = useState(false)
+  const [authError,    setAuthError] = useState('')
 
   // Persist session across page refreshes
   useEffect(() => {
     const saved = sessionStorage.getItem('dmcs-session')
-    if (saved) { try { setSession(JSON.parse(saved)) } catch {} }
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        // Restore the token into the api module BEFORE any child mounts and
+        // starts fetching, or the first request of a reloaded page 401s.
+        setToken(parsed.token)
+        setSession(parsed)
+      } catch { /* corrupt storage — fall through to the join screen */ }
+    }
   }, [])
 
   // WebSocket connection
   useEffect(() => {
     if (!session) return
 
-    const sock = io(window.location.origin, { transports: ['websocket', 'polling'] })
+    // The token now gates the handshake itself — an unauthenticated socket is
+    // refused before it connects, rather than connecting and being ignored.
+    const sock = io(window.location.origin, {
+      transports: ['websocket', 'polling'],
+      auth: { token: session.token },
+    })
     setSocket(sock)
 
     sock.on('connect', () => {
       setConnected(true)
-      sock.emit('player:identify', { token: session.token, characterId: character?.id ?? null })
+      setAuthError('')
+      sock.emit('player:identify', { characterId: character?.id ?? null })
     })
     sock.on('disconnect', () => setConnected(false))
+    sock.on('connect_error', (err) => {
+      setConnected(false)
+      // The server rejects the handshake when the token is unknown, which after
+      // a DM restart is every token.
+      setAuthError(
+        /token/i.test(err?.message ?? '')
+          ? 'Your session has ended. Reload the page and join again.'
+          : `Connection failed: ${err?.message ?? 'unknown error'}`
+      )
+    })
 
     // Map pushed by DM
     sock.on('map:set', ({ mapId }) => {
-      fetch(`/api/map/${mapId}`).then(r => r.json()).then(setActiveMap)
+      apiFetch(`/api/map/${mapId}`)
+        .then(setActiveMap)
+        .catch(err => setAuthError(err.message))
       setView('map')
     })
 
@@ -51,7 +79,9 @@ export default function PlayerWebApp() {
     // HP/stats sync
     sock.on('character:sync', ({ characterId }) => {
       if (character?.id === characterId) {
-        fetch(`/api/character/${characterId}`).then(r => r.json()).then(setCharacter)
+        apiFetch(`/api/character/${characterId}`)
+          .then(setCharacter)
+          .catch(err => setAuthError(err.message))
       }
     })
 
@@ -65,13 +95,14 @@ export default function PlayerWebApp() {
 
   const handleJoin = (sessionData) => {
     sessionStorage.setItem('dmcs-session', JSON.stringify(sessionData))
+    setToken(sessionData.token)
     setSession(sessionData)
   }
 
   const handleSelectCharacter = (char) => {
     setCharacter(char)
     if (socket?.connected) {
-      socket.emit('player:identify', { token: session.token, characterId: char.id })
+      socket.emit('player:identify', { characterId: char.id })
     }
   }
 
@@ -86,6 +117,12 @@ export default function PlayerWebApp() {
         activeView={activeView}
         onViewChange={setView}
       />
+      {authError && (
+        <div style={{ background: '#3a1010', color: '#ffb0b0', padding: '0.6rem 1rem',
+          fontSize: '0.85rem', textAlign: 'center' }}>
+          {authError}
+        </div>
+      )}
       <div style={{ flex: 1 }}>
         {activeView === 'character' && (
           <CharacterSheet
