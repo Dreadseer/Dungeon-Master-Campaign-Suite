@@ -238,8 +238,17 @@ export default function MapEngine() {
           onBack={() => { setActiveMap(null); load() }}
           stageScale={stageScale}
           onResetView={() => { setStageScale(1.0); setStagePos({ x: 0, y: 0 }) }}
-          onSaveGridSize={(gs) => {
-            setActiveMap(prev => ({ ...prev, grid_size: gs }))
+          onSaveGridSize={(gs, fogCleared) => {
+            // fog_data must be updated in the same setState as grid_size:
+            // MapCanvas re-initialises its mask from [map.fog_data, map.grid_size],
+            // so leaving the old mask in state would have it compare the stale
+            // array against the new dimensions on the very next render.
+            setActiveMap(prev => ({
+              ...prev,
+              grid_size: gs,
+              ...(fogCleared ? { fog_data: '[]' } : {}),
+            }))
+            setCurrentGridSize(gs)
           }}
           map={activeMap}
           fogBrushSize={fogBrushSize}

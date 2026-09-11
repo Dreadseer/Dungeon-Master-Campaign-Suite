@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { describeGridChange } from '../../utils/mapGridUtils'
+import { notifyError, notifySuccess } from '../../stores/toastStore'
 
 export default function MapToolbar({
   activeTool,
@@ -25,20 +27,49 @@ export default function MapToolbar({
   const [savingThumb, setSavingThumb] = useState(false)
 
   async function handleSaveGridSize() {
+    // The fog mask is indexed by grid size — index = row * ceil(width / grid) +
+    // col — so changing the grid silently invalidates every cell in it.
+    // MapCanvas already starts the mask over when the length no longer matches
+    // (MapCanvas.jsx:104), but it does so without a word, which means an evening
+    // of painted fog can vanish because the DM nudged the grid by 5px.
+    const change = describeGridChange(map.grid_size, gridSize, map.fog_data)
+    if (change.clearsFog && !window.confirm(change.message)) return
+
     setSavingGrid(true)
-    await window.electronAPI.db.maps.update(map.id, {
-      name:        map.name,
-      location_id: map.location_id ?? null,
-      grid_size:   gridSize,
-    })
-    setSavingGrid(false)
-    onSaveGridSize?.(gridSize)
+    try {
+      await window.electronAPI.db.maps.update(map.id, {
+        name:        map.name,
+        location_id: map.location_id ?? null,
+        grid_size:   gridSize,
+      })
+
+      // Clear the stored mask in the same breath. Leaving the stale one behind
+      // would make the player server fail closed on the length mismatch and
+      // withhold every token, with nothing on screen explaining why.
+      if (change.changed) {
+        await window.electronAPI.db.maps.updateFog(map.id, [])
+      }
+
+      notifySuccess(change.clearsFog
+        ? `Grid set to ${gridSize}px. Fog cleared.`
+        : `Grid set to ${gridSize}px.`)
+      onSaveGridSize?.(gridSize, change.changed)
+    } catch (err) {
+      notifyError(err, 'Save grid size')
+    } finally {
+      setSavingGrid(false)
+    }
   }
 
   async function handleUpdateThumbnail() {
     setSavingThumb(true)
-    await onUpdateThumbnail?.()
-    setSavingThumb(false)
+    try {
+      await onUpdateThumbnail?.()
+    } catch (err) {
+      notifyError(err, 'Update thumbnail')
+    } finally {
+      setSavingThumb(false)
+    }
   }
 
   const isFogTool = activeTool === 'fog-reveal' || activeTool === 'fog-hide'
