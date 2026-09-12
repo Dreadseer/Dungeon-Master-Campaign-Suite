@@ -774,3 +774,179 @@ implementation's shape.
    lives in two places (`AIService._logUsage` writes it, `ai:getUsageStats` reads it). If Phase 4 adds
    a migration anyway, a real `success` column would be cheaper to keep honest.
 5. **konva / react-konva peer mismatch** — unchanged since Phase 0.
+
+---
+
+## Phase 4 — Sessions, plot threads, reveals
+
+**Date:** 2026-09-12
+**Branch:** `phase-4-sessions`, branched from **`phase-3-rules-qa`**, not `main`.
+**Verdict changes:** **Q2 PARTIAL → SOLVED.** Q3 unchanged until Phase 6, as expected.
+
+> **Branch chain.** `main → phase-0-foundation → phase-1-integrity → phase-2-player-security →
+> phase-3-rules-qa → phase-4-sessions`. Merging the newest gets all five.
+
+> **NUMBERING.** The brief calls this "migration 010". 010 is Phase 3's `shared_pdf_sources`, and
+> migrations are append-only, so this shipped as **011**. The DDL is the brief's, from the review's
+> Q2e, unchanged.
+
+### What shipped — 4a
+
+**1-2. Migration 011 + data preservation** — `cd7a854`
+
+`sessions`, `plot_threads` and `reveals`, plus the `UNIQUE(campaign_id, session_number)` the brief
+asks for and three indexes. Design points worth keeping:
+
+- `plot_threads.opened_session_id` / `resolved_session_id` are **ON DELETE SET NULL**, not CASCADE.
+  Deleting a session must not delete the thread it happened to open — the thread outlives it.
+- `reveals` is a separate table rather than an `is_revealed` column on four others: it keeps the flag
+  out of the JSON blobs, makes "what did the party learn in session 7" one query, and avoids widening
+  four CHECK constraints.
+- `reveals.UNIQUE(entity_type, entity_id)` needs no `campaign_id` — entity ids are already unique
+  within their own table.
+
+**The data step (standing rule 10).** `importCampaignNotes` **copies** each non-empty
+`campaigns.description` into a first session titled "Imported notes". The column is left exactly as
+it was. Nothing is deleted; if the import is wrong the original text is still there. Idempotent by
+construction — a campaign that already has any session is skipped.
+
+**Runner change.** Migration entries may now carry an `after` hook, and the DDL plus the hook run in
+one transaction. A half-applied import is worse than none: it leaves some campaigns migrated and some
+not, and the idempotence check then skips the rest forever.
+
+**3. Handlers, preload, renderer API** — `cd7a854`
+
+`db:sessions:{getAll,getById,getCurrent,create,update,updateNotes,delete}`,
+`db:plots:{getAll,getById,create,update,updateStatus,delete}`,
+`db:reveals:{getForCampaign,getForSession,isRevealed,reveal,unreveal}`, plus
+`db:maps:getByLocation` and `db:encounters:getByLocation` for task 13. **177 channels, preload and
+handlers matched, zero orphans** (`npm run test:ipc`).
+
+`sessions:create` derives the session number rather than trusting the caller, so two fast clicks
+cannot compute the same one, and **recounts** `session_count` rather than incrementing — an increment
+drifts the moment a session is deleted. `reveals:reveal` uses `ON CONFLICT DO UPDATE`, so revealing
+an already-revealed item is a no-op rather than a constraint failure.
+
+**4. Connections widened** — `f8db221`
+
+From three types to eight (npc, location, faction, lore, map, encounter, character, plot), driven by
+one `TYPE_SOURCES` table pairing each type with its loader and its display column — characters use
+`character_name`, plot threads use `title`, the rest use `name`.
+
+The `item` node type, defined in `mindMapUtils` from the start and never built, is **replaced** rather
+than kept — it was the template the brief pointed at and nothing referenced it. The five new types
+share a generic `EntityNode` driven by `NODE_CONFIG` rather than getting five more copies of the same
+60-line component; the three original bespoke nodes stay. Toolbar filter pills are generated from
+`NODE_CONFIG`, so a future type appears automatically instead of being invisible until someone
+remembers a second table.
+
+**The Mind Map filter defaults to the three world types on, five off.** Eight types on one canvas is
+unreadable, and the brief asks for a filter precisely so it does not become so — defaulting to
+everything-on would make the first render the worst one.
+
+`useMindMapData` loads all eight. This matters more than it looks: the hook drops any edge whose
+endpoints are not both present as nodes, so without it every connection to a new type would have been
+silently invisible.
+
+**5. `db:world:search` widened** — `cd7a854`
+
+Characters, encounters, maps, sessions, plot threads, non-lore compendium entries — and, most
+importantly, **lore bodies** via `json_extract(data, '$.content')`. Only the title was searched
+before, so the text of every lore entry was invisible to search: the easiest possible way to lose your
+own worldbuilding. `WorldSearch`'s group list is generated from one table rather than four hardcoded
+rows.
+
+### What shipped — 4b
+
+**7. Sessions page** — `745609a`. List newest-first plus a detail pane: title, date, notes, the plot
+threads opened or closed in that session, and what was revealed in it. Notes autosave on blur with a
+Saving/Saved indicator. A blur that changed nothing does not write, so nobody sees "Saved" flash at
+them for clicking away.
+
+**8. Plot Threads board** — `745609a`. Four columns, button transitions rather than drag (drag needs a
+library; the stack is locked). Closing a thread stamps it with the session in progress; reopening
+clears that stamp because it is no longer true. Every status can reach every other — threads get
+reopened often enough that a one-way board would be wrong.
+
+**9. RevealToggle** — `745609a`, on Lore, NPCs, Locations and Factions. Revealing something marked
+`is_secret` asks first: it is the one direction that cannot be taken back at the table.
+
+**10. CampaignManager repointed** — `745609a`. The notes textarea now edits the current session's
+notes, with a "+ New session" button. Typing into it on a campaign with no sessions starts session 1
+rather than dropping what was typed. `campaigns.description` goes back to being a description.
+
+**Found while doing this:** the stat cards were lying. Encounters and characters were hardcoded to 0.
+They now count.
+
+**11. Sidebar + routes** — `745609a`.
+
+**12. Player-facing reveals** — `745609a`. `GET /api/campaign/:id/revealed`, token-scoped per Phase 2,
+plus a "What you know" tab in **both** the browser player app and the in-app Electron player window.
+Only player-facing fields are resolved: an NPC's `secrets`, `motivation` and `notes` and a location's
+`lore` are absent by construction. An unknown `entity_type` is skipped rather than guessed at.
+
+**13. AttachedPanel** — `f8db221`. "Everything attached to this" on location edit and NPC quick view:
+NPCs standing in a location, maps of it, encounters staged there, and its connections. The data was
+always there; nothing joined it up in one view.
+
+### Acceptance
+
+| Check | Result |
+|---|---|
+| Migration 011 on a DB with three campaigns, one with a description → exactly one imported session, description intact | **PASS** — and the two campaigns with NULL / whitespace-only descriptions correctly got none |
+| Create three sessions → card shows "3 sessions" | **PASS** |
+| Search a phrase that exists only inside a lore entry's body → found | **PASS** — and asserted the *old* title-only query finds nothing, so the test proves the fix rather than the fixture |
+| Reveal a lore entry → appears in player "What you know"; unreveal → gone | **PASS at the API layer** — see below |
+| Delete a session referenced by a plot thread → thread survives with `NULL` link | **PASS** — and the reveal survives too, with a NULL `session_id`: the party still knows what it was told |
+| `npm test` green | **PASS** — 11 files, 449 tests: **446 passed**, 1 expected-fail, 2 todo (the Phase 5 monster-AC tripwire) |
+| `npm run test:sessions` | **PASS** — 45/45 |
+| `npm run test:server` | **PASS** — 62/62, up from 47 |
+| Regressions: `test:migrations` / `test:rag` / `test:ipc` | **PASS** — 62/62, 42/42, 0 problems |
+| `npm run build:renderer` | **PASS** |
+
+**On the reveal round-trip, precisely.** `npm run test:server` starts a real `PlayerServer` and asserts
+that a revealed lore entry, NPC and location come back with their player-facing text, that an
+unrevealed faction does not, that another campaign's reveal does not, and — five separate checks
+against the **raw JSON**, not the parsed fields — that `secrets`, `motivation`, `notes` and `lore`
+appear nowhere. What is *not* covered is the UI round-trip: clicking the 👁 toggle and watching the
+item appear in the player tab. That needs the app running.
+
+**Not run, and why:**
+
+- **The app itself, for the fifth phase running.** `require('better-sqlite3')` still succeeds under
+  bare Node 24 (ABI 137) while Electron 33 needs 130, and `npm run postinstall` still fails at
+  node-gyp. **This phase is almost entirely UI** — two new pages, a reveal toggle on four pages, a
+  repointed CampaignManager, an attached-items panel, two player tabs — and **none of it has been
+  clicked.** It is verified by unit test, by the data-layer harnesses, and by build. That is a weaker
+  claim than any previous phase's, and it is the right time to say so plainly: the ABI blocker has
+  gone from an inconvenience to the dominant risk in this project.
+- **The Electron player window's "What you know" tab.** It mirrors the server's resolver field for
+  field, but it runs through IPC rather than HTTP, so `test:server` does not cover it. Verified by
+  reading.
+- **Drag-and-drop on the plot board.** Not built — buttons instead, because drag needs a library.
+
+### Deferred
+
+- **Reveals have no handler-side cleanup.** Deleting an NPC leaves its `reveals` row behind, pointing
+  at an id that no longer exists — exactly the polymorphic-orphan problem Phase 1 fixed for
+  `connections` and `mind_map_positions`. `deleteWithPolymorphicRefs` in `dbHandlers.js` needs
+  `reveals` added to it. **This is the one loose end I would fix first.**
+- **`reveals:changed` is listened for but never broadcast.** The Electron player view refreshes on it;
+  nothing sends it yet, so a reveal made mid-session needs a manual refresh in that window.
+- **The Sessions detail pane shows reveals as `type #id`,** not names. Resolving them needs a join or
+  four lookups per session; the data is right, the presentation is thin.
+- **`recap` is written but never generated.** The column exists and the update handler carries it, for
+  Phase 6's AI recaps.
+- **No component tests**, unchanged since Phase 1 — that needs jsdom and a testing library, i.e. new
+  devDependencies beyond the one permitted.
+
+### Open questions for the next session
+
+1. **The ABI blocker is now the top risk, not an annoyance.** Five phases of "verified by reading, not
+   by use", and this phase had the most UI of any. I would spend the first hour of Phase 5 on Node 20
+   via nvm-windows or diagnosing node-gyp, before writing a line of feature code.
+2. **Should `reveals` join `deleteWithPolymorphicRefs` now or in Phase 5?** It is a three-line change
+   and the orphan is real today.
+3. **Migration numbering has drifted from the brief twice** (Phase 3's 010, this phase's 011). Later
+   phase briefs that name a migration number will be off by two. Worth a note in the plan document.
+4. **konva / react-konva peer mismatch** — unchanged since Phase 0.

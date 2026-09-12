@@ -23,6 +23,12 @@ export default function PlayerTopBar({ campaign, activeView, onViewChange, conne
         >
           Map
         </button>
+        <button
+          style={{ ...s.navBtn, ...(activeView === 'known' ? s.navBtnActive : {}) }}
+          onClick={() => onViewChange('known')}
+        >
+          What You Know
+        </button>
       </nav>
 
       {/* Right: connection status + full screen */}

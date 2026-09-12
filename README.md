@@ -341,8 +341,8 @@ macOS/Linux follow the same pattern (`~/Library/Application Support/<name>/` and
 
 ### Adding a new table (all four IPC layers)
 
-1. Add `const MIGRATION_011 = \`CREATE TABLE …\`` in `DatabaseService.js`. **(ids 1–10 are taken.)** Never edit an existing `MIGRATION_0NN` — migrations are append-only.
-2. Append `{ id: 11, name: 'my_table', sql: MIGRATION_011 }` to the `migrations` array.
+1. Add `const MIGRATION_012 = \`CREATE TABLE …\`` in `DatabaseService.js`. **(ids 1–11 are taken.)** Never edit an existing `MIGRATION_0NN` — migrations are append-only.
+2. Append `{ id: 12, name: 'my_table', sql: MIGRATION_012 }` to the `migrations` array.
 3. Add CRUD methods to `DatabaseService`.
 4. Register `registerHandler('db:myTable:*', …)` in `electron/ipc/dbHandlers.js`.
 5. Expose them on `window.electronAPI.db.myTable.*` in `electron/preload.js`.
@@ -359,14 +359,25 @@ mark the entry `foreignKeysOff: true` and the runner handles the toggle,
 transaction and `PRAGMA foreign_key_check` for you. `MIGRATION_009` (six tables)
 and `MIGRATION_010` (dropping a `NOT NULL`) are the worked examples.
 
+**Migrating data as well as schema** — for example copying a column into a new
+table — goes in an `after` hook on the migration entry, not a separate step:
+`{ id: 11, name: '…', sql: MIGRATION_011, after: importCampaignNotes }`. The
+runner puts the DDL and the hook in one transaction, so they commit or roll back
+together. A half-applied data import is worse than none: it leaves some rows
+migrated and some not, and any idempotence check then skips the rest forever.
+`MIGRATION_011` is the worked example. Per standing rule 10, such a hook
+**copies** — it must never delete the column it read.
+
 ---
 
 ## Modules
 
 | Module (page) | Summary |
 |---|---|
-| Campaign Manager | Create / load / rename / delete campaigns; the active campaign is held in `campaignStore` (persisted to `localStorage`). |
-| World Builder | Factions, Locations, NPCs, Lore, and named Connections; optional AI suggestion panel. The separate "Lore & Connections" page was removed in Phase 1 — it duplicated `/world/lore` and `/world/connections`. |
+| Campaign Manager | Create / load / rename / delete campaigns; the active campaign is held in `campaignStore` (persisted to `localStorage`). The notes box edits the **current session's** notes, not the campaign description (Phase 4). |
+| World Builder | Factions, Locations, NPCs, Lore, **Sessions**, **Plot Threads**, and named Connections; optional AI suggestion panel. The separate "Lore & Connections" page was removed in Phase 1 — it duplicated `/world/lore` and `/world/connections`. |
+| Sessions | One row per session played, with long-form notes that autosave on blur. Shows the plot threads opened or closed in each session and what the party learned in it. |
+| Plot Threads | A board of what is unresolved, grouped open / active / resolved / abandoned. Closing a thread stamps it with the session in progress. |
 | Mind Map | React Flow graph of all world entities with Dagre auto-layout and PNG export. |
 | Map Engine | Upload battle maps, paint fog of war, place tokens; opens a pop-out combat-map window. Changing a map's grid size re-indexes the fog mask, so saving a new size on a painted map asks for confirmation and then clears the fog. |
 | Compendium | Browse SRD monsters/spells/equipment + homebrew, **and** the [Source Book Importer](DMCS_Source_Book_Importer.md) (📥 Single / 📦 Bulk) that turns indexed PDF passages into structured entries via AI. |
@@ -433,6 +444,63 @@ going to the model. Embeddings require Ollama; retrieval does not.
 
 ---
 
+## Sessions, plot threads and reveals
+
+Added in Phase 4. Before it, a campaign had no memory: `campaigns.description`
+was a single textarea that every session overwrote, so a DM either kept one
+ever-growing wall of text or lost last week's notes writing this week's.
+
+| Table | Holds |
+|---|---|
+| `sessions` | One row per session played: number, title, date, long-form notes, recap |
+| `plot_threads` | What is unresolved, and which session opened and closed it |
+| `reveals` | What the party has actually been told, as opposed to what the DM knows |
+
+**Notes autosave on blur.** A DM typing during a game will not remember to press
+a button. The Sessions page and the Campaign Manager's notes box both write to
+the *current session*; the Campaign Manager also has a "+ New session" button.
+Typing into an empty notes box on a campaign with no sessions starts session 1
+rather than dropping what was typed.
+
+`campaigns.session_count` is finally true — it had been read and never written
+since it was added.
+
+### `is_secret` versus revealed
+
+These are independent and mean different things:
+
+- **`is_secret`** — DM-only. Do not put this in front of a player.
+- **A reveal** — the party has learned this, whether or not it was ever secret.
+
+A thing can be secret and unrevealed (most things), public and unrevealed (just
+hasn't come up yet), or revealed. The 👁 toggle on lore entries, NPCs, locations
+and factions records a reveal, stamped with the session in progress, so *"what
+did the party learn in session 7"* is a one-line query. Revealing something
+marked secret asks for confirmation first — it is the one direction that cannot
+be taken back at the table.
+
+### What players see
+
+Revealed items appear in a **"What you know"** tab, in both the browser player
+app and the in-app Electron player window.
+
+Only player-facing fields are sent. An NPC's `secrets`, `motivation` and `notes`
+and a location's `lore` are absent **by construction** — revealing an NPC means
+the party has met them, not that they have read the DM's notes. The browser path
+goes through `GET /api/campaign/:id/revealed`, token-scoped like every other
+route (Phase 2), and `npm run test:server` asserts those DM-only fields appear
+nowhere in the response.
+
+### Data preservation
+
+Migration 011 **copies** each non-empty `campaigns.description` into a first
+session titled "Imported notes". The original column is left exactly as it was —
+nothing is deleted, and `description` goes back to being a description of the
+campaign, which is what the column was named for. The import is idempotent: a
+campaign that already has a session is skipped.
+
+---
+
 ## Player Views
 
 DMCS has **two** distinct ways for players to see content:
@@ -490,9 +558,10 @@ npm run test:migrations   # replays migrations 001-009 on a fresh AND a populate
 npm run test:ipc          # cross-checks channel names across the preload/handler layers
 npm run test:server       # starts a real player server and checks auth, scoping and fog
 npm run test:rag          # indexes the SRD and runs real queries, including in no-ai mode
+npm run test:sessions     # migration 011, the notes import, and the sessions/plots/reveals SQL
 ```
 
-None of the four `node` scripts need a working native `better-sqlite3` build:
+None of the five `node` scripts need a working native `better-sqlite3` build:
 they use Node's built-in `node:sqlite`, plain source parsing, or a stub database.
 `test:rag` also runs without Ollama on purpose — it exercises the keyword-search
 path that rules Q&A falls back to when Ollama is absent.
@@ -509,6 +578,7 @@ no jsdom and no component testing yet — everything covered so far is a pure ES
 | `src/utils/__tests__/ipcError.test.js` | Unwrapping Electron's IPC rejection envelope; plain-language rewrites of the seven common database/filesystem failures |
 | `src/utils/__tests__/locationUtils.test.js` | Ancestor-chain walking, cycle detection at any depth, the 50-hop bound |
 | `src/utils/__tests__/mapGridUtils.test.js` | Counting painted fog cells; deciding when a grid-size change destroys a mask |
+| `src/utils/__tests__/sessionUtils.test.js` | Session labelling and date formatting, next-session numbering, plot-status grouping and transitions |
 | `electron/server/__tests__/fogFilter.test.js` | Server-side fog enforcement, asserted against the renderer's own `fogUtils` so the two copies cannot drift |
 | `electron/server/__tests__/imageSize.test.js` | PNG/JPEG/GIF/WebP header parsing, including the JPEG markers that are not frame headers |
 | `electron/services/__tests__/srdIndexText.test.js` | Serialising SRD monsters/spells/equipment/classes into indexable text, across both cache shapes |

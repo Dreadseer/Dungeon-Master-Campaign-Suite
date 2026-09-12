@@ -6,6 +6,7 @@ import PlayerCharacterSelect    from './components/player/PlayerCharacterSelect'
 import PlayerCharacterSheet     from './components/player/PlayerCharacterSheet'
 import PlayerMapView            from './components/player/PlayerMapView'
 import PlayerSessionNotes       from './components/player/PlayerSessionNotes'
+import PlayerKnownLore          from './components/player/PlayerKnownLore'
 
 function PlayerAppInner() {
   const [searchParams]                  = useSearchParams()
@@ -130,6 +131,13 @@ function PlayerAppInner() {
 
         {activeView === 'map' && (
           <PlayerMapView
+            campaignId={campaignId}
+            broadcastMsg={broadcastMsg}
+          />
+        )}
+
+        {activeView === 'known' && (
+          <PlayerKnownLore
             campaignId={campaignId}
             broadcastMsg={broadcastMsg}
           />
