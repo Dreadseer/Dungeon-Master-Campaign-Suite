@@ -35,6 +35,9 @@ class DatabaseService {
       // and PRAGMA foreign_keys is a no-op inside a transaction — so the runner
       // has to toggle it around the transaction rather than the SQL doing it.
       { id: 9, name: 'referential_integrity', sql: MIGRATION_009, foreignKeysOff: true },
+      // Same recreate procedure as 009, so the same flag: pdf_chunks references
+      // pdf_sources, and SQLite cannot drop a NOT NULL constraint in place.
+      { id: 10, name: 'shared_pdf_sources', sql: MIGRATION_010, foreignKeysOff: true },
     ]
 
     for (const m of migrations) {
@@ -514,6 +517,47 @@ const MIGRATION_009 = `
   FROM pdf_sources;
   DROP TABLE pdf_sources;
   ALTER TABLE pdf_sources_m009 RENAME TO pdf_sources;
+`
+
+// Migration 010 — pdf_sources.campaign_id becomes nullable, for shared sources.
+//
+// Phase 3 indexes the bundled SRD so rules Q&A works on a fresh install with
+// nothing uploaded. That index belongs to no campaign: it is the same 5.1
+// content for every game, and re-embedding it per campaign would mean running
+// Ollama over the whole SRD once per campaign and storing N copies of identical
+// vectors.
+//
+// A shared source needs campaign_id NULL, and the column was NOT NULL. The
+// alternatives were all worse: pointing the SRD at some arbitrary campaign makes
+// it vanish when that campaign is deleted (ON DELETE CASCADE), and creating a
+// hidden sentinel campaign puts a fake row in the DM's campaign list.
+//
+// SQLite cannot drop a NOT NULL constraint, so this is the same create/copy/
+// drop/rename recreate used by 008 and 009, with foreignKeysOff for the same
+// reason: pdf_chunks.source_id references this table.
+//
+// Existing rows are copied with their campaign_id intact — no row is orphaned,
+// and every uploaded book keeps its owner. The only thing that changes is that
+// NULL becomes legal.
+const MIGRATION_010 = `
+  CREATE TABLE pdf_sources_m010 (
+    id          INTEGER PRIMARY KEY,
+    -- NULL means "shared across all campaigns" (currently only the SRD index).
+    -- A NULL here is not orphaned data: it is a row that deliberately has no owner.
+    campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE,
+    filename    TEXT,
+    file_path   TEXT,
+    status      TEXT DEFAULT 'pending' CHECK(status IN ('pending','indexed','embedded','failed')),
+    chunk_count INTEGER,
+    indexed_at  DATETIME
+  );
+  INSERT INTO pdf_sources_m010
+    (id, campaign_id, filename, file_path, status, chunk_count, indexed_at)
+  SELECT
+     id, campaign_id, filename, file_path, status, chunk_count, indexed_at
+  FROM pdf_sources;
+  DROP TABLE pdf_sources;
+  ALTER TABLE pdf_sources_m010 RENAME TO pdf_sources;
 `
 
 // ── SRD Subclass Seed Data — 27 subclasses (2–3 per class × 12 classes) ────────

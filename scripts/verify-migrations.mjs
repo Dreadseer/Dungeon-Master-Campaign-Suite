@@ -1,6 +1,9 @@
-// Verification harness for migration 009 (Phase 1, referential integrity).
+// Verification harness for the schema migrations (Phase 1 onward).
 //
-//   node scripts/verify-migration-009.mjs
+//   node scripts/verify-migrations.mjs
+//
+// Covers migration 009 (referential integrity, Phase 1) and 010 (shared
+// pdf_sources, Phase 3).
 //
 // Runs entirely on Node's built-in node:sqlite — the same SQLite engine
 // better-sqlite3 wraps, executing the same DDL. DatabaseService itself cannot be
@@ -19,7 +22,7 @@ import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 
 const SRC = readFileSync('electron/database/DatabaseService.js', 'utf8')
-const LAST = 9
+const LAST = 10
 
 let failures = 0
 let checks = 0
@@ -43,7 +46,7 @@ const sqlFor = (n) => {
 // Mirrors DatabaseService.runGuardedMigration: FKs off, transaction,
 // foreign_key_check before commit, FKs back on.
 const applyMigration = (db, id) => {
-  const guarded = id === 9
+  const guarded = id === 9 || id === 10
   if (guarded) db.exec('PRAGMA foreign_keys = OFF')
   try {
     if (guarded) db.exec('BEGIN')
@@ -135,12 +138,12 @@ const snapshot = (db) => ({
 })
 
 // ── Scenario A: fresh database ───────────────────────────────────────────────
-console.log('\n=== A. Fresh database: migrations 001-009 ===\n')
+console.log('\n=== A. Fresh database: migrations 001-010 ===\n')
 {
   const db = migrateTo(newDb(), LAST)
 
-  check('all 9 migrations recorded',
-    db.prepare('SELECT COUNT(*) c FROM _migrations').get().c === 9)
+  check('all 10 migrations recorded',
+    db.prepare('SELECT COUNT(*) c FROM _migrations').get().c === 10)
 
   const expected = [
     ['locations', 'parent_location_id', 'locations', 'SET NULL'],
@@ -172,14 +175,34 @@ console.log('\n=== A. Fresh database: migrations 001-009 ===\n')
   check('encounters keeps map_id (007)', columns(db, 'encounters').includes('map_id'))
   check('connections keeps campaign_id (002)', columns(db, 'connections').includes('campaign_id'))
 
-  check('no temporary _m009 tables left behind',
-    db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE name LIKE '%\\_m009' ESCAPE '\\'").get().c === 0)
+  check('no temporary _m009 / _m010 tables left behind',
+    db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE name LIKE '%\\_m009' OR name LIKE '%\\_m010' ESCAPE '\\'").get().c === 0)
+
+  // ── Migration 010: pdf_sources.campaign_id becomes nullable ───────────────
+  const pdfCols = db.prepare('PRAGMA table_info(pdf_sources)').all()
+  const campaignCol = pdfCols.find(c => c.name === 'campaign_id')
+  check('pdf_sources.campaign_id is nullable (010)', campaignCol?.notnull === 0,
+    `notnull=${campaignCol?.notnull}`)
+  check('  it still CASCADEs when a campaign IS set',
+    fkFor(db, 'pdf_sources', 'campaign_id')?.on_delete === 'CASCADE')
+  check('  the status CHECK from 009 survived',
+    ddl(db, 'pdf_sources').includes("'embedded'"))
+  check('  all seven columns are still present',
+    ['id', 'campaign_id', 'filename', 'file_path', 'status', 'chunk_count', 'indexed_at']
+      .every(c => pdfCols.some(pc => pc.name === c)))
+
+  // A shared source — the SRD sentinel — can now be inserted.
+  db.exec("INSERT INTO pdf_sources (id, campaign_id, filename, file_path, status, chunk_count) VALUES (900, NULL, 'SRD 5.1', NULL, 'embedded', 12)")
+  check('a campaign_id=NULL source can be inserted (the SRD sentinel)',
+    db.prepare('SELECT campaign_id FROM pdf_sources WHERE id=900').get().campaign_id === null)
+  check("  and it is not returned by a campaign's own source list",
+    db.prepare('SELECT COUNT(*) c FROM pdf_sources WHERE campaign_id = 1').get().c === 0)
 
   db.close()
 }
 
 // ── Scenario B: populated database ───────────────────────────────────────────
-console.log('\n=== B. Populated database: rows through 001-008, then 009 ===\n')
+console.log('\n=== B. Populated database: rows through 001-008, then 009 and 010 ===\n')
 let populated
 {
   const db = migrateTo(newDb(), 8)
@@ -199,7 +222,14 @@ let populated
   try { db.exec("UPDATE pdf_sources SET status='embedded' WHERE id=1") } catch { checkFailed = true }
   check("pre-009: UPDATE pdf_sources SET status='embedded' is REFUSED", checkFailed)
 
+  let nullRejected = false
+  try {
+    db.exec("INSERT INTO pdf_sources (campaign_id, filename) VALUES (NULL, 'SRD 5.1')")
+  } catch { nullRejected = true }
+  check('pre-010: a campaign_id=NULL source is REFUSED', nullRejected)
+
   applyMigration(db, 9)
+  applyMigration(db, 10)
   const after = snapshot(db)
 
   for (const table of Object.keys(before)) {
@@ -207,8 +237,18 @@ let populated
       JSON.stringify(before[table]) === JSON.stringify(after[table]))
   }
 
-  check('pdf_chunks survived the pdf_sources rebuild',
+  check('pdf_chunks survived BOTH pdf_sources rebuilds (009 and 010)',
     db.prepare('SELECT COUNT(*) c FROM pdf_chunks').get().c === 1)
+  check('  the chunk still points at its source',
+    db.prepare('SELECT source_id FROM pdf_chunks LIMIT 1').get().source_id === 1)
+  check('post-010: the existing source kept its campaign_id',
+    db.prepare('SELECT campaign_id FROM pdf_sources WHERE id=1').get().campaign_id === 1)
+  check('post-010: a shared source can now be added alongside it', (() => {
+    try {
+      db.exec("INSERT INTO pdf_sources (id, campaign_id, filename, status) VALUES (900, NULL, 'SRD 5.1', 'embedded')")
+      return db.prepare('SELECT campaign_id FROM pdf_sources WHERE id=900').get().campaign_id === null
+    } catch { return false }
+  })())
   check('mind_map_positions untouched',
     db.prepare('SELECT COUNT(*) c FROM mind_map_positions').get().c === 1)
 
@@ -274,6 +314,9 @@ console.log('\n=== C. Acceptance: deletes that used to fail silently ===\n')
       db.prepare('SELECT COUNT(*) c FROM campaigns').get().c === 1)
   }
 
+  check('the shared SRD source SURVIVES deleting a campaign',
+    db.prepare('SELECT COUNT(*) c FROM pdf_sources WHERE id=900').get().c === 1)
+
   check('database passes foreign_key_check afterwards',
     db.prepare('PRAGMA foreign_key_check').all().length === 0)
 
@@ -285,7 +328,7 @@ console.log('\n=== D. Re-running the migration set is a no-op ===\n')
 {
   const db = migrateTo(newDb(), LAST)
   const ran = new Set(db.prepare('SELECT id FROM _migrations').all().map(r => r.id))
-  check('all 9 ids recorded, so a second launch skips every one', ran.size === 9)
+  check('all 10 ids recorded, so a second launch skips every one', ran.size === 10)
   db.close()
 }
 
