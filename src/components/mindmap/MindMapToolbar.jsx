@@ -1,11 +1,13 @@
 import { useNavigate } from 'react-router-dom'
+import { CONNECTABLE_TYPES, NODE_CONFIG } from '../../utils/mindMapUtils'
 
-const TYPE_PILLS = [
-  { key: 'npc',      label: '👤 NPCs'      },
-  { key: 'location', label: '🏰 Locations' },
-  { key: 'faction',  label: '🛡️ Factions'  },
-  { key: 'item',     label: '💎 Items'     },
-]
+// Generated from NODE_CONFIG so a new entity type appears here automatically.
+const TYPE_PILLS = CONNECTABLE_TYPES.map(key => ({
+  key,
+  label: NODE_CONFIG[key].label,
+  color: NODE_CONFIG[key].color,
+  icon:  NODE_CONFIG[key].icon,
+}))
 
 export default function MindMapToolbar({
   // filter state
@@ -55,7 +57,7 @@ export default function MindMapToolbar({
               onClick={() => onToggleType(p.key)}
               title={`Toggle ${p.label} visibility`}
             >
-              {p.label}
+              {p.icon} {p.label}
             </button>
           )
         })}

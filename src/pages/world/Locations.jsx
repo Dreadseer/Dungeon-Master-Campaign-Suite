@@ -7,6 +7,7 @@ import Skeleton from '../../components/ui/Skeleton'
 import { findParentCycle } from '../../utils/locationUtils'
 import { notifyError, notifySuccess } from '../../stores/toastStore'
 import RevealToggle from '../../components/world/RevealToggle'
+import AttachedPanel from '../../components/world/AttachedPanel'
 
 const TYPES = ['town', 'dungeon', 'shop', 'region', 'landmark']
 const TABS  = ['All', ...TYPES]
@@ -320,6 +321,14 @@ export default function Locations() {
 
         {editing && (
           <div style={s.connSection}>
+            {/* Everything attached to this location: NPCs standing in it, maps
+                of it, encounters staged there, and its connections. */}
+            <AttachedPanel
+              entityType="location"
+              entityId={editing.id}
+              entityName={editing.name}
+              campaignId={activeCampaign.id}
+            />
             <button style={s.connToggle} type="button" onClick={() => setLocConnOpen(o => !o)}>
               {locConnOpen ? '▾' : '▸'} Connections
             </button>

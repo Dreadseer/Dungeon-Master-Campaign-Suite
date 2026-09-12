@@ -21,16 +21,28 @@ import AIInsightsPanel                                from '../components/mindma
 import EdgeCreationModal                              from '../components/mindmap/EdgeCreationModal'
 import EdgeContextMenu                                from '../components/mindmap/EdgeContextMenu'
 import { notifyError, notifySuccess } from '../stores/toastStore'
+import { entityNode } from '../components/mindmap/nodes/EntityNode'
+import { CONNECTABLE_TYPES } from '../utils/mindMapUtils'
 
+// The three original types keep their bespoke components; the five added in
+// Phase 4 share the generic EntityNode, which reads NODE_CONFIG.
 const nodeTypes = {
-  npc:      NPCNode,
-  location: LocationNode,
-  faction:  FactionNode,
-  item:     ItemNode,
+  npc:       NPCNode,
+  location:  LocationNode,
+  faction:   FactionNode,
+  lore:      entityNode('lore'),
+  map:       entityNode('map'),
+  encounter: entityNode('encounter'),
+  character: entityNode('character'),
+  plot:      entityNode('plot'),
 }
 const edgeTypes = { mindMapEdge: MindMapEdge }
 
-const ALL_TYPES = new Set(['npc', 'location', 'faction', 'item'])
+// Derived from NODE_CONFIG so adding a type in one place shows it in the filter.
+// With eight types the graph gets unreadable fast, so the filter starts with the
+// three world types on and the rest off — a DM can turn on what they need.
+const ALL_TYPES = new Set(CONNECTABLE_TYPES)
+const DEFAULT_VISIBLE_TYPES = new Set(['npc', 'location', 'faction'])
 
 // ── Outer shell: provides ReactFlowProvider, guards, data ─────────────────
 export default function MindMap() {
@@ -100,7 +112,7 @@ function MindMapInner({ initNodes, initEdges, reload, activeCampaign }) {
   }, [initNodes, initEdges, setNodes, setEdges])
 
   // ── Filter / toolbar state ─────────────────────────────────────────────
-  const [visibleTypes,    setVisibleTypes]    = useState(ALL_TYPES)
+  const [visibleTypes,    setVisibleTypes]    = useState(DEFAULT_VISIBLE_TYPES)
   const [factionFilter,   setFactionFilter]   = useState(null)
   const [searchQuery,     setSearchQuery]     = useState('')
   const [layoutDirection, setLayoutDirection] = useState('TB')

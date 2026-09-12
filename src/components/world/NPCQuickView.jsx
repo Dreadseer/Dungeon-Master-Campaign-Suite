@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import AttachedPanel from './AttachedPanel'
 
 export default function NPCQuickView({ npc, onClose, onEdit }) {
   const [secretsRevealed, setSecretsRevealed] = useState(false)
@@ -67,6 +68,15 @@ export default function NPCQuickView({ npc, onClose, onEdit }) {
               {secretsRevealed && <p style={{ ...s.sectionText, color: '#c07070' }}>{npc.secrets}</p>}
             </div>
           )}
+          {/* Everything linked to this NPC — Phase 4 task 13. */}
+          <div style={s.section}>
+            <AttachedPanel
+              entityType="npc"
+              entityId={npc.id}
+              entityName={npc.name}
+              campaignId={npc.campaign_id}
+            />
+          </div>
         </div>
 
         <div style={s.footer}>

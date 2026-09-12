@@ -4,7 +4,23 @@ import EntityModal from '../../components/world/EntityModal'
 import Skeleton from '../../components/ui/Skeleton'
 import { notifyError, notifySuccess } from '../../stores/toastStore'
 
-const ENTITY_TYPES = ['npc', 'location', 'faction']
+// Widened in Phase 4. A campaign's connections were previously limited to the
+// three world tables, so "this map is where that encounter happens" or "this
+// plot thread is about that NPC" had nowhere to live.
+const ENTITY_TYPES = ['npc', 'location', 'faction', 'lore', 'map', 'encounter', 'character', 'plot']
+
+// Each type's loader and the column its display name lives in. Kept as one
+// table so adding a type is one row rather than four scattered edits.
+const TYPE_SOURCES = {
+  npc:       { load: (api, id) => api.db.npcs.getAll(id),       label: e => e.name },
+  location:  { load: (api, id) => api.db.locations.getAll(id),  label: e => e.name },
+  faction:   { load: (api, id) => api.db.factions.getAll(id),   label: e => e.name },
+  lore:      { load: (api, id) => api.db.lore.getAll(id),       label: e => e.name },
+  map:       { load: (api, id) => api.db.maps.getAll(id),       label: e => e.name },
+  encounter: { load: (api, id) => api.db.encounters.getAll(id), label: e => e.name },
+  character: { load: (api, id) => api.db.characters.getAll(id), label: e => e.character_name },
+  plot:      { load: (api, id) => api.db.plots.getAll(id),      label: e => e.title },
+}
 const RELATIONSHIP_SUGGESTIONS = [
   'ally', 'enemy', 'member of', 'rival', 'family', 'lover',
   'employer', 'employee', 'owns', 'worships', 'fears',
@@ -34,20 +50,24 @@ export default function Connections() {
 
   const load = useCallback(async () => {
     if (!activeCampaign?.id) return
-    const [conns, npcs, locations, factions] = await Promise.all([
+    const [conns, ...lists] = await Promise.all([
       window.electronAPI.db.connections.getAll(activeCampaign.id),
-      window.electronAPI.db.npcs.getAll(activeCampaign.id),
-      window.electronAPI.db.locations.getAll(activeCampaign.id),
-      window.electronAPI.db.factions.getAll(activeCampaign.id),
+      ...ENTITY_TYPES.map(type =>
+        TYPE_SOURCES[type].load(window.electronAPI, activeCampaign.id).catch(() => [])),
     ])
-    setConnections(conns)
-    setAllEntities({ npc: npcs, location: locations, faction: factions })
-    setLoading(false)
+
+    const entities = {}
     const map = {}
-    npcs.forEach(e      => { map[`npc:${e.id}`]      = e.name })
-    locations.forEach(e => { map[`location:${e.id}`] = e.name })
-    factions.forEach(e  => { map[`faction:${e.id}`]  = e.name })
+    ENTITY_TYPES.forEach((type, i) => {
+      const rows = lists[i] ?? []
+      entities[type] = rows
+      rows.forEach(e => { map[`${type}:${e.id}`] = TYPE_SOURCES[type].label(e) })
+    })
+
+    setConnections(conns)
+    setAllEntities(entities)
     setEntityMap(map)
+    setLoading(false)
   }, [activeCampaign?.id])
 
   useEffect(() => { load() }, [load])

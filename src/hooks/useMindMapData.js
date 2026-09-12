@@ -11,10 +11,25 @@ export function useMindMapData(campaignId) {
     if (!campaignId) return
     setLoading(true)
     try {
-      const [npcs, locations, factions, connections, savedPositions] = await Promise.all([
-        window.electronAPI.db.npcs.getAll(campaignId),
-        window.electronAPI.db.locations.getAll(campaignId),
-        window.electronAPI.db.factions.getAll(campaignId),
+      // Phase 4 widened connections from three types to eight, so the graph has
+      // to be able to draw all eight — an edge whose endpoint is missing is
+      // silently dropped below, which would have hidden every new connection.
+      // Each loader is individually caught: one failing table should cost its
+      // own nodes, not the whole graph.
+      const load = (fn) => fn(campaignId).catch(() => [])
+
+      const [
+        npcs, locations, factions, lore, maps, encounters, characters, plots,
+        connections, savedPositions,
+      ] = await Promise.all([
+        load(window.electronAPI.db.npcs.getAll),
+        load(window.electronAPI.db.locations.getAll),
+        load(window.electronAPI.db.factions.getAll),
+        load(window.electronAPI.db.lore.getAll),
+        load(window.electronAPI.db.maps.getAll),
+        load(window.electronAPI.db.encounters.getAll),
+        load(window.electronAPI.db.characters.getAll),
+        load(window.electronAPI.db.plots.getAll),
         window.electronAPI.db.connections.getAll(campaignId),
         window.electronAPI.db.mindmap.getPositions(campaignId),
       ])
@@ -25,12 +40,14 @@ export function useMindMapData(campaignId) {
         posMap[`${p.entity_type}-${p.entity_id}`] = { x: p.x_pos, y: p.y_pos }
       })
 
-      // Build nodes — use saved position or default grid placement
-      const allNodes = [
-        ...npcs.map((e, i)      => buildNode('npc',      e, posMap[`npc-${e.id}`]      ?? { x: i * 220, y: 0   })),
-        ...locations.map((e, i) => buildNode('location', e, posMap[`location-${e.id}`] ?? { x: i * 220, y: 220 })),
-        ...factions.map((e, i)  => buildNode('faction',  e, posMap[`faction-${e.id}`]  ?? { x: i * 220, y: 440 })),
+      // Build nodes — saved position, or a default row per type.
+      const ROWS = [
+        ['npc', npcs], ['location', locations], ['faction', factions], ['lore', lore],
+        ['map', maps], ['encounter', encounters], ['character', characters], ['plot', plots],
       ]
+      const allNodes = ROWS.flatMap(([type, rows], row) =>
+        rows.map((e, i) => buildNode(type, e, posMap[`${type}-${e.id}`] ?? { x: i * 220, y: row * 220 }))
+      )
 
       // Build edges — only include edges where BOTH endpoints exist as nodes
       const nodeIds  = new Set(allNodes.map(n => n.id))
