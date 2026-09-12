@@ -341,8 +341,8 @@ macOS/Linux follow the same pattern (`~/Library/Application Support/<name>/` and
 
 ### Adding a new table (all four IPC layers)
 
-1. Add `const MIGRATION_010 = \`CREATE TABLE …\`` in `DatabaseService.js`. **(ids 1–9 are taken.)** Never edit an existing `MIGRATION_00N` — migrations are append-only.
-2. Append `{ id: 10, name: 'my_table', sql: MIGRATION_010 }` to the `migrations` array.
+1. Add `const MIGRATION_011 = \`CREATE TABLE …\`` in `DatabaseService.js`. **(ids 1–10 are taken.)** Never edit an existing `MIGRATION_0NN` — migrations are append-only.
+2. Append `{ id: 11, name: 'my_table', sql: MIGRATION_011 }` to the `migrations` array.
 3. Add CRUD methods to `DatabaseService`.
 4. Register `registerHandler('db:myTable:*', …)` in `electron/ipc/dbHandlers.js`.
 5. Expose them on `window.electronAPI.db.myTable.*` in `electron/preload.js`.
@@ -356,8 +356,8 @@ SELECT` with an explicit column list, drop old, rename new — never rename the
 at your temporary name). That procedure needs foreign keys disabled and has to be
 atomic, and `PRAGMA foreign_keys` is silently ignored inside a transaction — so
 mark the entry `foreignKeysOff: true` and the runner handles the toggle,
-transaction and `PRAGMA foreign_key_check` for you. `MIGRATION_009` is the worked
-example.
+transaction and `PRAGMA foreign_key_check` for you. `MIGRATION_009` (six tables)
+and `MIGRATION_010` (dropping a `NOT NULL`) are the worked examples.
 
 ---
 
@@ -375,7 +375,7 @@ example.
 | Combat Calculator | Standalone XP/CR calculator. |
 | AI Assistant | Streaming chat with campaign context injected; "Rules Q&A" routes through the RAG pipeline. |
 | AI Sources | Upload PDFs, monitor indexing, trigger embedding. |
-| Settings | Anthropic key (safeStorage), Ollama status, RAG settings, ngrok token, AI usage stats. |
+| Settings | Anthropic key (safeStorage), Ollama status, RAG settings, **Rules Q&A index**, ngrok token, AI usage stats (including failed calls). |
 
 ---
 
@@ -385,9 +385,51 @@ On startup the app picks a mode (shown as a badge in the TopBar):
 
 1. Valid Anthropic key in `safeStorage` → **`online`** (Claude API, model `claude-sonnet-5`).
 2. Else Ollama reachable at `http://localhost:11434` → **`offline-ollama`** (`llama3:latest` chat).
-3. Else **`no-ai`** — all AI features hide; the rest of the app works normally.
+3. Else **`no-ai`** — AI-generated content hides; the rest of the app works normally, **including rules Q&A** (see below).
 
-**RAG / PDF pipeline:** upload a PDF → `PdfIngestionService` chunks it (~400 tokens) into `pdf_chunks` → `EmbeddingService` embeds each chunk with Ollama `nomic-embed-text` into a `vectra` index → on a query, the top-k chunks are retrieved (with contiguous-chunk stitching) and sent to the model, which answers with page-number attribution. Embeddings require Ollama running even when chat is online.
+### Rules Q&A
+
+Works on a fresh install with nothing uploaded and no API key.
+
+**Settings → Rules Q&A Index → "Index SRD for rules Q&A"** serialises the bundled
+SRD 5.1 cache (monsters, spells, equipment, classes) into text and chunks it into
+`pdf_chunks` under a shared source named `SRD 5.1`. This also runs automatically
+the first time the SRD is seeded.
+
+The index has two useful states, and the first one is not a failure:
+
+| State | Needs | What you get |
+|---|---|---|
+| **Keyword search ready** | nothing | SQLite keyword retrieval over the SRD |
+| **Semantic search ready** | Ollama + `nomic-embed-text` | vector retrieval, better on paraphrased questions |
+
+Retrieval always searches **your campaign's own uploaded books plus the shared
+SRD**. Sources are scoped per campaign — campaign B never retrieves campaign A's
+homebrew PDF — but the SRD is shared by all of them, so a brand-new campaign is
+not starting from nothing.
+
+**Each AI mode degrades rather than failing:**
+
+- `online` / `offline-ollama` — a grounded answer with citations.
+- `no-ai` — the retrieved passages render directly under a **"Relevant passages"**
+  heading. No answer is generated, and none is needed for most single-rule
+  lookups: the SRD text *is* the answer. This used to throw "No AI service
+  available".
+- Ollama not running — retrieval falls back to keyword search and the result is
+  labelled *"Keyword search — Ollama is not running"* rather than quietly
+  returning worse hits.
+
+**Situation mode** (requires AI; the toggle is hidden in `no-ai`) breaks a
+multi-rule table situation into 2–5 rules concepts, retrieves for each, and rules
+over the union — for questions like "the grappled rogue wants to cast a spell
+with somatic components underwater", where a single embedding of the whole
+sentence lands between four rules and retrieves none of them well.
+
+**RAG / PDF pipeline:** upload a PDF → `PdfIngestionService` chunks it (~400
+tokens) into `pdf_chunks` → `EmbeddingService` embeds each chunk with Ollama
+`nomic-embed-text` into a `vectra` index → on a query, chunks are over-fetched,
+filtered to the sources this campaign may see, and stitched contiguously before
+going to the model. Embeddings require Ollama; retrieval does not.
 
 ---
 
@@ -447,11 +489,13 @@ npm run test:watch
 npm run test:migrations   # replays migrations 001-009 on a fresh AND a populated database
 npm run test:ipc          # cross-checks channel names across the preload/handler layers
 npm run test:server       # starts a real player server and checks auth, scoping and fog
+npm run test:rag          # indexes the SRD and runs real queries, including in no-ai mode
 ```
 
-None of the three `node` scripts need a working native `better-sqlite3` build:
-they use Node's built-in `node:sqlite`, plain source parsing, and a stub database
-respectively.
+None of the four `node` scripts need a working native `better-sqlite3` build:
+they use Node's built-in `node:sqlite`, plain source parsing, or a stub database.
+`test:rag` also runs without Ollama on purpose — it exercises the keyword-search
+path that rules Q&A falls back to when Ollama is absent.
 
 **Vitest**, configured inside the existing `vite.config.js` (`test` block) rather than a separate
 config file. Environment is `node`; suites are discovered at `src/**/__tests__/**/*.test.js`. There is
@@ -467,6 +511,8 @@ no jsdom and no component testing yet — everything covered so far is a pure ES
 | `src/utils/__tests__/mapGridUtils.test.js` | Counting painted fog cells; deciding when a grid-size change destroys a mask |
 | `electron/server/__tests__/fogFilter.test.js` | Server-side fog enforcement, asserted against the renderer's own `fogUtils` so the two copies cannot drift |
 | `electron/server/__tests__/imageSize.test.js` | PNG/JPEG/GIF/WebP header parsing, including the JPEG markers that are not frame headers |
+| `electron/services/__tests__/srdIndexText.test.js` | Serialising SRD monsters/spells/equipment/classes into indexable text, across both cache shapes |
+| `electron/services/__tests__/queryExpansion.test.js` | All 15 condition names expanding, cross-checked against `combatUtils` |
 
 ### Known bugs are recorded as tests, not comments
 

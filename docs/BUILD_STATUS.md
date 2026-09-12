@@ -602,3 +602,175 @@ keeps it runnable under bare node.
    this should not happen, but a clearer signal in the DM UI ("players cannot see tokens on this map —
    the image could not be measured") would beat silence.
 4. **konva / react-konva peer mismatch** — unchanged since Phase 0.
+
+---
+
+## Phase 3 — Rules Q&A works on day one
+
+**Date:** 2026-09-12
+**Branch:** `phase-3-rules-qa`, branched from **`phase-2-player-security`**, not `main`.
+**Verdict changes:** Q4 PARTIAL → **SOLVED for single-rule lookups**, with the caveat in Acceptance below.
+Situation mode shipped as well.
+
+> **Branch chain.** `main → phase-0-foundation → phase-1-integrity → phase-2-player-security →
+> phase-3-rules-qa`. Each phase needs the last one's work; merging the newest gets all four.
+
+### The bug that reframes this phase
+
+**Semantic search has never run in this application.** vectra 0.15's signature is
+`queryItems(vector, query, topK, filter, isBm25)`. `EmbeddingService.search` called it as
+`queryItems(vector, topK)`, putting `topK` in the `query` slot and leaving `topK` undefined.
+`Math.min(undefined, n)` is `NaN`, the internal top-k heap never accepted an item, and the call
+returned `[]` on every query.
+
+Measured against the installed package, not read from source:
+
+```
+queryItems(vector, 5)             -> 0 results
+queryItems(vector, '', 5)         -> 4 results
+Math.min(undefined, 4)            -> NaN
+```
+
+Every RAG query in the app's history silently used the SQLite keyword branch. This **inverts the
+capability review's Q4d finding**: the keyword fallback is not "well-written and unreachable in
+practice", it is the only path that has ever run. Fixed, with the over-fetch this phase needed anyway.
+
+### What shipped
+
+**1. SRD indexing** — `189447f`, `f3f4e52`, `0d0a484`
+
+The app has always shipped a full SRD cache in `srd_cache`, used only for browsing, while rules Q&A
+demanded the DM upload a PDF of a book they already own. `SrdService` gains `buildIndexableText()`,
+`buildSrdIndex()`, `getIndexStatus()` and `clearSrdIndex()`; the serialisation itself lives in a pure
+`srdIndexText.js` because `SrdService.js` opens with `require('electron')` and so cannot be unit
+tested. One sentinel `pdf_sources` row named `SRD 5.1`, `campaign_id` NULL, one chunk per SRD entry,
+`page_number` carrying a section index so citations read "SRD 5.1, Monsters" not "p.4". Rebuilding
+replaces rather than appends. `srd:seedAll` builds the index automatically after a first seed, and
+embeds too if Ollama is actually reachable — wrapped so a failure there never fails the seed.
+
+**Migration 010 — a deliberate departure from the brief, flagged for review.** The brief said to make
+this work "in code" and, if `pdf_sources.campaign_id` is not nullable, to note it for Phase 4. It is
+`NOT NULL`. I added the migration now rather than deferring, because every workaround is worse:
+pointing the SRD at an arbitrary campaign makes the whole index vanish when that campaign is deleted
+(via the `ON DELETE CASCADE` Phase 1 added), a hidden sentinel campaign puts a fake row in the DM's
+campaign list, and one SRD source per campaign defeats the point of sharing. Deferring would have meant
+shipping the phase's headline feature on one of those, or not shipping it. **Say the word and I will
+move it to Phase 4.**
+
+**2. Campaign filtering pushed into retrieval** — `0d0a484`
+
+`allowedSourceIds()` returns the campaign's own sources **plus every shared source**, and search
+over-fetches `topK * 4` before filtering. Filtering a `topK`-sized list was the dilution bug: five
+global hits could all belong to another campaign's book, leaving this campaign with nothing even though
+its own sources had relevant passages further down. The keyword top-up is scoped to the same allowed
+set — it previously filtered on `campaign_id = ?` and so could never see a shared source at all.
+
+**On vectra's metadata filter**, which the brief said to check rather than assume: it exists, `$eq`
+works, but **`$in` is broken for numeric values** in 0.15 — the implementation requires the array
+entries to be strings, so `$in: [10, 20]` against a numeric `source_id` never matches. Over-fetch and
+filter in JS it is.
+
+**3. Ollama optional at query time** — `0d0a484`
+
+The `embed()` call is wrapped; on failure `search` falls through to the keyword branch and tags the
+result `degraded`, distinguishing "Ollama is not running" from "the model is not installed". The UI
+says which. Previously this threw and the Ask button appeared to do nothing.
+
+**4. A real `no-ai` path** — `0d0a484`
+
+`RAGService.query` returns `{ answer: null, sources, extractedPassages: true }` instead of throwing
+"No AI service available". `RAGQueryPanel` renders a **"Relevant passages"** panel as the primary
+result, with full passage text rather than the 120-character preview used for citations. The Ask button
+is gated on `hasEmbedded || srdIndexed`, not on AI mode.
+
+**5. AI failures are logged** — `0d0a484`
+
+`complete()` is wrapped so a throw still writes an `ai_usage_log` row. **No migration**: `response_len
+= -1` is the sentinel, because a negative response length is not a real measurement and a diagnostic
+table did not justify schema churn. Usage stats gain a failure count, and the average is now taken over
+successful calls only — a call that threw after 200ms is not evidence the model is fast.
+
+**6. Query expansion** — `189447f`
+
+All 15 PHB conditions, cross-checked against `CONDITIONS` in `src/utils/combatUtils.js` by a test, plus
+grapple/grappling, opportunity attack, somatic/verbal/material and ~20 other terms. Two behaviour fixes
+fell out of writing it:
+
+- The old version split on `' '` alone, so **`"grappled?"` never matched the table**. A DM typing a
+  question almost always ends it with a question mark, which means expansion was effectively off for
+  most real queries.
+- Condition names now match their grammatical variants: restrain / restrained / restraining.
+
+**7. Situation mode (stretch)** — `0d0a484`
+
+`situationQuery` decomposes a situation into 2–5 rules concepts as strict JSON, retrieves per concept,
+unions and dedupes keeping the best score and recording which concepts each passage covers, then asks
+for one ruling over the set. Unparseable model output falls back to treating the situation as a single
+concept — a worse decomposition beats an error. Hidden in `no-ai` rather than shown broken, since the
+decomposition step cannot degrade the way retrieval can.
+
+### Acceptance
+
+| Check | Result |
+|---|---|
+| `npm test` green | **PASS** — 10 files, 415 tests: **412 passed**, 1 expected-fail, 2 todo (the Phase 5 monster-AC tripwire) |
+| `expandQuery` covered by a test asserting all 15 condition names expand | **PASS** — 35 tests, one per condition, plus a cross-check against `combatUtils` |
+| Empty campaign, ask "what does the restrained condition do" → answer with an `SRD 5.1` citation | **PASS in harness** — see the caveat below |
+| Stop Ollama, ask again → keyword result flagged degraded, no exception | **PASS in harness** — `degraded: true`, `degradedReason: 'ollama-unavailable'` |
+| `no-ai` mode → passages render, no error string | **PASS in harness** — `answer: null`, `extractedPassages: true`, full text present |
+| Two campaigns, PDF only in A: querying from B returns SRD hits, not an empty list | **PASS in harness** — B gets 5 SRD sources and zero of A's homebrew text |
+| `npm run test:rag` | **PASS** — 42/42 |
+| Regressions: `test:migrations` / `test:server` / `test:ipc` | **PASS** — 62/62, 47/47, 0 problems |
+| `npm run build:renderer` | **PASS** |
+
+**What "PASS in harness" means, precisely.** `scripts/verify-rag.mjs` runs the **real** `SrdService`
+and the **real** `RAGService` against a **real** SQLite database with the app's own migrations applied.
+`EmbeddingService` is stubbed — but stubbed to reproduce exactly what the real one does when Ollama is
+unreachable: the SQLite keyword branch with `degraded` set. Since "works without Ollama" is this
+phase's central claim, that is the right path to exercise, and the stub's keyword SQL mirrors the real
+implementation's shape.
+
+**Not run, and why:**
+
+- **The semantic path, with Ollama actually running.** No Ollama here. The vectra call fix is verified
+  against the installed package by direct probe (the numbers above), and `embedSource` is unchanged
+  from the code that has been embedding PDFs all along — but **no query in this phase has been answered
+  from a vector index**, because no vector index can be built without Ollama. The keyword path is
+  fully exercised; the semantic path is verified by reading plus the probe.
+- **A real AI answer.** No API key. `RAGService` was tested with three stub models (online, no-ai,
+  throwing). Prompt composition and the context handed to the model are asserted; **answer quality is
+  not evaluated at all.**
+- **The app itself.** Unchanged since Phase 0: `require('better-sqlite3')` still succeeds under bare
+  Node 24, so the binary is ABI 137 while Electron 33 needs 130, and `npm run postinstall` still fails
+  at node-gyp. The Settings index button, the "Relevant passages" panel, the degraded banner and the
+  situation toggle are **verified by reading and by build, not by use.**
+- **The auto-index-after-seed path.** It requires a live dnd5eapi fetch through Electron's `net`. The
+  code is wrapped so a failure cannot fail the seed, but the happy path is unexercised.
+
+### Deferred
+
+- **Nothing chunks the SRD text.** Each SRD entry becomes exactly one `pdf_chunks` row, however long.
+  A long monster entry is one large chunk, which eats the 3000-character context budget faster than a
+  PDF's ~400-token chunks would. It works, and per-entry chunks make citations exact, but a long-entry
+  split is worth considering if answers start getting truncated.
+- **`_expandContiguous` runs on SRD hits too**, and will pull in neighbouring SRD entries (alphabetical
+  neighbours, not related rules) because the chunk indices are adjacent. Harmless — it adds context
+  rather than losing it — but it is not doing anything useful for this source.
+- **The vectra bug means there is no existing vector index to migrate.** Anyone who "embedded" a PDF
+  before this fix has vectors that were never queried. They will start working now, with no action
+  needed, but the embeddings were made by whatever model was installed at the time.
+- **No test for `SrdService`'s Electron-dependent paths** (`seedAll`, `fetchAndCache`), unchanged.
+
+### Open questions for the next session
+
+1. **The `better-sqlite3` ABI is now four phases old as a blocker**, and its cost is rising: this phase
+   has more UI surface than any so far and none of it has been clicked. Fixing it — Node 20 via
+   nvm-windows, or diagnosing the node-gyp failure — is worth more than the next feature.
+2. **Should migration 010 stay in Phase 3?** It works and is tested both ways, but the brief suggested
+   deferring it to Phase 4. Easy to move if you would rather.
+3. **Is one chunk per SRD entry the right granularity?** See Deferred. It affects answer quality once a
+   model is actually in the loop, which cannot be measured here.
+4. **`response_len = -1` as the failure sentinel** avoided a migration, but it is a convention that
+   lives in two places (`AIService._logUsage` writes it, `ai:getUsageStats` reads it). If Phase 4 adds
+   a migration anyway, a real `success` column would be cheaper to keep honest.
+5. **konva / react-konva peer mismatch** — unchanged since Phase 0.
