@@ -22,7 +22,8 @@
     "test:migrations": "node scripts/verify-migrations.mjs",
     "test:ipc": "node scripts/verify-ipc-layers.mjs",
     "test:server": "node scripts/verify-player-server.mjs",
-    "test:rag": "node scripts/verify-rag.mjs"
+    "test:rag": "node scripts/verify-rag.mjs",
+    "test:sessions": "node scripts/verify-sessions.mjs"
   },
   "build": {
     "appId": "com.dmcs.app",

@@ -38,6 +38,10 @@ class DatabaseService {
       // Same recreate procedure as 009, so the same flag: pdf_chunks references
       // pdf_sources, and SQLite cannot drop a NOT NULL constraint in place.
       { id: 10, name: 'shared_pdf_sources', sql: MIGRATION_010, foreignKeysOff: true },
+      // Purely additive (three CREATE TABLEs), so the simple path is enough —
+      // no table is recreated and no foreign key needs disabling. The data
+      // import that goes with it runs in `after`, inside the same transaction.
+      { id: 11, name: 'sessions_plots_reveals', sql: MIGRATION_011, after: importCampaignNotes },
     ]
 
     for (const m of migrations) {
@@ -53,8 +57,26 @@ class DatabaseService {
   // The original path: statements auto-commit one at a time. Correct for
   // migrations 001-008, all of which are additive.
   runSimpleMigration(m) {
-    this.db.exec(m.sql)
-    this.db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(m.id, m.name)
+    // A migration with an `after` hook needs the DDL and the data step to be
+    // atomic: a half-applied import would leave some campaigns with a session
+    // and some without, and the idempotence check would then skip the rest
+    // forever. Migrations without a hook keep the original auto-commit path.
+    if (!m.after) {
+      this.db.exec(m.sql)
+      this.db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(m.id, m.name)
+      return
+    }
+
+    this.db.exec('BEGIN')
+    try {
+      this.db.exec(m.sql)
+      m.after(this)
+      this.db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(m.id, m.name)
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
   }
 
   // Table-recreate migrations, which must run with foreign keys disabled and
@@ -130,6 +152,55 @@ class DatabaseService {
       }
     })()
   }
+}
+
+// Data preservation for migration 011.
+//
+// Before sessions existed, a campaign's running notes lived in
+// `campaigns.description`, which the CampaignManager textarea wrote to on blur.
+// Phase 4 repoints that textarea at the current session's notes, so anything
+// already written there would become unreachable from the UI.
+//
+// This copies it into a first session rather than moving it:
+// `campaigns.description` is left EXACTLY as it was. Nothing is deleted, and if
+// this import turns out to be wrong the original text is still in place. The
+// campaign edit form now treats `description` as a real description field again,
+// which is what the column was named for.
+//
+// Idempotent by construction: a campaign that already has any session is
+// skipped, so re-running cannot produce a second "Imported notes".
+function importCampaignNotes(db) {
+  const candidates = db.all(`
+    SELECT c.id, c.name, c.description
+      FROM campaigns c
+     WHERE c.description IS NOT NULL
+       AND TRIM(c.description) <> ''
+       AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.campaign_id = c.id)
+  `)
+
+  let imported = 0
+  for (const campaign of candidates) {
+    db.run(
+      `INSERT INTO sessions (campaign_id, session_number, title, notes, created_at)
+       VALUES (?, 1, 'Imported notes', ?, datetime('now'))`,
+      [campaign.id, campaign.description]
+    )
+    imported++
+  }
+
+  // campaigns.session_count has been read and never written since it was added.
+  // Now that sessions are real, make it true for the rows just imported.
+  if (imported > 0) {
+    db.run(`
+      UPDATE campaigns
+         SET session_count = (SELECT COUNT(*) FROM sessions s WHERE s.campaign_id = campaigns.id)
+       WHERE EXISTS (SELECT 1 FROM sessions s WHERE s.campaign_id = campaigns.id)
+    `)
+  }
+
+  console.log(`[migration 011] imported ${imported} campaign description(s) into sessions ` +
+              `(of ${candidates.length} candidate(s)); campaigns.description left intact`)
+  return { imported }
 }
 
 const MIGRATION_001 = `
@@ -558,6 +629,71 @@ const MIGRATION_010 = `
   FROM pdf_sources;
   DROP TABLE pdf_sources;
   ALTER TABLE pdf_sources_m010 RENAME TO pdf_sources;
+`
+
+// Migration 011 — Sessions, plot threads and reveals.
+//
+// NUMBERING: the phase brief calls this "migration 010", but 010 is already
+// taken by Phase 3's shared_pdf_sources. Migrations are append-only, so this is
+// 011. The content is the brief's, unchanged.
+//
+// Until now a campaign had no memory of what happened in it. `campaigns.notes`
+// was a single textarea that every session overwrote, so a DM either kept one
+// ever-growing wall of text or lost last week's notes writing this week's.
+//
+// Three tables, per the capability review's Q2e:
+//   sessions      — one row per session played, with long-form notes and a recap
+//   plot_threads   — what is unresolved, and which session opened/closed it
+//   reveals        — what the party has actually been told, as opposed to what
+//                    the DM knows
+//
+// `reveals` is a separate table rather than an is_revealed column on four other
+// tables: it keeps the flag out of the JSON blobs, makes "what did the party
+// learn in session 7" a one-line query, and avoids widening four CHECK
+// constraints. The entity reference is polymorphic and therefore unconstrained,
+// like `connections` — handler-side cleanup covers it, same as Phase 1.
+const MIGRATION_011 = `
+  CREATE TABLE IF NOT EXISTS sessions (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id    INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    session_number INTEGER NOT NULL,
+    title          TEXT,
+    played_on      DATE,
+    notes          TEXT,
+    recap          TEXT,
+    created_at     DATETIME DEFAULT (datetime('now')),
+    -- Two sessions cannot share a number within one campaign. Without this,
+    -- a double-click on "New session" silently creates two "Session 4"s.
+    UNIQUE(campaign_id, session_number)
+  );
+
+  CREATE TABLE IF NOT EXISTS plot_threads (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id         INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    title               TEXT NOT NULL,
+    description         TEXT,
+    status              TEXT DEFAULT 'open' CHECK(status IN ('open','active','resolved','abandoned')),
+    -- SET NULL, not CASCADE: deleting a session must not delete the plot thread
+    -- it happened to open. The thread outlives the session that started it.
+    opened_session_id   INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
+    resolved_session_id INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
+    created_at          DATETIME DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS reveals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    entity_type TEXT NOT NULL,
+    entity_id   INTEGER NOT NULL,
+    revealed_at DATETIME DEFAULT (datetime('now')),
+    session_id  INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
+    -- Entity ids are unique within their own table, so this needs no campaign_id.
+    UNIQUE(entity_type, entity_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_sessions_campaign  ON sessions(campaign_id, session_number DESC);
+  CREATE INDEX IF NOT EXISTS idx_plots_campaign     ON plot_threads(campaign_id, status);
+  CREATE INDEX IF NOT EXISTS idx_reveals_campaign   ON reveals(campaign_id, entity_type);
 `
 
 // ── SRD Subclass Seed Data — 27 subclasses (2–3 per class × 12 classes) ────────

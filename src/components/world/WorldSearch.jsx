@@ -3,18 +3,44 @@ import { useNavigate } from 'react-router-dom'
 import useCampaignStore from '../../stores/campaignStore'
 
 const TYPE_COLORS = {
-  location: { bg: '#1a2a1a', text: '#5a9a5a' },
-  faction:  { bg: '#1e1228', text: '#9a6abf' },
-  npc:      { bg: '#1a1a2a', text: '#6a8abf' },
-  lore:     { bg: '#2a1a0a', text: '#c9a84c' },
+  location:   { bg: '#1a2a1a', text: '#5a9a5a' },
+  faction:    { bg: '#1e1228', text: '#9a6abf' },
+  npc:        { bg: '#1a1a2a', text: '#6a8abf' },
+  lore:       { bg: '#2a1a0a', text: '#c9a84c' },
+  character:  { bg: '#0f2226', text: '#5aa8bf' },
+  encounter:  { bg: '#2a1212', text: '#bf6a6a' },
+  map:        { bg: '#1c2418', text: '#8aa85a' },
+  session:    { bg: '#241c30', text: '#a98adf' },
+  plot:       { bg: '#2a2410', text: '#cfb45a' },
+  compendium: { bg: '#22160a', text: '#bf8f5a' },
 }
 
 const ENTITY_PATH = {
-  location: '/world/locations',
-  faction:  '/world/factions',
-  npc:      '/world/npcs',
-  lore:     '/world/lore',
+  location:   '/world/locations',
+  faction:    '/world/factions',
+  npc:        '/world/npcs',
+  lore:       '/world/lore',
+  character:  '/characters',
+  encounter:  '/encounters',
+  map:        '/maps',
+  session:    '/world/sessions',
+  plot:       '/world/plots',
+  compendium: '/compendium',
 }
+
+// Order matters: the groups a DM is most likely to be hunting for come first.
+const GROUP_DEFS = [
+  { key: 'locations',  label: 'Locations',  type: 'location' },
+  { key: 'npcs',       label: 'NPCs',       type: 'npc' },
+  { key: 'factions',   label: 'Factions',   type: 'faction' },
+  { key: 'lore',       label: 'Lore',       type: 'lore' },
+  { key: 'sessions',   label: 'Sessions',   type: 'session' },
+  { key: 'plots',      label: 'Plot threads', type: 'plot' },
+  { key: 'characters', label: 'Characters', type: 'character' },
+  { key: 'encounters', label: 'Encounters', type: 'encounter' },
+  { key: 'maps',       label: 'Maps',       type: 'map' },
+  { key: 'compendium', label: 'Homebrew',   type: 'compendium' },
+]
 
 export default function WorldSearch() {
   const activeCampaign = useCampaignStore(s => s.activeCampaign)
@@ -71,15 +97,12 @@ export default function WorldSearch() {
 
   const hasResults = results && results.total > 0
   const typeCount  = results
-    ? ['location','faction','npc','lore'].filter(t => results[t + 's']?.length > 0 || results[t]?.length > 0).length
+    ? GROUP_DEFS.filter(g => results[g.key]?.length > 0).length
     : 0
 
-  const groups = results ? [
-    { key: 'locations', label: 'Locations', type: 'location', items: results.locations },
-    { key: 'factions',  label: 'Factions',  type: 'faction',  items: results.factions  },
-    { key: 'npcs',      label: 'NPCs',       type: 'npc',      items: results.npcs      },
-    { key: 'lore',      label: 'Lore',       type: 'lore',     items: results.lore      },
-  ].filter(g => g.items?.length > 0) : []
+  const groups = results
+    ? GROUP_DEFS.map(g => ({ ...g, items: results[g.key] })).filter(g => g.items?.length > 0)
+    : []
 
   return (
     <div ref={containerRef} style={s.wrap}>

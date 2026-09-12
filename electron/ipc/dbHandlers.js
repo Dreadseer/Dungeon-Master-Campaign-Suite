@@ -242,7 +242,188 @@ function registerDbHandlers(db) {
   registerHandler('db:lore:delete', (_, id) =>
     deleteWithPolymorphicRefs(db, 'compendium_custom', 'lore', id))
 
+  // ── Sessions — Phase 4 ───────────────────────────────────────────────────
+  registerHandler('db:sessions:getAll', (_, campaignId) =>
+    db.all(`
+      SELECT s.*,
+             (SELECT COUNT(*) FROM reveals r WHERE r.session_id = s.id) AS reveal_count,
+             (SELECT COUNT(*) FROM plot_threads p WHERE p.opened_session_id = s.id) AS opened_count,
+             (SELECT COUNT(*) FROM plot_threads p WHERE p.resolved_session_id = s.id) AS resolved_count
+      FROM sessions s
+      WHERE s.campaign_id = ?
+      ORDER BY s.session_number DESC`,
+      [campaignId]))
+
+  registerHandler('db:sessions:getById', (_, id) =>
+    db.get('SELECT * FROM sessions WHERE id = ?', [id]))
+
+  // The session the DM is currently running: the highest-numbered one.
+  registerHandler('db:sessions:getCurrent', (_, campaignId) =>
+    db.get(
+      'SELECT * FROM sessions WHERE campaign_id = ? ORDER BY session_number DESC LIMIT 1',
+      [campaignId]))
+
+  registerHandler('db:sessions:create', (_, data) =>
+    db.transaction(() => {
+      // Derive the number rather than trusting the caller, so two fast clicks
+      // cannot both compute the same one. UNIQUE(campaign_id, session_number)
+      // is the backstop if they somehow do.
+      const next = data.session_number ?? (
+        (db.get('SELECT MAX(session_number) AS n FROM sessions WHERE campaign_id = ?',
+          [data.campaign_id])?.n ?? 0) + 1
+      )
+
+      const result = db.run(`
+        INSERT INTO sessions (campaign_id, session_number, title, played_on, notes, recap, created_at)
+        VALUES (?,?,?,?,?,?,datetime('now'))`,
+        [data.campaign_id, next, data.title ?? `Session ${next}`,
+         data.played_on ?? null, data.notes ?? '', data.recap ?? null])
+
+      // campaigns.session_count was read and never written before Phase 4.
+      // Recount rather than increment: an increment drifts the moment a session
+      // is deleted, and this is one cheap indexed count.
+      db.run(`
+        UPDATE campaigns
+           SET session_count = (SELECT COUNT(*) FROM sessions WHERE campaign_id = ?),
+               updated_at = datetime('now')
+         WHERE id = ?`,
+        [data.campaign_id, data.campaign_id])
+
+      return { ...result, session_number: next }
+    }))
+
+  registerHandler('db:sessions:update', (_, id, data) =>
+    db.run(`
+      UPDATE sessions SET title = ?, played_on = ?, notes = ?, recap = ? WHERE id = ?`,
+      [data.title, data.played_on ?? null, data.notes ?? '', data.recap ?? null, id]))
+
+  // Autosave target for the notes textarea — narrower than a full update so a
+  // blur cannot clobber a title edited in another field.
+  registerHandler('db:sessions:updateNotes', (_, id, notes) =>
+    db.run('UPDATE sessions SET notes = ? WHERE id = ?', [notes ?? '', id]))
+
+  registerHandler('db:sessions:delete', (_, id) =>
+    db.transaction(() => {
+      const session = db.get('SELECT campaign_id FROM sessions WHERE id = ?', [id])
+      // plot_threads.opened_session_id / resolved_session_id are ON DELETE SET
+      // NULL, so threads survive with a null link. reveals.session_id likewise:
+      // the party still knows what it was told, even if the session record goes.
+      const result = db.run('DELETE FROM sessions WHERE id = ?', [id])
+      if (session) {
+        db.run(`
+          UPDATE campaigns
+             SET session_count = (SELECT COUNT(*) FROM sessions WHERE campaign_id = ?)
+           WHERE id = ?`,
+          [session.campaign_id, session.campaign_id])
+      }
+      return result
+    }))
+
+  // ── Plot threads — Phase 4 ───────────────────────────────────────────────
+  registerHandler('db:plots:getAll', (_, campaignId) =>
+    db.all(`
+      SELECT p.*,
+             o.session_number AS opened_session_number,
+             o.title          AS opened_session_title,
+             r.session_number AS resolved_session_number,
+             r.title          AS resolved_session_title
+      FROM plot_threads p
+      LEFT JOIN sessions o ON p.opened_session_id   = o.id
+      LEFT JOIN sessions r ON p.resolved_session_id = r.id
+      WHERE p.campaign_id = ?
+      ORDER BY
+        CASE p.status WHEN 'active' THEN 0 WHEN 'open' THEN 1
+                      WHEN 'resolved' THEN 2 ELSE 3 END,
+        p.created_at DESC`,
+      [campaignId]))
+
+  registerHandler('db:plots:getById', (_, id) =>
+    db.get('SELECT * FROM plot_threads WHERE id = ?', [id]))
+
+  registerHandler('db:plots:create', (_, data) =>
+    db.run(`
+      INSERT INTO plot_threads (campaign_id, title, description, status, opened_session_id, created_at)
+      VALUES (?,?,?,?,?,datetime('now'))`,
+      [data.campaign_id, data.title, data.description ?? null,
+       data.status ?? 'open', data.opened_session_id ?? null]))
+
+  registerHandler('db:plots:update', (_, id, data) =>
+    db.run(`
+      UPDATE plot_threads
+         SET title = ?, description = ?, status = ?,
+             opened_session_id = ?, resolved_session_id = ?
+       WHERE id = ?`,
+      [data.title, data.description ?? null, data.status ?? 'open',
+       data.opened_session_id ?? null, data.resolved_session_id ?? null, id]))
+
+  // Status transition from the board. Moving a thread to 'resolved' stamps it
+  // with the current session, so "which session closed this" is answerable
+  // without the DM having to remember to set it.
+  registerHandler('db:plots:updateStatus', (_, id, status, sessionId) =>
+    db.transaction(() => {
+      const resolving = status === 'resolved' || status === 'abandoned'
+      if (resolving) {
+        return db.run(
+          'UPDATE plot_threads SET status = ?, resolved_session_id = COALESCE(?, resolved_session_id) WHERE id = ?',
+          [status, sessionId ?? null, id])
+      }
+      // Reopening clears the resolving session — it is no longer true.
+      return db.run(
+        'UPDATE plot_threads SET status = ?, resolved_session_id = NULL WHERE id = ?',
+        [status, id])
+    }))
+
+  registerHandler('db:plots:delete', (_, id) =>
+    db.run('DELETE FROM plot_threads WHERE id = ?', [id]))
+
+  // ── Reveals — Phase 4 ────────────────────────────────────────────────────
+  // What the party has actually been told, as opposed to what the DM knows.
+  registerHandler('db:reveals:getForCampaign', (_, campaignId) =>
+    db.all(`
+      SELECT r.*, s.session_number, s.title AS session_title
+      FROM reveals r
+      LEFT JOIN sessions s ON r.session_id = s.id
+      WHERE r.campaign_id = ?
+      ORDER BY r.revealed_at DESC`,
+      [campaignId]))
+
+  registerHandler('db:reveals:getForSession', (_, sessionId) =>
+    db.all('SELECT * FROM reveals WHERE session_id = ? ORDER BY revealed_at DESC', [sessionId]))
+
+  registerHandler('db:reveals:isRevealed', (_, entityType, entityId) => {
+    const row = db.get(
+      'SELECT id, revealed_at, session_id FROM reveals WHERE entity_type = ? AND entity_id = ?',
+      [entityType, entityId])
+    return { revealed: !!row, ...(row ?? {}) }
+  })
+
+  registerHandler('db:reveals:reveal', (_, campaignId, entityType, entityId, sessionId) =>
+    // UNIQUE(entity_type, entity_id) makes revealing twice a no-op rather than
+    // an error — the DM clicking a already-revealed toggle should not see a
+    // constraint failure.
+    db.run(`
+      INSERT INTO reveals (campaign_id, entity_type, entity_id, session_id, revealed_at)
+      VALUES (?,?,?,?,datetime('now'))
+      ON CONFLICT(entity_type, entity_id) DO UPDATE
+        SET session_id = excluded.session_id, revealed_at = excluded.revealed_at`,
+      [campaignId, entityType, entityId, sessionId ?? null]))
+
+  registerHandler('db:reveals:unreveal', (_, entityType, entityId) =>
+    db.run('DELETE FROM reveals WHERE entity_type = ? AND entity_id = ?', [entityType, entityId]))
+
+  // ── Everything attached to one entity — Phase 4 task 13 ──────────────────
+  registerHandler('db:maps:getByLocation', (_, locationId) =>
+    db.all('SELECT id, name, grid_size, image_path FROM maps WHERE location_id = ? ORDER BY name', [locationId]))
+
+  registerHandler('db:encounters:getByLocation', (_, locationId) =>
+    db.all('SELECT id, name, status, xp_total FROM encounters WHERE location_id = ? ORDER BY name', [locationId]))
+
   // Global world search
+  // Searches every table a DM might have written the phrase into, not just the
+  // four world tables. The two that mattered most were missing entirely: lore
+  // BODIES (only the title was searched, so the text of every lore entry was
+  // invisible) and session notes, which is where most of a campaign's prose ends
+  // up once Phase 4 exists.
   registerHandler('db:world:search', (_, campaignId, query) => {
     const q = `%${query}%`
     const locations = db.all(
@@ -254,11 +435,57 @@ function registerDbHandlers(db) {
     const npcs = db.all(
       `SELECT id, name, role AS subtitle, 'npc' AS entity_type FROM npcs WHERE campaign_id=? AND (name LIKE ? OR notes LIKE ? OR motivation LIKE ?)`,
       [campaignId, q, q, q])
+
+    // Lore content lives inside the `data` JSON blob as $.content. Searching
+    // only `name` meant a DM could not find a lore entry by anything written in
+    // it — the single most common way to lose a piece of your own worldbuilding.
     const lore = db.all(
-      `SELECT id, name, 'lore' AS entity_type FROM compendium_custom WHERE campaign_id=? AND type='lore' AND name LIKE ?`,
+      `SELECT id, name, 'lore' AS entity_type FROM compendium_custom
+        WHERE campaign_id=? AND type='lore'
+          AND (name LIKE ? OR json_extract(data, '$.content') LIKE ?)`,
+      [campaignId, q, q])
+
+    const characters = db.all(
+      `SELECT id, character_name AS name, class AS subtitle, 'character' AS entity_type
+         FROM characters
+        WHERE campaign_id=? AND (character_name LIKE ? OR player_name LIKE ? OR notes LIKE ?)`,
+      [campaignId, q, q, q])
+
+    const encounters = db.all(
+      `SELECT id, name, status AS subtitle, 'encounter' AS entity_type
+         FROM encounters
+        WHERE campaign_id=? AND (name LIKE ? OR notes LIKE ?)`,
+      [campaignId, q, q])
+
+    const maps = db.all(
+      `SELECT id, name, 'map' AS entity_type FROM maps WHERE campaign_id=? AND name LIKE ?`,
       [campaignId, q])
-    return { locations, factions, npcs, lore,
-             total: locations.length + factions.length + npcs.length + lore.length }
+
+    const sessions = db.all(
+      `SELECT id, COALESCE(title, 'Session ' || session_number) AS name,
+              'Session ' || session_number AS subtitle, 'session' AS entity_type
+         FROM sessions
+        WHERE campaign_id=? AND (title LIKE ? OR notes LIKE ? OR recap LIKE ?)
+        ORDER BY session_number DESC`,
+      [campaignId, q, q, q])
+
+    const plots = db.all(
+      `SELECT id, title AS name, status AS subtitle, 'plot' AS entity_type
+         FROM plot_threads
+        WHERE campaign_id=? AND (title LIKE ? OR description LIKE ?)`,
+      [campaignId, q, q])
+
+    // Homebrew items/spells/monsters — everything in compendium_custom that is
+    // not a lore entry, which the old query excluded without saying so.
+    const compendium = db.all(
+      `SELECT id, name, type AS subtitle, 'compendium' AS entity_type
+         FROM compendium_custom
+        WHERE campaign_id=? AND type <> 'lore' AND (name LIKE ? OR data LIKE ?)`,
+      [campaignId, q, q])
+
+    const groups = { locations, factions, npcs, lore, characters, encounters, maps, sessions, plots, compendium }
+    const total = Object.values(groups).reduce((sum, rows) => sum + rows.length, 0)
+    return { ...groups, total }
   })
 
   // Maps — Phase 3
