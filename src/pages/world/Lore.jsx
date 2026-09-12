@@ -5,6 +5,7 @@ import EntityCard from '../../components/world/EntityCard'
 import EntityModal from '../../components/world/EntityModal'
 import Skeleton from '../../components/ui/Skeleton'
 import { notifyError, notifySuccess } from '../../stores/toastStore'
+import RevealToggle from '../../components/world/RevealToggle'
 
 const CATEGORIES = ['History', 'Faction', 'Location', 'Secret', 'Other']
 const EMPTY_FORM  = { name: '', category: 'History', content: '', is_secret: false }
@@ -22,6 +23,9 @@ export default function Lore() {
   const [saving, setSaving]     = useState(false)
   const [error, setError]       = useState('')
   const [filterCat, setFilterCat] = useState('All')
+  // Reveals are stamped with the session in progress, so "what did the party
+  // learn in session 7" answers itself.
+  const [currentSession, setCurrentSession] = useState(null)
 
   const load = useCallback(() => {
     if (!activeCampaign?.id) return
@@ -30,6 +34,13 @@ export default function Lore() {
   }, [activeCampaign?.id])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!activeCampaign?.id) return
+    window.electronAPI.db.sessions.getCurrent(activeCampaign.id)
+      .then(setCurrentSession)
+      .catch(err => notifyError(err, 'Load current session'))
+  }, [activeCampaign?.id])
 
   // ?create=true auto-open
   useEffect(() => {
@@ -151,6 +162,14 @@ export default function Lore() {
                 <p style={{ ...s.preview, ...(isSecret ? s.secretPreview : {}) }}>
                   {preview}{(parsed.content || '').length > 150 ? '…' : ''}
                 </p>
+                <RevealToggle
+                  campaignId={activeCampaign.id}
+                  entityType="lore"
+                  entityId={entry.id}
+                  entityName={entry.name}
+                  isSecret={isSecret}
+                  sessionId={currentSession?.id ?? null}
+                />
                 <button style={s.editBtn} onClick={e => { e.stopPropagation(); openEdit(entry) }}>Edit</button>
               </EntityCard>
             )

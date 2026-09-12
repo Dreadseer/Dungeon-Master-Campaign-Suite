@@ -21,7 +21,7 @@ export default function TopBar({ campaignName, playerName, connected, activeView
       <div style={{ flex: 1 }} />
 
       {/* View toggle */}
-      {['character', 'map'].map(view => (
+      {['character', 'map', 'known'].map(view => (
         <button
           key={view}
           onClick={() => onViewChange(view)}
@@ -30,7 +30,7 @@ export default function TopBar({ campaignName, playerName, connected, activeView
             padding: '4px 12px', borderRadius: '4px', cursor: 'pointer',
             fontSize: '13px', textTransform: 'capitalize' }}
         >
-          {view === 'character' ? '📜 Sheet' : '🗺 Map'}
+          {view === 'character' ? '📜 Sheet' : view === 'map' ? '🗺 Map' : '📖 Known'}
         </button>
       ))}
 

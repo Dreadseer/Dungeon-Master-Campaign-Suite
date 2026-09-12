@@ -6,6 +6,7 @@ import MapView             from './components/MapView'
 import TopBar              from './components/TopBar'
 import SessionNotesOverlay from './components/SessionNotesOverlay'
 import { apiFetch, setToken } from './api'
+import KnownLore           from './components/KnownLore'
 
 export default function PlayerWebApp() {
   const [session,      setSession]   = useState(null)
@@ -132,6 +133,7 @@ export default function PlayerWebApp() {
           />
         )}
         {activeView === 'map' && <MapView map={activeMap} />}
+        {activeView === 'known' && <KnownLore campaignId={session.campaignId} />}
       </div>
       <SessionNotesOverlay notes={sessionNotes} />
     </div>

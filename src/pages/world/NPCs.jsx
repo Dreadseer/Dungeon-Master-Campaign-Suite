@@ -5,6 +5,7 @@ import NPCModal from '../../components/world/NPCModal'
 import NPCQuickView from '../../components/world/NPCQuickView'
 import Skeleton from '../../components/ui/Skeleton'
 import { notifyError, notifySuccess } from '../../stores/toastStore'
+import RevealToggle from '../../components/world/RevealToggle'
 
 export default function NPCs() {
   const activeCampaign = useCampaignStore(s => s.activeCampaign)
@@ -36,6 +37,15 @@ export default function NPCs() {
   }, [activeCampaign?.id])
 
   useEffect(() => { load() }, [load])
+
+  // Reveals are stamped with the session in progress.
+  const [currentSession, setCurrentSession] = useState(null)
+  useEffect(() => {
+    if (!activeCampaign?.id) return
+    window.electronAPI.db.sessions.getCurrent(activeCampaign.id)
+      .then(setCurrentSession)
+      .catch(err => notifyError(err, 'Load current session'))
+  }, [activeCampaign?.id])
 
   const activeFilterCount = [
     search !== '',
@@ -183,6 +193,14 @@ export default function NPCs() {
                 onDelete={() => handleDelete(npc)}
                 accentColor={npc.is_alive ? '#c9a84c' : '#6a3030'}
               >
+                <RevealToggle
+                  campaignId={activeCampaign.id}
+                  entityType="npc"
+                  entityId={npc.id}
+                  entityName={npc.name}
+                  isSecret={false}
+                  sessionId={currentSession?.id ?? null}
+                />
                 <div style={s.cardActions}>
                   <button style={s.actionBtn} onClick={e => handleToggleAlive(npc, e)}>
                     {npc.is_alive ? 'Mark Dead' : 'Mark Alive'}

@@ -5,6 +5,7 @@ import EntityCard from '../../components/world/EntityCard'
 import EntityModal from '../../components/world/EntityModal'
 import Skeleton from '../../components/ui/Skeleton'
 import { notifyError, notifySuccess } from '../../stores/toastStore'
+import RevealToggle from '../../components/world/RevealToggle'
 
 const ALIGNMENTS = [
   'Lawful Good', 'Neutral Good', 'Chaotic Good',
@@ -32,6 +33,15 @@ export default function Factions() {
   }, [activeCampaign?.id])
 
   useEffect(() => { load() }, [load])
+
+  // Reveals are stamped with the session in progress.
+  const [currentSession, setCurrentSession] = useState(null)
+  useEffect(() => {
+    if (!activeCampaign?.id) return
+    window.electronAPI.db.sessions.getCurrent(activeCampaign.id)
+      .then(setCurrentSession)
+      .catch(err => notifyError(err, 'Load current session'))
+  }, [activeCampaign?.id])
 
   // ?create=true auto-opens the modal
   useEffect(() => {
@@ -116,7 +126,16 @@ export default function Factions() {
               onClick={() => openEdit(f)}
               onDelete={() => handleDelete(f)}
               accentColor="#8a5a9a"
-            />
+            >
+              <RevealToggle
+                campaignId={activeCampaign.id}
+                entityType="faction"
+                entityId={f.id}
+                entityName={f.name}
+                isSecret={false}
+                sessionId={currentSession?.id ?? null}
+              />
+            </EntityCard>
           ))}
         </div>
       )}

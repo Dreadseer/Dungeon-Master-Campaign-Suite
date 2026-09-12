@@ -218,6 +218,23 @@ class PlayerServer {
       }
     })
 
+    // What the party knows — the reveals table, resolved to readable summaries.
+    //
+    // Token-scoped like every other route (Phase 2). This is the ONLY route that
+    // exposes lore/NPC/location prose to players, and it exposes exactly the rows
+    // the DM has explicitly revealed: nothing is inferred, and `is_secret` is
+    // irrelevant here because revealing something already required a confirmation
+    // on the DM side.
+    this.app.get('/api/campaign/:id/revealed', (req, res) => {
+      try {
+        if (!this._ownsCampaign(req, req.params.id)) return this._denyNotFound(res)
+        res.json(this._revealedForCampaign(Number(req.params.id)))
+      } catch (err) {
+        console.error('[PlayerServer] GET /api/campaign/:id/revealed', err)
+        res.status(500).json({ error: err.message })
+      }
+    })
+
     this.app.get('/api/map/:id', (req, res) => {
       try {
         const map = this.db.get('SELECT * FROM maps WHERE id=?', [req.params.id])
@@ -303,6 +320,77 @@ class PlayerServer {
       console.error('[PlayerServer] Unhandled error:', err)
       res.status(500).json({ error: err.message ?? 'Internal server error' })
     })
+  }
+
+  // Resolve `reveals` rows into player-safe summaries.
+  //
+  // Only player-facing fields are selected, per type. An NPC's `secrets` and
+  // `motivation` columns are deliberately absent: revealing an NPC means the
+  // party has met them, not that they have read the DM's notes. Same for a
+  // location's `lore` and a lore entry's DM-only metadata.
+  _revealedForCampaign(campaignId) {
+    const rows = this.db.all(
+      `SELECT entity_type, entity_id, revealed_at FROM reveals
+        WHERE campaign_id = ? ORDER BY revealed_at DESC`,
+      [campaignId])
+
+    const items = []
+    for (const row of rows) {
+      const item = this._resolveRevealed(row, campaignId)
+      if (item) items.push(item)
+    }
+    return { items, count: items.length }
+  }
+
+  _resolveRevealed(row, campaignId) {
+    const base = { type: row.entity_type, id: row.entity_id, revealed_at: row.revealed_at }
+
+    switch (row.entity_type) {
+      case 'npc': {
+        // race/class/role only. `notes`, `secrets` and `motivation` stay with the DM.
+        const npc = this.db.get(
+          'SELECT id, campaign_id, name, race, class, role, is_alive FROM npcs WHERE id = ?',
+          [row.entity_id])
+        if (!npc || Number(npc.campaign_id) !== Number(campaignId)) return null
+        return {
+          ...base,
+          name: npc.name,
+          summary: [npc.race, npc.class, npc.role].filter(Boolean).join(' · ') || null,
+        }
+      }
+      case 'location': {
+        // `description` is the public-facing text; `lore` is the DM's.
+        const loc = this.db.get(
+          'SELECT id, campaign_id, name, type, description FROM locations WHERE id = ?',
+          [row.entity_id])
+        if (!loc || Number(loc.campaign_id) !== Number(campaignId)) return null
+        return { ...base, name: loc.name, subtitle: loc.type, summary: loc.description ?? null }
+      }
+      case 'faction': {
+        const faction = this.db.get(
+          'SELECT id, campaign_id, name, alignment, description FROM factions WHERE id = ?',
+          [row.entity_id])
+        if (!faction || Number(faction.campaign_id) !== Number(campaignId)) return null
+        return { ...base, name: faction.name, subtitle: faction.alignment, summary: faction.description ?? null }
+      }
+      case 'lore': {
+        const entry = this.db.get(
+          "SELECT id, campaign_id, name, data FROM compendium_custom WHERE id = ? AND type = 'lore'",
+          [row.entity_id])
+        if (!entry || Number(entry.campaign_id) !== Number(campaignId)) return null
+        let content = null, category = null
+        try {
+          const parsed = JSON.parse(entry.data ?? '{}')
+          content = parsed.content ?? null
+          category = parsed.category ?? null
+        } catch { /* malformed blob — the title alone is still worth showing */ }
+        return { ...base, name: entry.name, subtitle: category, summary: content }
+      }
+      default:
+        // An unknown entity_type is a row this server version does not
+        // understand. Skipping beats guessing what is safe to send.
+        return null
+    }
   }
 
   // ── WEBSOCKET EVENTS ────────────────────────────────────────

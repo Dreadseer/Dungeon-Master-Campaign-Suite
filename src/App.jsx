@@ -26,6 +26,8 @@ import Locations   from './pages/world/Locations'
 import NPCs        from './pages/world/NPCs'
 import Lore        from './pages/world/Lore'
 import Connections from './pages/world/Connections'
+import Sessions    from './pages/world/Sessions'
+import PlotThreads from './pages/world/PlotThreads'
 
 function Guarded({ children }) {
   return <CampaignGuard>{children}</CampaignGuard>
@@ -70,6 +72,8 @@ function AppContent() {
             <Route path="/world/npcs"         element={<Guarded><NPCs /></Guarded>} />
             <Route path="/world/lore"         element={<Guarded><Lore /></Guarded>} />
             <Route path="/world/connections"  element={<Guarded><Connections /></Guarded>} />
+            <Route path="/world/sessions"     element={<Guarded><Sessions /></Guarded>} />
+            <Route path="/world/plots"        element={<Guarded><PlotThreads /></Guarded>} />
 
             <Route path="/mindmap"    element={<Guarded><MindMap /></Guarded>} />
             <Route path="/maps"       element={<Guarded><MapEngine /></Guarded>} />

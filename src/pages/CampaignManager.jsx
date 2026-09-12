@@ -26,18 +26,63 @@ export default function CampaignManager() {
     }
   }, []) // eslint-disable-line
 
-  // Load stats when active campaign changes
+  // Load stats and the session in progress when the active campaign changes.
+  //
+  // The notes textarea used to write to campaigns.description, which meant every
+  // session overwrote the last one's notes. It now edits the CURRENT SESSION's
+  // notes (Phase 4). campaigns.description goes back to being a description of
+  // the campaign, which is what the column was named for; migration 011 copied
+  // any existing notes into a first session rather than moving them, so nothing
+  // written before this change is lost.
+  const loadSession = useCallback(async () => {
+    if (!activeCampaign?.id) return
+    try {
+      const session = await window.electronAPI.db.sessions.getCurrent(activeCampaign.id)
+      setCurrentSession(session ?? null)
+      setNotes(session?.notes ?? '')
+    } catch (err) {
+      notifyError(err, 'Load current session')
+    }
+  }, [activeCampaign?.id])
+
   useEffect(() => {
     if (!activeCampaign?.id) return
-    setNotes(activeCampaign.description || '')
+    loadSession()
     Promise.all([
       window.electronAPI.db.npcs.getAll(activeCampaign.id),
       window.electronAPI.db.locations.getAll(activeCampaign.id),
-    ]).then(([npcs, locations]) => {
+      window.electronAPI.db.encounters.getAll(activeCampaign.id),
+      window.electronAPI.db.characters.getAll(activeCampaign.id),
+    ]).then(([npcs, locations, encounters, characters]) => {
       const alive = npcs.filter(n => n.is_alive).length
-      setStats({ npcsAlive: alive, npcsDead: npcs.length - alive, locations: locations.length, encounters: 0, characters: 0 })
-    })
-  }, [activeCampaign?.id]) // eslint-disable-line
+      setStats({
+        npcsAlive: alive, npcsDead: npcs.length - alive,
+        locations: locations.length, encounters: encounters.length, characters: characters.length,
+      })
+    }).catch(err => notifyError(err, 'Load campaign stats'))
+  }, [activeCampaign?.id, loadSession]) // eslint-disable-line
+
+  const [currentSession, setCurrentSession] = useState(null)
+  const [notesSaveState, setNotesSaveState] = useState('idle')
+  const [startingSession, setStartingSession] = useState(false)
+
+  async function handleStartSession() {
+    if (!activeCampaign?.id) return
+    setStartingSession(true)
+    try {
+      const { session_number } = await window.electronAPI.db.sessions.create({
+        campaign_id: activeCampaign.id,
+        played_on: new Date().toISOString().slice(0, 10),
+      })
+      notifySuccess(`Session ${session_number} started. Notes below are now its own.`)
+      await loadSession()
+      await loadCampaigns()
+    } catch (err) {
+      notifyError(err, 'Start session')
+    } finally {
+      setStartingSession(false)
+    }
+  }
 
   async function handleDelete(id) {
     if (!window.confirm('Delete this campaign? This cannot be undone.')) return
@@ -55,16 +100,41 @@ export default function CampaignManager() {
 
   async function handleNotesBlur() {
     if (!activeCampaign) return
+
+    // No session yet: start one rather than dropping what was just typed. A DM
+    // who opens a fresh campaign and writes into the notes box means those
+    // words to be kept.
+    if (!currentSession) {
+      if (!notes.trim()) return
+      setNotesSaveState('saving')
+      try {
+        const { lastInsertRowid } = await window.electronAPI.db.sessions.create({
+          campaign_id: activeCampaign.id,
+          played_on: new Date().toISOString().slice(0, 10),
+          notes,
+        })
+        setNotesSaveState('saved')
+        setTimeout(() => setNotesSaveState('idle'), 2000)
+        await loadSession()
+        await loadCampaigns()
+        return lastInsertRowid
+      } catch (err) {
+        setNotesSaveState('error')
+        notifyError(err, 'Save session notes')
+      }
+      return
+    }
+
+    if (notes === (currentSession.notes ?? '')) return
+    setNotesSaveState('saving')
     try {
-      await window.electronAPI.db.campaigns.update(activeCampaign.id, {
-        name: activeCampaign.name,
-        description: notes,
-        world_setting: activeCampaign.world_setting,
-      })
+      await window.electronAPI.db.sessions.updateNotes(currentSession.id, notes)
+      setCurrentSession(prev => (prev ? { ...prev, notes } : prev))
+      setNotesSaveState('saved')
+      setTimeout(() => setNotesSaveState('idle'), 2000)
     } catch (err) {
-      // Silent until now, and the worst kind: the DM types session notes, tabs
-      // away, and only finds out they were never saved on the next launch.
-      notifyError(err, 'Save campaign notes')
+      setNotesSaveState('error')
+      notifyError(err, 'Save session notes')
     }
   }
 
@@ -72,6 +142,10 @@ export default function CampaignManager() {
     return <ViewB
       campaign={activeCampaign}
       stats={stats}
+      currentSession={currentSession}
+      notesSaveState={notesSaveState}
+      startingSession={startingSession}
+      onStartSession={handleStartSession}
       notes={notes}
       onNotesChange={setNotes}
       onNotesBlur={handleNotesBlur}
@@ -128,7 +202,10 @@ function CampaignCard({ campaign, onLoad, onDelete }) {
       <h2 style={s.cardTitle}>{campaign.name}</h2>
       {campaign.world_setting && <p style={s.cardSetting}>{campaign.world_setting}</p>}
       {campaign.description   && <p style={s.cardDesc}>{campaign.description}</p>}
-      <p style={s.cardMeta}>{campaign.session_count} sessions · Created {date}</p>
+      {/* session_count is true as of Phase 4 — it was read and never written before. */}
+      <p style={s.cardMeta}>
+        {campaign.session_count ?? 0} session{(campaign.session_count ?? 0) !== 1 ? 's' : ''} · Created {date}
+      </p>
       <div style={s.cardActions}>
         <button style={s.btnPrimary} onClick={() => onLoad(campaign)}>Load Campaign</button>
         <button style={s.btnDanger}  onClick={() => onDelete(campaign.id)}>Delete</button>
@@ -189,7 +266,8 @@ function NewCampaignModal({ onClose, onCreated, onLoad }) {
 
 // ─── View B: Active Campaign Dashboard ───────────────────────────────────
 
-function ViewB({ campaign, stats, notes, onNotesChange, onNotesBlur, onSwitch, navigate }) {
+function ViewB({ campaign, stats, notes, onNotesChange, onNotesBlur, onSwitch, navigate,
+                 currentSession, notesSaveState, startingSession, onStartSession }) {
   return (
     <div style={s.page}>
       <div style={s.header}>
@@ -208,7 +286,31 @@ function ViewB({ campaign, stats, notes, onNotesChange, onNotesBlur, onSwitch, n
       </div>
 
       <div style={s.section}>
-        <label style={s.label}>Session Notes</label>
+        <div style={s.notesHead}>
+          <label style={s.label}>
+            {currentSession
+              ? `Session ${currentSession.session_number} notes`
+              : 'Session notes'}
+          </label>
+          <span style={s.notesSaveState}>
+            {notesSaveState === 'saving' && 'Saving…'}
+            {notesSaveState === 'saved'  && <span style={{ color: '#5ba85b' }}>✓ Saved</span>}
+            {notesSaveState === 'error'  && <span style={{ color: '#e05050' }}>Not saved</span>}
+          </span>
+          <button
+            style={startingSession ? s.btnNewSessionDisabled : s.btnNewSession}
+            onClick={onStartSession}
+            disabled={startingSession}
+            title="Start a new session. The current notes stay with the session they belong to."
+          >
+            {startingSession ? 'Starting…' : '+ New session'}
+          </button>
+        </div>
+        {!currentSession && (
+          <p style={s.notesHint}>
+            No session started yet — typing here starts session 1.
+          </p>
+        )}
         <textarea
           style={{ ...s.input, height: 160, resize: 'vertical', width: '100%' }}
           value={notes}
@@ -243,6 +345,11 @@ function StatCard({ label, value, sub }) {
 // ─── Styles ───────────────────────────────────────────────────────────────
 
 const s = {
+  notesHead:      { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 },
+  notesSaveState: { color: '#6b5a3a', fontSize: '0.75rem', marginLeft: 'auto' },
+  notesHint:      { color: '#4a3f28', fontSize: '0.75rem', margin: '0 0 6px' },
+  btnNewSession:  { background: 'none', border: '1px solid #3a2a10', color: '#c9a84c', borderRadius: 4, padding: '3px 10px', fontSize: '0.75rem', cursor: 'pointer' },
+  btnNewSessionDisabled: { background: 'none', border: '1px solid #241a08', color: '#4a3f28', borderRadius: 4, padding: '3px 10px', fontSize: '0.75rem', cursor: 'not-allowed' },
   page:         { padding: '2rem', maxWidth: 900 },
   header:       { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' },
   title:        { color: '#c9a84c', fontSize: '1.8rem', margin: 0 },

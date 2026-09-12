@@ -16,6 +16,8 @@ const navSections = [
       { to: '/world/locations',    label: 'Locations',    sub: true },
       { to: '/world/lore',        label: 'Lore',          sub: true },
       { to: '/world/connections', label: 'Connections',   sub: true },
+      { to: '/world/sessions',   label: 'Sessions',      sub: true },
+      { to: '/world/plots',      label: 'Plot Threads',  sub: true },
       { to: '/mindmap',          label: 'Mind Map' },
     ],
   },

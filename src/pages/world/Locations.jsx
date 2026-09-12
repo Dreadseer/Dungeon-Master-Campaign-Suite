@@ -6,6 +6,7 @@ import EntityModal from '../../components/world/EntityModal'
 import Skeleton from '../../components/ui/Skeleton'
 import { findParentCycle } from '../../utils/locationUtils'
 import { notifyError, notifySuccess } from '../../stores/toastStore'
+import RevealToggle from '../../components/world/RevealToggle'
 
 const TYPES = ['town', 'dungeon', 'shop', 'region', 'landmark']
 const TABS  = ['All', ...TYPES]
@@ -36,6 +37,15 @@ export default function Locations() {
   }, [activeCampaign?.id])
 
   useEffect(() => { load() }, [load])
+
+  // Reveals are stamped with the session in progress.
+  const [currentSession, setCurrentSession] = useState(null)
+  useEffect(() => {
+    if (!activeCampaign?.id) return
+    window.electronAPI.db.sessions.getCurrent(activeCampaign.id)
+      .then(setCurrentSession)
+      .catch(err => notifyError(err, 'Load current session'))
+  }, [activeCampaign?.id])
 
   useEffect(() => {
     if (searchParams.get('create') === 'true') {
@@ -213,6 +223,14 @@ export default function Locations() {
                 onDelete={() => handleDelete(loc)}
                 accentColor="#6a8abf"
               >
+                <RevealToggle
+                  campaignId={activeCampaign.id}
+                  entityType="location"
+                  entityId={loc.id}
+                  entityName={loc.name}
+                  isSecret={false}
+                  sessionId={currentSession?.id ?? null}
+                />
                 {loc.parent_location_id && loc.parent_name && (
                   <div style={s.breadcrumb}>
                     <button style={s.breadcrumbBtn} onClick={(e) => openParent(loc.parent_location_id, e)}>

@@ -73,6 +73,34 @@ const CHARACTERS = [
     inventory: '[]', spell_slots: '{}', subclass_name: null },
 ]
 
+// Phase 4: reveals, and the rows they resolve to.
+const NPCS = [
+  { id: 30, campaign_id: 3, name: 'Gellan Primewater', race: 'Human', class: null, role: 'Council member',
+    is_alive: 1, notes: 'DM ONLY: skimming the harbour tax',
+    secrets: 'DM ONLY: funds the Sea Ghosts', motivation: 'DM ONLY: greed' },
+  { id: 31, campaign_id: 4, name: 'Someone Else NPC', race: 'Elf', role: 'Spy', is_alive: 1 },
+]
+const LOCATIONS = [
+  { id: 40, campaign_id: 3, name: 'The Snapping Line', type: 'shop',
+    description: 'A tackle shop on the north quay.', lore: 'DM ONLY: trapdoor to the smugglers tunnel' },
+]
+const FACTIONS = [
+  { id: 50, campaign_id: 3, name: 'The Sea Ghosts', alignment: 'Chaotic Evil', description: 'Smugglers.' },
+]
+const LORE = [
+  { id: 60, campaign_id: 3, name: 'The Wreck of the Emperor', type: 'lore',
+    data: JSON.stringify({ content: 'A galleon lost in the shoals sixty years ago.', category: 'History', is_secret: true }) },
+]
+const REVEALS = [
+  { entity_type: 'npc', entity_id: 30, campaign_id: 3, revealed_at: '2026-09-12 20:00:00' },
+  { entity_type: 'location', entity_id: 40, campaign_id: 3, revealed_at: '2026-09-12 20:05:00' },
+  { entity_type: 'lore', entity_id: 60, campaign_id: 3, revealed_at: '2026-09-12 20:10:00' },
+  // Belongs to campaign 4 — must never reach a campaign-3 token.
+  { entity_type: 'npc', entity_id: 31, campaign_id: 4, revealed_at: '2026-09-12 20:15:00' },
+  // An entity_type this server version does not know about.
+  { entity_type: 'artifact', entity_id: 70, campaign_id: 3, revealed_at: '2026-09-12 20:20:00' },
+]
+
 // Minimal stand-in for DatabaseService. Only the two methods PlayerServer uses.
 const db = {
   get(sql, params = []) {
@@ -80,9 +108,16 @@ const db = {
     if (/FROM campaigns/i.test(sql)) return CAMPAIGNS.find(c => c.id === id) ?? undefined
     if (/FROM maps/i.test(sql)) return MAPS.find(m => m.id === id) ?? undefined
     if (/FROM characters/i.test(sql)) return CHARACTERS.find(c => c.id === id) ?? undefined
+    if (/FROM npcs/i.test(sql)) return NPCS.find(n => n.id === id) ?? undefined
+    if (/FROM locations/i.test(sql)) return LOCATIONS.find(l => l.id === id) ?? undefined
+    if (/FROM factions/i.test(sql)) return FACTIONS.find(f => f.id === id) ?? undefined
+    if (/FROM compendium_custom/i.test(sql)) return LORE.find(l => l.id === id) ?? undefined
     return undefined
   },
   all(sql, params = []) {
+    if (/FROM reveals/i.test(sql)) {
+      return REVEALS.filter(r => r.campaign_id === Number(params[0]))
+    }
     if (/FROM characters/i.test(sql)) {
       return CHARACTERS.filter(c => c.campaign_id === Number(params[0]))
     }
@@ -243,6 +278,44 @@ try {
   check('an unrelated broadcast type passes through untouched',
     emitted.payload.text === 'The door creaks open.')
   server.io.to = realTo
+
+  // ── H. What the party knows (Phase 4) ──────────────────────────────────────
+  console.log('\nH. /api/campaign/:id/revealed\n')
+
+  check('the revealed route needs a token',
+    (await get('/api/campaign/3/revealed')).status === 401)
+  check("a token for another campaign cannot read it",
+    (await get('/api/campaign/4/revealed', { token })).status === 404)
+
+  const revealedRes = await get('/api/campaign/3/revealed', { token })
+  check('with the right token it returns 200', revealedRes.status === 200)
+  const revealed = await revealedRes.json()
+  const raw = JSON.stringify(revealed)
+
+  check('  it returns the three resolvable reveals for this campaign',
+    revealed.count === 3, `got ${revealed.count}`)
+  check('  the revealed NPC is named', revealed.items.some(i => i.name === 'Gellan Primewater'))
+  check('  the revealed location carries its public description',
+    revealed.items.some(i => i.summary === 'A tackle shop on the north quay.'))
+  check('  the revealed lore carries its body text',
+    revealed.items.some(i => i.summary?.startsWith('A galleon lost in the shoals')))
+
+  // The whole point: revealing an NPC means the party has MET them, not that
+  // they have read the DM's notes.
+  check("  the NPC's secrets do NOT leak", !raw.includes('funds the Sea Ghosts'))
+  check("  the NPC's motivation does NOT leak", !raw.includes('DM ONLY: greed'))
+  check("  the NPC's private notes do NOT leak", !raw.includes('skimming the harbour tax'))
+  check("  the location's DM-only lore does NOT leak", !raw.includes('trapdoor to the smugglers tunnel'))
+  check('  no field named secrets, motivation or lore appears at all',
+    !/"(secrets|motivation|lore)"\s*:/.test(raw))
+
+  check("  another campaign's reveal is not included",
+    !raw.includes('Someone Else NPC'))
+  check('  an unknown entity_type is skipped rather than guessed at',
+    !revealed.items.some(i => i.type === 'artifact'))
+
+  check('  an unrevealed faction does not appear',
+    !raw.includes('The Sea Ghosts') || !revealed.items.some(i => i.type === 'faction'))
 
   // ── G. Tokens die with the server ──────────────────────────────────────────
   console.log('\nG. Session lifetime\n')
