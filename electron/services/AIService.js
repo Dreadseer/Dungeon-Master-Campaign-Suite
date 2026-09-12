@@ -42,8 +42,46 @@ class AIService {
     return global.ragSettings?.ollamaModel || this.ollamaModel
   }
 
+  // A failed call is recorded with response_len = FAILED_RESPONSE_LEN.
+  //
+  // ai_usage_log has no status column and adding one would mean a migration for
+  // a diagnostic table, so an existing column carries the flag instead: a
+  // response of negative length is not a real measurement, which makes it an
+  // unambiguous sentinel. getUsageStats counts rows below zero as failures.
+  static get FAILED_RESPONSE_LEN() { return -1 }
+
   async complete(systemPrompt, userMessage, options = {}) {
     const start = Date.now()
+    let result
+
+    try {
+      result = await this._complete(systemPrompt, userMessage, options)
+    } catch (err) {
+      // Log the failure, then rethrow — the caller still needs to know.
+      // Without this, a DM whose key had expired or whose Ollama had stopped saw
+      // usage stats claiming everything was fine.
+      this._logUsage(options, systemPrompt, userMessage, AIService.FAILED_RESPONSE_LEN, start)
+      throw err
+    }
+
+    this._logUsage(options, systemPrompt, userMessage, result.length, start)
+    return result
+  }
+
+  _logUsage(options, systemPrompt, userMessage, responseLen, start) {
+    // Non-critical: logging must never turn a working call into a failed one.
+    try {
+      if (global.db) {
+        global.db.run(
+          'INSERT INTO ai_usage_log (campaign_id, mode, type, prompt_len, response_len, duration_ms) VALUES (?,?,?,?,?,?)',
+          [options.campaignId ?? null, this.mode, options.type ?? 'chat',
+           (systemPrompt + userMessage).length, responseLen, Date.now() - start]
+        )
+      }
+    } catch { /* logging is non-critical */ }
+  }
+
+  async _complete(systemPrompt, userMessage, options = {}) {
     let result
 
     if (this.mode === 'online') {
@@ -82,18 +120,7 @@ class AIService {
       throw new Error('No AI service available. Please configure an API key or install Ollama.')
     }
 
-    // Non-critical: log usage without blocking the response
-    try {
-      if (global.db) {
-        global.db.run(
-          'INSERT INTO ai_usage_log (campaign_id, mode, type, prompt_len, response_len, duration_ms) VALUES (?,?,?,?,?,?)',
-          [options.campaignId ?? null, this.mode, options.type ?? 'chat',
-           (systemPrompt + userMessage).length, result.length, Date.now() - start]
-        )
-      }
-    } catch { /* logging is non-critical */ }
-
-    return result
+    return result ?? ''
   }
 
   // Streaming completion — fires onChunk(text) for each token, onDone() when finished.

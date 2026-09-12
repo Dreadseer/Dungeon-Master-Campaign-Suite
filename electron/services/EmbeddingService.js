@@ -114,25 +114,61 @@ class EmbeddingService {
   }
 
   // Semantic search: find the top-k most similar chunks to a query string.
-  // Falls back to SQLite full-text search when the vectra index is empty
-  // (e.g. books were processed before CPU-only mode was enabled).
+  //
+  // Three ways this can end up on the keyword branch, and all three are normal:
+  //   - Ollama is not running, so no query vector can be produced;
+  //   - the vectra index is empty (nothing embedded yet);
+  //   - the vector search returns nothing useful.
+  //
+  // The result array carries a `degraded` property in the keyword case so the UI
+  // can say "keyword search — Ollama not running" instead of quietly returning
+  // worse answers. It is set on the array rather than wrapping the return value
+  // because every existing caller treats the result as an array.
   async search(queryText, topK = 5, itemName = null, sourceId = null) {
     await this.ensureIndex()
-    const queryVector = await this.embed(queryText)
-    const results     = await this.index.queryItems(queryVector, topK)
 
-    if (results.length > 0) {
-      const hits = results.map(r => ({
-        score:       r.score,
-        chunk_id:    r.item.metadata.chunk_id,
-        source_id:   r.item.metadata.source_id,
-        page_number: r.item.metadata.page_number,
-        text:        r.item.metadata.text,
-      }))
-      return this._expandContiguous(hits)
+    // Ollama is optional at query time. Before this, a DM who had not installed
+    // it — or had simply not started it — got an unhandled exception from the
+    // fetch inside embed() and the Ask button appeared to do nothing.
+    let queryVector = null
+    let degradedReason = null
+    try {
+      queryVector = await this.embed(queryText)
+    } catch (err) {
+      degradedReason = /not installed|not found/i.test(err.message)
+        ? 'embedding-model-missing'
+        : 'ollama-unavailable'
+      console.warn('[EmbeddingService] semantic search unavailable, using keyword search:', err.message)
     }
 
-    // Vectra index empty — fall back to SQLite keyword search.
+    if (queryVector) {
+      // vectra 0.15's signature is queryItems(vector, query, topK, filter, isBm25).
+      // This used to be called as queryItems(vector, topK), which put topK in the
+      // `query` slot and left topK undefined — and `Math.min(undefined, n)` is
+      // NaN, so the internal top-k heap never accepted a single item and the call
+      // returned [] every time. Semantic search had never actually run; every
+      // query in the app's history has quietly used the keyword branch below.
+      //
+      // Over-fetch here: RAGService filters the results by allowed source_id
+      // afterwards, and filtering a topK-sized list can leave almost nothing.
+      const overFetch = Math.max(topK * 4, 20)
+      const results = await this.index.queryItems(queryVector, queryText, overFetch)
+
+      if (results.length > 0) {
+        const hits = results.slice(0, overFetch).map(r => ({
+          score:       r.score,
+          chunk_id:    r.item.metadata.chunk_id,
+          source_id:   r.item.metadata.source_id,
+          page_number: r.item.metadata.page_number,
+          text:        r.item.metadata.text,
+        }))
+        const expanded = this._expandContiguous(hits)
+        expanded.degraded = false
+        return expanded
+      }
+    }
+
+    // Fall back to SQLite keyword search.
     //
     // We use an AND-combination of individual keywords rather than a consecutive
     // phrase match. This is robust against newlines and formatting in PDF text
@@ -146,7 +182,7 @@ class EmbeddingService {
     const keywords   = nameSource.trim().split(/\s+/)
       .filter(w => w.length > 2 && !STOP.has(w.toLowerCase()))
 
-    if (!keywords.length) return []
+    if (!keywords.length) return this._degraded([], degradedReason)
 
     // Build: WHERE [source_id=?] AND norm LIKE '%word1%' AND norm LIKE '%word2%' ...
     const norm       = `REPLACE(REPLACE(REPLACE(text, char(10), ' '), char(13), ' '), '  ', ' ')`
@@ -173,7 +209,7 @@ class EmbeddingService {
       )
     }
 
-    if (!rows.length) return []
+    if (!rows.length) return this._degraded([], degradedReason)
 
     // Score: each keyword occurrence counts, title-position bonus for entries
     // where the name appears in the first 120 chars of the chunk.
@@ -198,7 +234,16 @@ class EmbeddingService {
       .sort((a, b) => b.score - a.score)
       .slice(0, Math.ceil(topK / 2))
 
-    return this._expandContiguous(ranked)
+    return this._degraded(this._expandContiguous(ranked), degradedReason)
+  }
+
+  // Tag a result array as keyword-only. `degraded` is true whenever the caller
+  // did not get vector search, whether because Ollama was unreachable or because
+  // nothing has been embedded yet — the UI wants to say something either way.
+  _degraded(results, reason) {
+    results.degraded = true
+    results.degradedReason = reason ?? 'no-vectors'
+    return results
   }
 
   // A multi-page entry (e.g. a subclass with several features, or a monster

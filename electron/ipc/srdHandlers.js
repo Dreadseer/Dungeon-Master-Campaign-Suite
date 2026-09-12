@@ -2,9 +2,78 @@ const { registerHandler } = require('./registerHandler')
 
 function registerSrdHandlers(db, srdService) {
   registerHandler('srd:seedAll', async (event) => {
-    return srdService.seedAll((percent, message) => {
+    const result = await srdService.seedAll((percent, message) => {
       event.sender.send('srd:progress', { percent, message })
     })
+
+    // Build the rules-Q&A index straight after the first seed, so a DM who has
+    // just set the app up can ask a rules question without knowing an indexing
+    // step exists. Chunking is local and fast; embedding needs Ollama and is
+    // attempted only if it is actually reachable.
+    try {
+      const status = srdService.getIndexStatus()
+      if (status.status === 'not-indexed') {
+        event.sender.send('srd:progress', { percent: 100, message: 'Indexing SRD for rules Q&A…' })
+        const { sourceId } = srdService.buildSrdIndex()
+
+        const embedStatus = global.embeddingService
+          ? await global.embeddingService.getStatus()
+          : null
+        if (embedStatus?.available && embedStatus?.hasModel) {
+          await global.embeddingService.embedSource(sourceId, (percent, message) => {
+            event.sender.send('srd:indexProgress', { percent, message })
+          })
+        }
+      }
+    } catch (err) {
+      // Never fail the seed because indexing failed — the compendium still works.
+      console.error('[srd:seedAll] auto-index failed:', err.message)
+      event.sender.send('srd:indexProgress', { percent: 100, message: `Indexing skipped: ${err.message}` })
+    }
+
+    return result
+  })
+
+  // ── Rules-Q&A index (Phase 3) ────────────────────────────────────────────
+  registerHandler('srd:getIndexStatus', () => srdService.getIndexStatus())
+
+  // Build the chunk rows. Local and fast; no Ollama needed. On its own this
+  // already makes rules Q&A work by keyword search.
+  registerHandler('srd:buildIndex', async (event) => {
+    return srdService.buildSrdIndex((percent, message) => {
+      event.sender.send('srd:indexProgress', { percent, message })
+    })
+  })
+
+  // Embed the chunks for semantic search. Needs Ollama; reports why if absent.
+  registerHandler('srd:embedIndex', async (event) => {
+    const status = srdService.getIndexStatus()
+    if (!status.sourceId) throw new Error('Build the SRD index first.')
+
+    const embedStatus = await global.embeddingService.getStatus()
+    if (!embedStatus.available) {
+      throw new Error('Ollama is not running. Rules Q&A still works by keyword search without it.')
+    }
+    if (!embedStatus.hasModel) {
+      throw new Error('The nomic-embed-text model is not installed. Run: ollama pull nomic-embed-text')
+    }
+
+    return global.embeddingService.embedSource(status.sourceId, (percent, message) => {
+      event.sender.send('srd:indexProgress', { percent, message })
+    })
+  })
+
+  registerHandler('srd:clearIndex', async () => {
+    const status = srdService.getIndexStatus()
+    if (status.sourceId) {
+      // Drop the vectors first, while the chunk rows they key off still exist.
+      try {
+        await global.embeddingService?.deleteSource(status.sourceId)
+      } catch (err) {
+        console.error('[srd:clearIndex] could not drop vectors:', err.message)
+      }
+    }
+    return srdService.clearSrdIndex()
   })
 
   // ── Monster handlers ─────────────────────────────────────────────────

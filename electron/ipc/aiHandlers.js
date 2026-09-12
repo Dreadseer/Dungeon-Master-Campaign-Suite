@@ -30,21 +30,37 @@ function registerAiHandlers(aiService, keyService) {
     return global.ragService.query(question, campaignId, options)
   })
 
+  // Situation mode — decompose into rules concepts, retrieve per concept, rule
+  // over the union. AI required; the renderer hides the toggle in no-ai mode.
+  registerHandler('ai:ragSituation', async (_, situation, campaignId, options) => {
+    return global.ragService.situationQuery(situation, campaignId, options)
+  })
+
   // AI usage stats — aggregate counts and timings from ai_usage_log
   registerHandler('ai:getUsageStats', (_, campaignId) => {
     const filter = campaignId ? 'WHERE campaign_id = ?' : ''
     const params = campaignId ? [campaignId] : []
+    // response_len < 0 is the failure sentinel written by AIService._logUsage.
+    // Averages are taken over successful calls only — a call that threw after
+    // 200ms is not evidence that the model is fast.
     const rows = global.db.all(
-      `SELECT type, COUNT(*) AS count, AVG(duration_ms) AS avg_ms
+      `SELECT type,
+              COUNT(*) AS count,
+              SUM(CASE WHEN response_len < 0 THEN 1 ELSE 0 END) AS failures,
+              AVG(CASE WHEN response_len >= 0 THEN duration_ms END) AS avg_ms
        FROM ai_usage_log ${filter}
        GROUP BY type`,
       params
     )
-    const total = rows.reduce((sum, r) => sum + r.count, 0)
-    const avgMs = rows.length
-      ? Math.round(rows.reduce((sum, r) => sum + r.avg_ms * r.count, 0) / Math.max(total, 1))
+    const total    = rows.reduce((sum, r) => sum + r.count, 0)
+    const failures = rows.reduce((sum, r) => sum + (r.failures ?? 0), 0)
+    const succeeded = total - failures
+    const avgMs = succeeded > 0
+      ? Math.round(
+          rows.reduce((sum, r) => sum + (r.avg_ms ?? 0) * (r.count - (r.failures ?? 0)), 0) / succeeded
+        )
       : 0
-    return { rows, total, avgMs }
+    return { rows, total, failures, succeeded, avgMs }
   })
 
   registerHandler('ai:clearUsageLog', (_, campaignId) => {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import useCampaignStore from '../stores/campaignStore'
-import { notifyError } from '../stores/toastStore'
+import { notifyError, notifySuccess, notifyInfo } from '../stores/toastStore'
 
 export default function Settings() {
   const activeCampaign = useCampaignStore(s => s.activeCampaign)
@@ -27,6 +27,11 @@ export default function Settings() {
   const [embedModel,      setEmbedModel]      = useState('nomic-embed-text')
   const [ragSaving,       setRagSaving]       = useState(false)
   const [ragMsg,          setRagMsg]          = useState('')
+
+  // ── SRD rules index state (Phase 3) ────────────────────────────────────────
+  const [srdIndex,      setSrdIndex]      = useState(null)   // { status, chunks, embedded, srdCached }
+  const [indexBusy,     setIndexBusy]     = useState(false)
+  const [indexProgress, setIndexProgress] = useState('')
 
   // ── Usage stats state ──────────────────────────────────────────────────────
   const [usageStats,  setUsageStats]  = useState(null)
@@ -119,6 +124,64 @@ export default function Settings() {
       setRagMsg('❌ ' + err.message)
     }
     setRagSaving(false)
+  }
+
+  // ── SRD rules index handlers ───────────────────────────────────────────────
+  const loadSrdIndex = useCallback(async () => {
+    try {
+      setSrdIndex(await window.electronAPI.srd.getIndexStatus())
+    } catch (err) {
+      notifyError(err, 'Read SRD index status')
+    }
+  }, [])
+
+  useEffect(() => { loadSrdIndex() }, [loadSrdIndex])
+
+  // Progress arrives on a main-process channel during both build and embed.
+  useEffect(() => {
+    const onProgress = ({ percent, message }) => setIndexProgress(`${message} (${percent}%)`)
+    window.electronAPI.srd.onIndexProgress(onProgress)
+    return () => window.electronAPI.srd.offIndexProgress?.(onProgress)
+  }, [])
+
+  async function handleBuildSrdIndex() {
+    setIndexBusy(true)
+    setIndexProgress('Building index…')
+    try {
+      const { chunks } = await window.electronAPI.srd.buildIndex()
+      notifySuccess(`Indexed ${chunks} SRD entries. Rules Q&A is ready.`)
+
+      // Embedding is a bonus, not a requirement: keyword search over these same
+      // chunks already answers single-rule questions. Attempt it, and treat a
+      // missing Ollama as information rather than failure.
+      setIndexProgress('Embedding for semantic search…')
+      try {
+        const { embedded } = await window.electronAPI.srd.embedIndex()
+        notifySuccess(`Embedded ${embedded} entries for semantic search.`)
+      } catch (err) {
+        notifyInfo(`Indexed for keyword search. Semantic search unavailable: ${err.message}`)
+      }
+    } catch (err) {
+      notifyError(err, 'Index SRD')
+    } finally {
+      setIndexBusy(false)
+      setIndexProgress('')
+      loadSrdIndex()
+    }
+  }
+
+  async function handleClearSrdIndex() {
+    if (!window.confirm('Remove the SRD rules index? Rules Q&A will stop working until you rebuild it.')) return
+    setIndexBusy(true)
+    try {
+      const { cleared } = await window.electronAPI.srd.clearIndex()
+      notifySuccess(`Removed ${cleared} indexed SRD entries.`)
+    } catch (err) {
+      notifyError(err, 'Clear SRD index')
+    } finally {
+      setIndexBusy(false)
+      loadSrdIndex()
+    }
   }
 
   // ── Usage log handlers ─────────────────────────────────────────────────────
@@ -369,6 +432,53 @@ export default function Settings() {
         </div>
       </section>
 
+      {/* ── Rules Q&A index (Phase 3) ─── */}
+      <section style={s.section}>
+        <h2 style={s.sectionTitle}>Rules Q&amp;A Index</h2>
+        <p style={s.body}>
+          Indexes the bundled SRD 5.1 so rules questions work without uploading a
+          source book. Keyword search works on its own; Ollama adds semantic search.
+        </p>
+
+        {srdIndex && (
+          <div style={s.srdStatusRow}>
+            <SrdStatusPill status={srdIndex.status} />
+            <span style={s.srdCounts}>
+              {srdIndex.srdCached} SRD entries cached
+              {srdIndex.chunks > 0 && ` · ${srdIndex.chunks} indexed`}
+              {srdIndex.embedded > 0 && ` · ${srdIndex.embedded} embedded`}
+            </span>
+          </div>
+        )}
+
+        {srdIndex?.srdCached === 0 && (
+          <p style={s.srdWarn}>
+            No SRD data cached yet — run <strong>Re-seed SRD</strong> first.
+          </p>
+        )}
+
+        {indexProgress && <p style={s.srdProgress}>{indexProgress}</p>}
+
+        <div style={s.row}>
+          <button
+            style={(indexBusy || srdIndex?.srdCached === 0) ? s.btnDisabled : s.btnPrimary}
+            onClick={handleBuildSrdIndex}
+            disabled={indexBusy || srdIndex?.srdCached === 0}
+          >
+            {indexBusy
+              ? 'Indexing…'
+              : srdIndex?.status === 'not-indexed'
+                ? 'Index SRD for rules Q&A'
+                : 'Rebuild SRD index'}
+          </button>
+          {srdIndex?.status !== 'not-indexed' && (
+            <button style={s.btnDanger} onClick={handleClearSrdIndex} disabled={indexBusy}>
+              Remove index
+            </button>
+          )}
+        </div>
+      </section>
+
       {/* ── AI Usage Stats ─── */}
       <section style={s.section}>
         <div style={s.statsHeader}>
@@ -383,7 +493,14 @@ export default function Settings() {
         ) : (
           <div style={s.statsGrid}>
             <StatCard label="Total queries"       value={usageStats.total}     />
-            <StatCard label="Avg response time"   value={`${usageStats.avgMs} ms`} />
+            <StatCard label="Avg response time"   value={`${usageStats.avgMs} ms`} sub="successful calls only" />
+            {/* Failures used to be invisible: a DM with an expired key saw stats
+                claiming every call was fine. */}
+            <StatCard
+              label="Failed calls"
+              value={usageStats.failures ?? 0}
+              sub={usageStats.failures > 0 ? 'check key / Ollama' : 'none'}
+            />
             {chatRow  && <StatCard label={chatRow.label}  value={chatRow.count}  sub={`avg ${chatRow.avgMs} ms`}  />}
             {ragRow   && <StatCard label={ragRow.label}   value={ragRow.count}   sub={`avg ${ragRow.avgMs} ms`}   />}
             {ragFbRow && <StatCard label={ragFbRow.label} value={ragFbRow.count} sub={`avg ${ragFbRow.avgMs} ms`} />}
@@ -411,8 +528,32 @@ function StatCard({ label, value, sub }) {
   )
 }
 
+// ── SRD index status pill ─────────────────────────────────────────────────────
+function SrdStatusPill({ status }) {
+  const config = {
+    'not-indexed': { label: 'Not indexed', color: '#6b5a3a', bg: '#1a1408' },
+    // Chunked-but-not-embedded is a working state, not a warning: keyword search
+    // over these chunks is what makes rules Q&A work without Ollama.
+    'chunked':     { label: 'Keyword search ready', color: '#c9a84c', bg: '#241a08' },
+    'embedded':    { label: 'Semantic search ready', color: '#5ba85b', bg: '#0d1f0d' },
+  }[status] ?? { label: status, color: '#6b5a3a', bg: '#1a1408' }
+
+  return (
+    <span style={{
+      ...s.srdPill, color: config.color, background: config.bg, borderColor: config.color,
+    }}>
+      {config.label}
+    </span>
+  )
+}
+
 // ── Styles ────────────────────────────────────────────────────────────────────
 const s = {
+  srdStatusRow: { display: 'flex', alignItems: 'center', gap: 10, margin: '10px 0' },
+  srdPill:      { fontSize: '0.75rem', padding: '3px 10px', borderRadius: 12, border: '1px solid' },
+  srdCounts:    { color: '#6b5a3a', fontSize: '0.8rem' },
+  srdWarn:      { color: '#c9a84c', fontSize: '0.82rem', margin: '6px 0' },
+  srdProgress:  { color: '#a89060', fontSize: '0.82rem', margin: '6px 0', fontStyle: 'italic' },
   page:         { padding: '2rem', maxWidth: 640, overflowY: 'auto' },
   pageTitle:    { color: '#c9a84c', fontSize: '1.8rem', marginBottom: '2rem' },
   section:      { background: '#1a1208', border: '1px solid #3a2a10', borderRadius: 8, padding: '1.5rem', marginBottom: '1.5rem' },

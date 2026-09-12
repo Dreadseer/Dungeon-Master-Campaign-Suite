@@ -156,6 +156,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getEquipmentByIndex:  (index)   => ipcRenderer.invoke('srd:getEquipmentByIndex',index),
     getCacheStats:        ()        => ipcRenderer.invoke('srd:getCacheStats'),
     onProgress:           (cb)      => ipcRenderer.on('srd:progress', (_event, data) => cb(data)),
+    // Rules-Q&A index (Phase 3)
+    getIndexStatus:       ()        => ipcRenderer.invoke('srd:getIndexStatus'),
+    buildIndex:           ()        => ipcRenderer.invoke('srd:buildIndex'),
+    embedIndex:           ()        => ipcRenderer.invoke('srd:embedIndex'),
+    clearIndex:           ()        => ipcRenderer.invoke('srd:clearIndex'),
+    onIndexProgress:      (cb)      => ipcRenderer.on('srd:indexProgress', (_event, data) => cb(data)),
+    offIndexProgress:     (cb)      => ipcRenderer.removeListener('srd:indexProgress', cb),
   },
 
   ai: {
@@ -165,6 +172,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveKey:       (key)                           => ipcRenderer.invoke('ai:saveKey',   key),
     deleteKey:     ()                              => ipcRenderer.invoke('ai:deleteKey'),
     hasKey:        ()                              => ipcRenderer.invoke('ai:hasKey'),
+    ragSituation:  (situation, campaignId, options) => ipcRenderer.invoke('ai:ragSituation', situation, campaignId, options),
     ragQuery:      (question, campaignId, options) => ipcRenderer.invoke('ai:ragQuery',      question, campaignId, options),
     getUsageStats: (campaignId)                    => ipcRenderer.invoke('ai:getUsageStats', campaignId),
     clearUsageLog: (campaignId)                    => ipcRenderer.invoke('ai:clearUsageLog', campaignId),
