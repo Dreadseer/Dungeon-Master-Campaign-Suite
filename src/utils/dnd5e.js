@@ -152,3 +152,87 @@ export const HIT_DICE = {
   Bard:       8, Cleric: 8,  Druid: 8, Monk: 8, Rogue: 8, Warlock: 8,
   Sorcerer:   6, Wizard: 6,
 }
+
+// ── Death saving throws (PHB p. 197) ─────────────────────────────────────────
+//
+// Extracted from CharacterSheet.jsx in Phase 5 so the character sheet and the
+// initiative tracker roll the same way, and so the rules can be tested.
+//
+// The rule that was wrong before: a natural 20 does NOT give two successes. It
+// means the creature regains 1 hit point and is no longer dying — the death
+// saves end there, mid-count. That is a much better outcome than "two ticks",
+// and a DM using the old behaviour was under-rewarding their players' luck.
+//
+// The rest, for reference:
+//   1        two failures
+//   2-9      one failure
+//   10-19    one success
+//   20       1 HP, dying ends
+//   3 successes  stable at 0 HP, no longer making saves
+//   3 failures   dead
+
+export const DEATH_SAVE_TARGET = 10   // DC 10, per the PHB
+
+/**
+ * Apply one death saving throw.
+ *
+ * Pure: the caller supplies the roll, so a test can drive every branch and the
+ * UI can show the die that was rolled.
+ *
+ * @param {{successes:number, failures:number}} current
+ * @param {number} roll  a d20 result, 1-20
+ * @returns {{successes, failures, roll, outcome, revived, stable, dead, message}}
+ */
+export function applyDeathSave(current, roll) {
+  const clamp = (v) => Math.min(3, Math.max(0, Number.isFinite(+v) ? Math.trunc(+v) : 0))
+  let successes = clamp(current?.successes)
+  let failures = clamp(current?.failures)
+
+  const d20 = Math.min(20, Math.max(1, Math.trunc(Number(roll) || 1)))
+
+  let outcome
+  let revived = false
+
+  if (d20 === 20) {
+    // Not two successes — 1 hit point, and the dying condition ends.
+    outcome = 'critical-success'
+    revived = true
+    successes = 0
+    failures = 0
+  } else if (d20 === 1) {
+    outcome = 'critical-failure'
+    failures = clamp(failures + 2)
+  } else if (d20 >= DEATH_SAVE_TARGET) {
+    outcome = 'success'
+    successes = clamp(successes + 1)
+  } else {
+    outcome = 'failure'
+    failures = clamp(failures + 1)
+  }
+
+  const stable = !revived && successes >= 3
+  const dead = failures >= 3
+
+  const message =
+    revived ? `Natural 20 — back up with 1 hit point.`
+      : dead ? `Rolled ${d20} — three failures. Dead.`
+        : stable ? `Rolled ${d20} — three successes. Stable at 0 HP.`
+          : outcome === 'critical-failure' ? `Natural 1 — two failures (${failures}/3).`
+            : outcome === 'success' ? `Rolled ${d20} — success (${successes}/3).`
+              : `Rolled ${d20} — failure (${failures}/3).`
+
+  return { successes, failures, roll: d20, outcome, revived, stable, dead, message }
+}
+
+/** Roll a d20 and apply it. Separated so the pure part stays testable. */
+export function rollDeathSave(current) {
+  return applyDeathSave(current, Math.floor(Math.random() * 20) + 1)
+}
+
+/** A fresh, cleared set of death saves. */
+export const emptyDeathSaves = () => ({ successes: 0, failures: 0 })
+
+/** Should this combatant be making death saves? Players only, at 0 HP. */
+export const isDying = (combatant) =>
+  !!combatant?.is_player && (combatant?.hp_current ?? 0) <= 0 &&
+  (combatant?.death_saves?.failures ?? 0) < 3

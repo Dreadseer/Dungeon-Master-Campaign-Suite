@@ -1,4 +1,4 @@
-import { describe, it, expect, test } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import {
   rollInitiative,
   buildCombatants,
@@ -7,7 +7,7 @@ import {
   CONDITIONS,
   getCondition,
 } from '../combatUtils.js'
-import { createMonsterEntry } from '../encounterUtils.js'
+import { createMonsterEntry, parseArmorClass } from '../encounterUtils.js'
 
 // buildCombatants takes an encounter row straight from SQLite, so `monsters` is
 // a JSON *string*, not an array. These helpers build rows in that shape.
@@ -276,64 +276,144 @@ describe('CONDITIONS', () => {
   })
 })
 
+
 // ─────────────────────────────────────────────────────────────────────────────
-// KNOWN BUG — documented here, fixed in Phase 5.
-//
-// buildCombatants reads `entry.ac ?? 10` (combatUtils.js:24), but the monster
-// entry it reads from is produced by createMonsterEntry (encounterUtils.js:21),
-// which never writes an `ac` field. So every monster in every encounter enters
-// initiative at AC 10, however armoured the stat block says it is.
-//
-// Same convention as encounterUtils.test.js: one passing test pinning the
-// current behaviour, one `it.fails` tripwire that errors the moment it is fixed.
+// FIXED IN PHASE 5 — this was an `it.fails` tripwire from Phase 0 onward.
+// The tripwire did its job: it began erroring the moment the fix landed.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('KNOWN BUG (fixed in Phase 5)', () => {
+describe('monster AC (fixed in Phase 5)', () => {
   const statBlock = {
-    index: 'young-red-dragon',
-    name: 'Young Red Dragon',
-    challenge_rating: 10,
-    hit_points: 178,
-    armor_class: 18,
+    index: 'young-red-dragon', name: 'Young Red Dragon',
+    challenge_rating: 10, hit_points: 178, armor_class: 18,
   }
 
-  it('createMonsterEntry does not carry AC out of the stat block', () => {
+  it('createMonsterEntry carries AC out of the stat block', () => {
+    expect(createMonsterEntry(statBlock, 'srd').ac).toBe(18)
+  })
+
+  it('a monster enters combat with the AC on its stat block, not 10', () => {
     const entry = createMonsterEntry(statBlock, 'srd')
-    expect(entry.armor_class).toBeUndefined()
-    expect(entry.ac).toBeUndefined()
-    // It does carry HP and XP correctly, so the omission is specific to AC.
-    expect(entry.hp_max).toBe(178)
-    expect(entry.xp).toBe(5900)
+    expect(buildCombatants(encounterWith([entry]), [])[0].ac).toBe(18)
   })
 
-  it('so every monster combatant is built at AC 10', () => {
-    const entry = createMonsterEntry(statBlock, 'srd')
-    const combatants = buildCombatants(encounterWith([entry]), [])
-    expect(combatants[0].ac).toBe(10)
+  it('a goblin shows AC 15', () => {
+    // The acceptance line, in the shape the SRD actually stores it.
+    const goblin = { index: 'goblin', name: 'Goblin', challenge_rating: 0.25, hit_points: 7,
+                     armor_class: [{ type: 'armor', value: 15 }] }
+    const entry = createMonsterEntry(goblin, 'srd')
+    expect(entry.ac).toBe(15)
+    expect(buildCombatants(encounterWith([entry]), [])[0].ac).toBe(15)
   })
 
-  it.fails('a monster should enter combat with the AC on its stat block', () => {
-    const entry = createMonsterEntry(statBlock, 'srd')
-    const combatants = buildCombatants(encounterWith([entry]), [])
-    expect(combatants[0].ac).toBe(18)
+  it('reads the array shape the newer cache uses, taking the first entry', () => {
+    expect(parseArmorClass([{ type: 'natural', value: 17 }, { type: 'armor', value: 20 }])).toBe(17)
   })
 
-  it('buildCombatants does honour an ac field when one is present', () => {
-    // The reader is not broken — nothing upstream ever populates the field.
-    const combatants = buildCombatants(
-      encounterWith([monsterEntry('Armoured Goblin', 1, { ac: 16 })]),
-      [],
-    )
-    expect(combatants[0].ac).toBe(16)
+  it('reads a bare number, the older cache shape', () => {
+    expect(parseArmorClass(13)).toBe(13)
   })
 
-  test.todo('Phase 5: createMonsterEntry should write ac from statBlock.armor_class')
-
-  // Related, same root area: player AC is 10 + dexMod, ignoring armour entirely.
-  it('player AC currently ignores armour and is 10 + DEX mod', () => {
-    const combatants = buildCombatants(encounterWith([]), [character('Plate Knight', { dex: 8 })])
-    expect(combatants[0].ac).toBe(9)
+  it('returns null when the stat block has no AC, so a lookup can fill it in', () => {
+    for (const bad of [null, undefined, '', [], {}, 'abc']) {
+      expect(parseArmorClass(bad)).toBeNull()
+    }
   })
 
-  test.todo('Phase 5: player AC should come from equipped armour, not 10 + DEX')
+  it('an entry saved BEFORE Phase 5 gets its AC looked up on load', () => {
+    // Pre-Phase-5 encounter JSON has no `ac` field at all. Rather than
+    // defaulting it to 10 forever, buildCombatants looks the stat block up by
+    // the source_index the entry already carries.
+    const legacy = { id: 'e1', name: 'Goblin', count: 1, hp_max: 7, source_index: 'goblin' }
+    const withLookup = buildCombatants(encounterWith([legacy]), [], {
+      acLookup: (index) => (index === 'goblin' ? 15 : null),
+    })
+    expect(withLookup[0].ac).toBe(15)
+  })
+
+  it('falls back to 10 only when the lookup also fails', () => {
+    const legacy = { id: 'e1', name: 'Homebrew Thing', count: 1, hp_max: 20, source_index: 'unknown' }
+    expect(buildCombatants(encounterWith([legacy]), [], { acLookup: () => null })[0].ac).toBe(10)
+    expect(buildCombatants(encounterWith([legacy]), [])[0].ac).toBe(10)
+  })
+})
+
+describe('player AC (fixed in Phase 5)', () => {
+  it('uses the armour the character is wearing, not 10 + DEX', () => {
+    // Chain mail is AC 16 flat. The old formula gave 10 + dexMod = 9 for a
+    // DEX 8 fighter, which is worse than wearing nothing.
+    const fighter = {
+      id: 1, character_name: 'Plate Knight', hp_max: 40, hp_current: 40,
+      stats: JSON.stringify({ dex: 8 }),
+      inventory: JSON.stringify([{ name: 'Chain Mail', equipped: true }]),
+    }
+    const ac = buildCombatants(encounterWith([]), [fighter])[0].ac
+    expect(ac).toBeGreaterThan(9)
+  })
+
+  it('honours a manual AC override from the sheet', () => {
+    const char = {
+      id: 2, character_name: 'Override', hp_max: 10, hp_current: 10,
+      stats: JSON.stringify({ dex: 14, ac_override: 21 }), inventory: '[]',
+    }
+    expect(buildCombatants(encounterWith([]), [char])[0].ac).toBe(21)
+  })
+
+  it('still produces a usable AC when the inventory is malformed', () => {
+    // A broken inventory should cost this character its armour bonus, not stop
+    // the fight from starting.
+    const char = {
+      id: 3, character_name: 'Broken Bag', hp_max: 10, hp_current: 10,
+      stats: JSON.stringify({ dex: 14 }), inventory: '{not json',
+    }
+    const c = buildCombatants(encounterWith([]), [char])[0]
+    expect(Number.isFinite(c.ac)).toBe(true)
+    expect(c.ac).toBeGreaterThanOrEqual(10)
+  })
+
+  it('carries existing death saves in from the character sheet', () => {
+    const dying = {
+      id: 4, character_name: 'Bleeding Out', hp_max: 20, hp_current: 0,
+      stats: JSON.stringify({ dex: 12, death_saves: { successes: 1, failures: 2 } }),
+      inventory: '[]',
+    }
+    expect(buildCombatants(encounterWith([]), [dying])[0].death_saves)
+      .toEqual({ successes: 1, failures: 2 })
+  })
+})
+
+describe('Phase 5 combatant fields', () => {
+  const goblin = { id: 'e', name: 'Goblin', count: 2, hp_max: 7, ac: 15 }
+
+  it('every combatant starts with the new fields', () => {
+    for (const c of buildCombatants(encounterWith([goblin]), [])) {
+      expect(c.temp_hp).toBe(0)
+      expect(c.reaction_used).toBe(false)
+      expect(c.death_saves).toEqual({ successes: 0, failures: 0 })
+      expect(c.legendary_used).toBe(0)
+    }
+  })
+
+  it('legendary_max comes from the entry', () => {
+    const dragon = { id: 'd', name: 'Adult Red Dragon', count: 1, hp_max: 256, ac: 19, legendary_max: 3 }
+    expect(buildCombatants(encounterWith([dragon]), [])[0].legendary_max).toBe(3)
+  })
+
+  it('createMonsterEntry sets legendary_max from the stat block', () => {
+    const withLegendary = createMonsterEntry({
+      name: 'Ancient Dragon', challenge_rating: 24, hit_points: 546, armor_class: 22,
+      legendary_actions: [{ name: 'Detect' }, { name: 'Tail Attack' }, { name: 'Wing Attack' }],
+    }, 'srd')
+    expect(withLegendary.legendary_max).toBe(3)
+  })
+
+  it('a creature without legendary actions gets 0', () => {
+    expect(createMonsterEntry({ name: 'Goblin', challenge_rating: 0.25, hit_points: 7 }, 'srd').legendary_max).toBe(0)
+  })
+
+  it('each combatant gets its OWN death_saves object', () => {
+    const [a, b] = buildCombatants(encounterWith([goblin]), [])
+    a.death_saves.failures = 2
+    expect(b.death_saves.failures).toBe(0)
+  })
 })

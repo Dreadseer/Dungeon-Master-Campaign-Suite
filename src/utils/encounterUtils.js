@@ -24,6 +24,35 @@ export const parseCR = (cr) => {
 
 export const crToXP = (cr) => CR_XP[parseCR(cr)] ?? 0
 
+// Armour class out of an SRD or homebrew stat block.
+//
+// The shape is inconsistent and has been through two versions of the dnd5eapi:
+// older cached rows store a bare number, newer ones an array of
+// { type, value } (a monster can list several, e.g. "natural armor" and
+// "with mage armor"). Homebrew from CustomMonsterForm stores a number.
+//
+// Returns null rather than a default, so the caller can tell "no AC in this
+// stat block" from "AC 10", and the lazy backfill in buildCombatants knows
+// whether it still needs to look one up.
+export const parseArmorClass = (raw) => {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return Math.trunc(raw)
+  if (typeof raw === 'string' && raw.trim() !== '') {
+    const n = parseInt(raw, 10)
+    return Number.isFinite(n) ? n : null
+  }
+  if (Array.isArray(raw)) {
+    // Take the first usable entry — the SRD lists the creature's base armour
+    // first and conditional variants after it.
+    for (const entry of raw) {
+      const found = parseArmorClass(typeof entry === 'object' && entry !== null ? entry.value : entry)
+      if (found != null) return found
+    }
+    return null
+  }
+  if (raw !== null && typeof raw === 'object') return parseArmorClass(raw.value ?? raw.base ?? null)
+  return null
+}
+
 export const createMonsterEntry = (statBlock, source) => ({
   id:           crypto.randomUUID(),
   name:         statBlock.name,
@@ -33,6 +62,18 @@ export const createMonsterEntry = (statBlock, source) => ({
   xp:           crToXP(statBlock.challenge_rating),
   hp_max:       statBlock.hit_points ?? 10,
   hp_current:   statBlock.hit_points ?? 10,
+  // Phase 5. Before this, createMonsterEntry never wrote an `ac` field, so
+  // buildCombatants' `entry.ac ?? 10` meant EVERY monster entered initiative at
+  // AC 10 however armoured its stat block said it was.
+  ac:           parseArmorClass(statBlock.armor_class),
+  // Legendary actions, for the tracker's counter. The SRD lists each action;
+  // the count of legendary actions per round is 3 for almost every creature
+  // that has them, and the stat block states it in prose rather than a field.
+  legendary_max: Array.isArray(statBlock.legendary_actions) && statBlock.legendary_actions.length > 0 ? 3 : 0,
+  lair_action_text: typeof statBlock.lair_actions === 'string' ? statBlock.lair_actions
+    : Array.isArray(statBlock.lair_actions) && statBlock.lair_actions.length
+      ? statBlock.lair_actions.map(a => a?.desc ?? a?.name ?? '').filter(Boolean).join(' ')
+      : null,
   count:        1,
   custom_name:  null,
   notes:        '',
