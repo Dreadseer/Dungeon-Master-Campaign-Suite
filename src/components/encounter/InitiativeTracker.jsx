@@ -1,5 +1,13 @@
-import { useState, useEffect, useRef } from 'react'
-import { buildCombatants, rollInitiative, sortByInitiative } from '../../utils/combatUtils'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import {
+  buildCombatants, rollInitiative, sortByInitiative,
+  resetForNewRound, applyHPDelta, grantTempHP,
+  spendLegendaryAction, restoreLegendaryAction, lairActionRow, isLairRow,
+  LAIR_ACTION_INITIATIVE,
+} from '../../utils/combatUtils'
+import { serialiseCombat, deserialiseCombat, combatPayloadChanged } from '../../utils/combatPersistence'
+import { applyDeathSave, isDying, emptyDeathSaves } from '../../utils/dnd5e'
+import { notifyError } from '../../stores/toastStore'
 import { createToken }    from '../../utils/tokenUtils'
 import ConditionManager  from './ConditionManager'
 import CombatLog         from './CombatLog'
@@ -58,14 +66,142 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
   const [tokenToast, setTokenToast]         = useState('')
   const toastRef = useRef(null)
 
-  // ── Build combatants on mount ─────────────────────────────────────────────
+  // ── Load a saved fight, or build a new one ────────────────────────────────
+  //
+  // Combat used to be built fresh on every mount, which meant navigating away
+  // from the tracker and back lost the entire fight. Now a saved row wins, and
+  // buildCombatants is the fallback for an encounter with nothing stored.
+  const [hydrated, setHydrated] = useState(false)
+  const [resumed, setResumed]   = useState(false)
+
   useEffect(() => {
-    const built = buildCombatants(encounter, characters)
-    setCombatants(built)
-    const inputs = {}
-    built.forEach(c => { inputs[c.id] = '' })
-    setInitInputs(inputs)
-  }, [encounter, characters])
+    let cancelled = false
+
+    ;(async () => {
+      let saved = null
+      try {
+        saved = await window.electronAPI.db.combat.get(encounter.id)
+      } catch (err) {
+        // A failed read must not stop the fight starting — fall through to build.
+        notifyError(err, 'Load saved combat')
+      }
+
+      const restored = deserialiseCombat(saved)
+      if (cancelled) return
+
+      if (restored && restored.phase !== 'ended') {
+        setCombatants(restored.combatants)
+        setRoundCount(restored.round)
+        setPhase(restored.phase)
+        setLogEntries(restored.log)
+        // Keep the log's id counter ahead of what was restored, so a new entry
+        // cannot collide with a restored one and break React's keys.
+        _logId = Math.max(_logId, ...restored.log.map(e => Number(e?.id) || 0), 0)
+        setInitInputs(Object.fromEntries(restored.combatants.map(c => [c.id, ''])))
+        setResumed(true)
+        setHydrated(true)
+        return
+      }
+
+      // Nothing to resume. Build, looking up AC for monster entries saved
+      // before Phase 5 — they carry a source_index but no ac.
+      let acIndex = {}
+      try {
+        const monsters = await window.electronAPI.srd.getMonsters({})
+        // getMonsters returns summaries; AC needs the full stat block, so only
+        // fetch the ones this encounter actually uses.
+        const wanted = new Set(
+          JSON.parse(encounter.monsters ?? '[]')
+            .filter(e => e.ac == null && e.source_index)
+            .map(e => e.source_index)
+        )
+        for (const m of monsters) {
+          if (!wanted.has(m.index)) continue
+          const full = await window.electronAPI.srd.getMonsterByIndex(m.index)
+          if (full) acIndex[m.index] = full.armor_class
+        }
+      } catch { /* offline or no SRD — buildCombatants falls back to 10 */ }
+
+      if (cancelled) return
+      const built = buildCombatants(encounter, characters, {
+        acLookup: (index) => {
+          const raw = acIndex[index]
+          if (raw == null) return null
+          return typeof raw === 'number' ? raw
+            : Array.isArray(raw) ? (raw[0]?.value ?? null)
+              : (raw.value ?? null)
+        },
+      })
+      setCombatants(built)
+      setInitInputs(Object.fromEntries(built.map(c => [c.id, ''])))
+      setHydrated(true)
+    })()
+
+    return () => { cancelled = true }
+  }, [encounter.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Debounced save ────────────────────────────────────────────────────────
+  //
+  // Every change to combatants, round, phase or log is written ~500ms later.
+  // The comparison against the last payload matters: React hands out new array
+  // identities on every render, and without it an idle tracker would rewrite
+  // the row continuously.
+  const saveTimer = useRef(null)
+  const lastSaved = useRef(null)
+
+  useEffect(() => {
+    if (!hydrated || phase === 'setup' || combatants.length === 0) return
+
+    const payload = serialiseCombat({
+      campaignId, encounterId: encounter.id,
+      combatants, round: roundCount, phase, log: logEntries,
+    })
+    const { changed, key } = combatPayloadChanged(lastSaved.current, payload)
+    if (!changed) return
+
+    clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(async () => {
+      try {
+        await window.electronAPI.db.combat.save(payload)
+        lastSaved.current = key
+        // The pop-out map and the player window follow the fight live.
+        window.electronAPI.player.broadcast({
+          type: 'combat:update',
+          payload: { encounterId: encounter.id, round: roundCount, combatants },
+        })
+      } catch (err) {
+        notifyError(err, 'Save combat')
+      }
+    }, 500)
+
+    return () => clearTimeout(saveTimer.current)
+  }, [hydrated, combatants, roundCount, phase, logEntries, campaignId, encounter.id])
+
+  // Refs mirroring state, so the unmount handler below sees current values
+  // rather than the ones captured when it was created.
+  const combatantsRef = useRef(combatants)
+  const roundRef      = useRef(roundCount)
+  const phaseRef      = useRef(phase)
+  const logRef        = useRef(logEntries)
+  const hydratedRef   = useRef(hydrated)
+  useEffect(() => { combatantsRef.current = combatants }, [combatants])
+  useEffect(() => { roundRef.current = roundCount },      [roundCount])
+  useEffect(() => { phaseRef.current = phase },           [phase])
+  useEffect(() => { logRef.current = logEntries },        [logEntries])
+  useEffect(() => { hydratedRef.current = hydrated },     [hydrated])
+
+  // A save in flight when the component unmounts would be lost, and unmounting
+  // is exactly what happens when the DM navigates away mid-fight.
+  useEffect(() => () => {
+    clearTimeout(saveTimer.current)
+    if (!hydratedRef.current || phaseRef.current === 'setup') return
+    const payload = serialiseCombat({
+      campaignId, encounterId: encounter.id,
+      combatants: combatantsRef.current, round: roundRef.current,
+      phase: phaseRef.current, log: logRef.current,
+    })
+    window.electronAPI.db.combat.save(payload).catch(() => { /* best effort on unmount */ })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load maps
   useEffect(() => {
@@ -126,6 +262,9 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
     const newRound = wraps ? roundCount + 1 : roundCount
     if (wraps) {
       setRoundCount(newRound)
+      // Legendary actions and reactions refresh each round. Before Phase 5 they
+      // were tracked nowhere, so a DM had to remember what a dragon had spent.
+      setCombatants(prev => resetForNewRound(prev))
       addLog('round', `═══ Round ${newRound} begins ═══`, newRound)
     }
     addLog('turn', `▶ ${alive[nextAliveIdx].name}'s turn (Initiative ${alive[nextAliveIdx].initiative})`, newRound)
@@ -142,12 +281,24 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
     const target = combatants.find(c => c.id === id)
     if (!target) { setHpPanel(null); return }
 
+    if (hpMode === 'temp') {
+      addTempHP(id, amount)
+      setHpAmount('')
+      setHpPanel(null)
+      return
+    }
+
     const oldHP = target.hp_current
-    let newHP
+
+    // Resolve the change once, here, so the log entry, the unconscious check and
+    // the write-back all describe the same numbers the roster ends up with.
+    // Computing it twice is how the log came to disagree with the tracker.
+    const result = applyHPDelta(target, hpMode === 'damage' ? -amount : amount)
+    const newHP = result.combatant.hp_current
 
     if (hpMode === 'damage') {
-      newHP = Math.max(0, oldHP - amount)
-      addLog('damage', `${target.name} takes ${amount} damage — ${oldHP} → ${newHP} HP`)
+      const soak = result.absorbed > 0 ? ` (${result.absorbed} absorbed by temp HP)` : ''
+      addLog('damage', `${target.name} takes ${amount} damage${soak} — ${oldHP} → ${newHP} HP`)
 
       // Concentration check alert
       if (target.concentration) {
@@ -169,13 +320,133 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
         if (spellCardId  === id) setSpellCardId(null)
       }
     } else {
-      newHP = Math.min(target.hp_max, oldHP + amount)
       addLog('heal', `${target.name} healed ${amount} — ${oldHP} → ${newHP} HP`)
     }
 
-    setCombatants(prev => prev.map(c => c.id === id ? { ...c, hp_current: newHP } : c))
+    // Healing a dying character ends the dying condition, so the death-save
+    // counters have to clear with it — otherwise they carry into the next time
+    // the character drops and kill them early.
+    const clearsDeathSaves = hpMode !== 'damage' && oldHP <= 0 && newHP > 0
+
+    setCombatants(prev => prev.map(c => c.id !== id ? c : {
+      ...result.combatant,
+      ...(clearsDeathSaves ? { death_saves: emptyDeathSaves() } : {}),
+    }))
+
+    // Per-hit write-back. Previously player HP only reached the characters table
+    // when combat ENDED, so a crash mid-fight lost every point of damage taken —
+    // the DM reopened the sheet and found the character at full health.
+    if (target.is_player && target.entity_id) {
+      queueHPWriteBack(target.entity_id, newHP)
+    }
+
     setHpAmount('')
     setHpPanel(null)
+  }
+
+  // ── Throttled HP write-back ───────────────────────────────────────────────
+  //
+  // Writing on every hit would mean a database round trip per click during a
+  // busy round, so writes are coalesced to at most one per second per character,
+  // with the last value winning. A crash between the hit and the flush loses at
+  // most one second of damage, against the whole fight before this existed.
+  const hpWriteQueue = useRef(new Map())
+  const hpWriteTimer = useRef(null)
+
+  const flushHPWriteBack = useCallback(async () => {
+    const pending = [...hpWriteQueue.current.entries()]
+    hpWriteQueue.current.clear()
+    if (pending.length === 0) return
+    try {
+      await window.electronAPI.db.characters.bulkUpdateHP(
+        pending.map(([entityId, hp]) => ({ id: entityId, hp_current: hp }))
+      )
+      for (const [entityId] of pending) {
+        window.electronAPI.player.broadcast({ type: 'character:sync', payload: { characterId: entityId } })
+      }
+    } catch (err) {
+      notifyError(err, 'Save character HP')
+    }
+  }, [])
+
+  const queueHPWriteBack = useCallback((entityId, hp) => {
+    hpWriteQueue.current.set(entityId, hp)
+    if (hpWriteTimer.current) return
+    hpWriteTimer.current = setTimeout(() => {
+      hpWriteTimer.current = null
+      flushHPWriteBack()
+    }, 1000)
+  }, [flushHPWriteBack])
+
+  // Flush anything still queued when the tracker unmounts.
+  useEffect(() => () => {
+    clearTimeout(hpWriteTimer.current)
+    hpWriteTimer.current = null
+    flushHPWriteBack()
+  }, [flushHPWriteBack])
+
+  // ── Death saves ───────────────────────────────────────────────────────────
+  const rollDeathSaveFor = (id) => {
+    const target = combatants.find(c => c.id === id)
+    if (!target) return
+    const result = applyDeathSave(target.death_saves, Math.floor(Math.random() * 20) + 1)
+
+    setCombatants(prev => prev.map(c => c.id !== id ? c : {
+      ...c,
+      death_saves: { successes: result.successes, failures: result.failures },
+      // A natural 20 brings the character back up with exactly 1 hit point.
+      hp_current: result.revived ? 1 : c.hp_current,
+    }))
+
+    addLog(result.dead ? 'defeat' : result.revived ? 'heal' : 'condition',
+      `${target.name}: ${result.message}`)
+
+    if (target.entity_id) {
+      if (result.revived) queueHPWriteBack(target.entity_id, 1)
+      syncDeathSavesToSheet(target.entity_id, result)
+    }
+  }
+
+  // stats is a single JSON blob, so writing death saves means merging into
+  // whatever else is in there. Read it fresh rather than trusting a copy: the
+  // character sheet may have been edited in another tab since combat started.
+  const syncDeathSavesToSheet = useCallback(async (entityId, result) => {
+    try {
+      const row = await window.electronAPI.db.characters.getById(entityId)
+      if (!row) return
+      const stats = typeof row.stats === 'string' ? JSON.parse(row.stats || '{}') : (row.stats ?? {})
+      await window.electronAPI.db.characters.updateStats(entityId, {
+        ...stats,
+        // Cleared rather than stored once the character is no longer dying.
+        death_saves: (result.revived || result.stable)
+          ? emptyDeathSaves()
+          : { successes: result.successes, failures: result.failures },
+      })
+    } catch (err) {
+      notifyError(err, 'Save death saves')
+    }
+  }, [])
+
+  // ── Legendary actions ─────────────────────────────────────────────────────
+  const useLegendaryAction = (id) => {
+    setCombatants(prev => prev.map(c => c.id === id ? spendLegendaryAction(c) : c))
+    const target = combatants.find(c => c.id === id)
+    if (target && (target.legendary_used ?? 0) < (target.legendary_max ?? 0)) {
+      addLog('condition', `${target.name} uses a legendary action (${(target.legendary_used ?? 0) + 1}/${target.legendary_max})`)
+    }
+  }
+
+  const restoreLegendary = (id) =>
+    setCombatants(prev => prev.map(c => c.id === id ? restoreLegendaryAction(c) : c))
+
+  // ── Reactions and temporary hit points ────────────────────────────────────
+  const toggleReaction = (id) =>
+    setCombatants(prev => prev.map(c => c.id === id ? { ...c, reaction_used: !c.reaction_used } : c))
+
+  const addTempHP = (id, amount) => {
+    setCombatants(prev => prev.map(c => c.id === id ? grantTempHP(c, amount) : c))
+    const target = combatants.find(c => c.id === id)
+    if (target) addLog('heal', `${target.name} gains ${amount} temporary hit points`)
   }
 
   // ── Condition management ──────────────────────────────────────────────────
@@ -211,6 +482,14 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
   const handleEndCombat = async () => {
     addLog('end', `🏁 Combat ended — ${roundCount} round${roundCount !== 1 ? 's' : ''}`)
     setEndConfirm(false)
+
+    // Stop the debounced save from resurrecting the row we are about to delete.
+    clearTimeout(saveTimer.current)
+    try {
+      await window.electronAPI.db.combat.clear(encounter.id)
+    } catch (err) {
+      notifyError(err, 'Clear saved combat')
+    }
 
     // Write final HP for every player combatant back to characters DB
     const playerUpdates = combatants
@@ -308,7 +587,17 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
   }
 
   // ── ACTIVE PHASE ──────────────────────────────────────────────────────────
-  const displayed = orderedCombatants()
+  // The lair row is built for display only. Putting it in `combatants` would
+  // give it a turn in the rotation, a row in the saved fight and a token on the
+  // map — none of which it should have.
+  const lairRow = phase === 'active' ? lairActionRow(combatants) : null
+  const displayed = (() => {
+    const rows = orderedCombatants()
+    if (!lairRow) return rows
+    // Initiative count 20, losing ties, so it sits after everything on 20.
+    const at = rows.findIndex(c => (c.initiative ?? 0) < LAIR_ACTION_INITIATIVE)
+    return at === -1 ? [...rows, lairRow] : [...rows.slice(0, at), lairRow, ...rows.slice(at)]
+  })()
   const statBlockCombatant = combatants.find(c => c.id === statBlockId) ?? null
   const spellCardCombatant = combatants.find(c => c.id === spellCardId) ?? null
   const condTargetCombatant = conditionTarget ? combatants.find(c => c.id === conditionTarget) : null
@@ -344,6 +633,26 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
         {/* Combatant list */}
         <div style={{ ...s.trackerList, position: 'relative' }}>
           {displayed.map(c => {
+            if (isLairRow(c)) {
+              return (
+                <div key={c.id} style={{ ...s.combatantRow, ...s.lairRow }}>
+                  <div style={s.combatantMain}>
+                    <span style={s.turnArrow}> </span>
+                    <span style={s.typeIcon}>🏔</span>
+                    <span style={s.initVal}>{c.initiative}</span>
+                    <span style={s.lairName}>{c.name}</span>
+                    <span style={s.lairText} title={c.lair_action_text}>{c.lair_action_text}</span>
+                    <button
+                      style={s.lairBtn}
+                      onClick={() => addLog('condition', `🏔 Lair action — ${c.sources.join(', ')}`)}
+                    >
+                      Log use
+                    </button>
+                  </div>
+                </div>
+              )
+            }
+
             const isActive   = c.is_active
             const isDefeated = c.hp_current <= 0
             const hpPct      = c.hp_max > 0 ? c.hp_current / c.hp_max : 0
@@ -379,8 +688,44 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
                     <span style={s.hpBarText}>{c.hp_current}/{c.hp_max}</span>
                   </div>
 
+                  {/* Temporary hit points sit in front of real HP, so they are
+                      shown beside the bar rather than folded into it. */}
+                  {c.temp_hp > 0 && (
+                    <span style={s.tempHpBadge} title={`${c.temp_hp} temporary hit points`}>
+                      +{c.temp_hp}
+                    </span>
+                  )}
+
                   {/* AC */}
                   <span style={s.acBadge}>🛡 {c.ac}</span>
+
+                  {/* Reaction - one per round, cleared when the round advances */}
+                  {phase === 'active' && !isDefeated && (
+                    <span
+                      style={{ ...s.reactionIcon, ...(c.reaction_used ? s.reactionSpent : {}) }}
+                      title={c.reaction_used ? 'Reaction used — click to restore' : 'Reaction available — click when used'}
+                      onClick={() => toggleReaction(c.id)}
+                    >
+                      ⚡
+                    </span>
+                  )}
+
+                  {/* Legendary actions - click a pip to spend, right-click to undo */}
+                  {c.legendary_max > 0 && !isDefeated && (
+                    <span
+                      style={s.legendaryGroup}
+                      title={`Legendary actions: ${c.legendary_max - (c.legendary_used ?? 0)} of ${c.legendary_max} left`}
+                      onContextMenu={e => { e.preventDefault(); restoreLegendary(c.id) }}
+                    >
+                      {Array.from({ length: c.legendary_max }, (_, i) => (
+                        <span
+                          key={i}
+                          style={{ ...s.legendaryPip, ...(i < (c.legendary_used ?? 0) ? s.legendaryPipSpent : {}) }}
+                          onClick={() => useLegendaryAction(c.id)}
+                        />
+                      ))}
+                    </span>
+                  )}
 
                   {/* Condition pills — click opens condition manager */}
                   <div
@@ -416,6 +761,33 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
                   )}
                 </div>
 
+                {/* Death saves - shown only while a player is actually dying */}
+                {isDying(c) && (
+                  <div style={s.deathRow}>
+                    <span style={s.deathLabel}>Death saves</span>
+                    <span style={s.deathPips}>
+                      {Array.from({ length: 3 }, (_, i) => (
+                        <span key={`s${i}`} style={{
+                          ...s.deathPip,
+                          ...(i < (c.death_saves?.successes ?? 0) ? s.deathPipSuccess : {}),
+                        }} />
+                      ))}
+                    </span>
+                    <span style={s.deathSlash}>/</span>
+                    <span style={s.deathPips}>
+                      {Array.from({ length: 3 }, (_, i) => (
+                        <span key={`f${i}`} style={{
+                          ...s.deathPip,
+                          ...(i < (c.death_saves?.failures ?? 0) ? s.deathPipFailure : {}),
+                        }} />
+                      ))}
+                    </span>
+                    <button style={s.deathRollBtn} onClick={() => rollDeathSaveFor(c.id)}>
+                      Roll save
+                    </button>
+                  </div>
+                )}
+
                 {/* Inline HP panel */}
                 {isHpOpen && !isDefeated && (
                   <div style={s.hpPanelRow}>
@@ -431,6 +803,13 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
                         onClick={() => setHpMode('heal')}
                       >
                         + Heal
+                      </button>
+                      <button
+                        style={{ ...s.hpModeBtn, ...(hpMode === 'temp' ? s.hpModeBtnTempActive : {}) }}
+                        onClick={() => setHpMode('temp')}
+                        title="Temporary hit points — the higher value wins, they never add up"
+                      >
+                        ◆ Temp
                       </button>
                     </div>
                     <input
@@ -660,6 +1039,52 @@ const s = {
     color: '#666', cursor: 'pointer', fontSize: 12,
   },
   hpModeBtnActive:     { background: '#3a1010', border: '1px solid #8B0000', color: '#e05050' },
+  hpModeBtnTempActive: { background: '#10263a', border: '1px solid #2D5A7A', color: '#6fa8d0' },
+
+  // Temporary hit points, reactions and legendary actions
+  tempHpBadge: {
+    fontSize: 10, color: '#6fa8d0', background: '#10263a',
+    border: '1px solid #2D5A7A', borderRadius: 8, padding: '1px 5px', flexShrink: 0,
+  },
+  reactionIcon: { fontSize: 12, cursor: 'pointer', flexShrink: 0, opacity: 1 },
+  reactionSpent: { opacity: 0.22, filter: 'grayscale(1)' },
+  legendaryGroup: { display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0, cursor: 'pointer' },
+  legendaryPip: {
+    width: 9, height: 9, borderRadius: '50%',
+    background: '#c9a84c', border: '1px solid #8a7020', display: 'inline-block',
+  },
+  legendaryPipSpent: { background: '#1a1a1a', borderColor: '#3a3a3a' },
+
+  // Lair actions - a marker in the order, not a creature
+  lairRow: { background: '#141018', borderLeft: '3px solid #6a4a8a' },
+  lairName: { color: '#b090d0', fontSize: 12, fontWeight: 600, flexShrink: 0 },
+  lairText: {
+    color: '#776', fontSize: 11, flex: 1, whiteSpace: 'nowrap',
+    overflow: 'hidden', textOverflow: 'ellipsis',
+  },
+  lairBtn: {
+    padding: '2px 8px', background: '#221a2a', border: '1px solid #6a4a8a',
+    color: '#b090d0', cursor: 'pointer', fontSize: 11, borderRadius: 4, flexShrink: 0,
+  },
+
+  // Death saves
+  deathRow: {
+    display: 'flex', alignItems: 'center', gap: 6,
+    padding: '4px 14px 6px 50px', background: '#140d0d', borderTop: '1px solid #2a1a1a',
+  },
+  deathLabel: { fontSize: 10, color: '#8a7a6a', textTransform: 'uppercase', letterSpacing: 0.5 },
+  deathPips: { display: 'flex', gap: 3 },
+  deathPip: {
+    width: 10, height: 10, borderRadius: '50%',
+    background: '#1a1a1a', border: '1px solid #3a3a3a', display: 'inline-block',
+  },
+  deathPipSuccess: { background: '#2D7A2D', borderColor: '#7fc272' },
+  deathPipFailure: { background: '#8B0000', borderColor: '#e05050' },
+  deathSlash: { color: '#444', fontSize: 11 },
+  deathRollBtn: {
+    padding: '2px 8px', background: '#1a1010', border: '1px solid #5a3030',
+    color: '#c08080', cursor: 'pointer', fontSize: 11, borderRadius: 4,
+  },
   hpModeBtnHealActive: { background: '#1a3a1a', border: '1px solid #2D7A2D', color: '#7fc272' },
   hpInput: {
     width: 70, background: '#111', border: '1px solid #555',
