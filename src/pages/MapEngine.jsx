@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { deserialiseCombat } from '../utils/combatPersistence'
+import { summariseForMap } from '../utils/tokenCombatLink'
 import useCampaignStore from '../stores/campaignStore'
 import usePlayerStore   from '../stores/playerStore'
 import EntityModal from '../components/world/EntityModal'
@@ -46,6 +48,11 @@ export default function MapEngine() {
 
   // ── Fog of War state ───────────────────────────────────────────────
   const [fogBrushSize, setFogBrushSize] = useState(1)   // 1 | 3 | 5
+
+  // The DM's map is in the main window, which never receives player:broadcast —
+  // that goes to the pop-out only. Read the saved fight instead, so token HP is
+  // live here as well as on the players' screen.
+  const [combatRoster, setCombatRoster] = useState([])
   const fogControlsRef = useRef(null)   // holds { revealAll, hideAll } from MapCanvas
 
   const registerFogControls = useCallback((controls) => {
@@ -83,6 +90,24 @@ export default function MapEngine() {
       },
     })
   }, [autoSync, playerWindowOpen, activeMap])
+
+  useEffect(() => {
+    if (!activeCampaign) { setCombatRoster([]); return }
+    let cancelled = false
+    const check = async () => {
+      try {
+        const row = await window.electronAPI.db.combat.getActiveForCampaign(activeCampaign.id)
+        const parsed = deserialiseCombat(row)
+        if (!cancelled) setCombatRoster(parsed ? summariseForMap(parsed.combatants) : [])
+      } catch {
+        // Silent: a poll that toasts every few seconds is worse than no HP.
+        if (!cancelled) setCombatRoster([])
+      }
+    }
+    check()
+    const id = setInterval(check, 3000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [activeCampaign])
 
   // ── View mode (DM vs Player) ───────────────────────────────────────
   const [viewMode, setViewMode] = useState('dm')
@@ -260,6 +285,7 @@ export default function MapEngine() {
           onUpdateThumbnail={handleUpdateThumbnail}
         />
         <MapCanvas
+          combatRoster={combatRoster}
           map={activeMap}
           mode={viewMode}
           campaignId={activeCampaign.id}

@@ -7,6 +7,7 @@ import {
 import MapToken    from './MapToken'
 import AddTokenModal  from './AddTokenModal'
 import TokenInspector from './TokenInspector'
+import { findCombatantForToken, findTokenForCombatant } from '../../utils/tokenCombatLink'
 
 // Layout constants — keep in sync with Sidebar, TopBar, and MapToolbar heights
 const SIDEBAR_W      = 240
@@ -34,6 +35,8 @@ export default function MapCanvas({
   onHideAll,
   registerFogControls,    // callback to expose revealAll/hideAll up to MapEngine
   registerThumbnailGen,   // callback to expose generateThumbnail up to MapEngine
+  combatRoster = [],      // live combatants from the initiative tracker, if a fight is running
+  combatSelectedId = null,// whose turn it is, so the map can follow the tracker
 }) {
   const stageRef = useRef(null)
 
@@ -57,6 +60,24 @@ export default function MapCanvas({
   const [showAddTokenModal, setShowAddTokenModal] = useState(false)
   const [addTokenCell,      setAddTokenCell]      = useState({ col: 0, row: 0 })
   const saveTokensRef = useRef(null)
+
+  // Follow the tracker's turn order: when the active combatant changes, select
+  // the token standing for it. Silently does nothing when the creature has no
+  // token, or when two tokens share its name and the match is ambiguous.
+  // Guarded on the id rather than the effect deps: combatRoster and tokens get
+  // fresh identities on every poll and every token save, and without this the
+  // selection would snap back to the active combatant every few seconds,
+  // overriding whatever the viewer had clicked on.
+  const lastFollowedTurn = useRef(null)
+  useEffect(() => {
+    if (!combatSelectedId || combatSelectedId === lastFollowedTurn.current) return
+    const combatant = combatRoster.find(c => c.id === combatSelectedId)
+    if (!combatant) return
+    const token = findTokenForCombatant(combatant, tokens)
+    if (!token) return
+    lastFollowedTurn.current = combatSelectedId
+    setSelectedToken(token)
+  }, [combatSelectedId, combatRoster, tokens])
 
   // ── Canvas resize listener ─────────────────────────────────────────
   // Player mode: no sidebar, no MapToolbar — full width minus only PlayerTopBar
@@ -456,6 +477,7 @@ export default function MapCanvas({
       {selectedToken && (
         <TokenInspector
           token={selectedToken}
+          combatant={findCombatantForToken(selectedToken, combatRoster)}
           onDelete={deleteSelectedToken}
           onDeselect={() => setSelectedToken(null)}
           mode={mode}

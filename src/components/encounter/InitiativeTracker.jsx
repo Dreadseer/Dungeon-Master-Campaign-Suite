@@ -6,6 +6,7 @@ import {
   LAIR_ACTION_INITIATIVE,
 } from '../../utils/combatUtils'
 import { serialiseCombat, deserialiseCombat, combatPayloadChanged } from '../../utils/combatPersistence'
+import { summariseForMap } from '../../utils/tokenCombatLink'
 import { applyDeathSave, isDying, emptyDeathSaves } from '../../utils/dnd5e'
 import { notifyError } from '../../stores/toastStore'
 import { createToken }    from '../../utils/tokenUtils'
@@ -164,10 +165,16 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
       try {
         await window.electronAPI.db.combat.save(payload)
         lastSaved.current = key
-        // The pop-out map and the player window follow the fight live.
+        // The pop-out map follows the fight live. Only the fields the map
+        // renders cross the window boundary — the full combatant carries log
+        // ids, legendary counters and death saves the map has no use for.
         window.electronAPI.player.broadcast({
           type: 'combat:update',
-          payload: { encounterId: encounter.id, round: roundCount, combatants },
+          payload: {
+            encounterId: encounter.id,
+            round: roundCount,
+            combatants: summariseForMap(combatants),
+          },
         })
       } catch (err) {
         notifyError(err, 'Save combat')
@@ -258,6 +265,16 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
 
     const nextId = alive[nextAliveIdx].id
     setCombatants(prev => prev.map(c => ({ ...c, is_active: c.id === nextId })))
+
+    // Pushed immediately rather than waiting for the save debounce, so the map
+    // highlight does not trail the tracker by half a second.
+    const next = combatants.find(c => c.id === nextId)
+    window.electronAPI.player.broadcast({
+      type: 'combat:select',
+      payload: next
+        ? { combatantId: next.id, name: next.name, entityId: next.entity_id ?? null, isPlayer: !!next.is_player }
+        : null,
+    })
 
     const newRound = wraps ? roundCount + 1 : roundCount
     if (wraps) {

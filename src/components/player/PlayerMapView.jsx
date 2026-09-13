@@ -5,6 +5,9 @@ import PlayerMapControls from './PlayerMapControls'
 const PLAYER_TOPBAR_H = 48
 
 export default function PlayerMapView({ campaignId, broadcastMsg }) {
+  // The fight as the DM's tracker last described it, and whose turn it is.
+  const [combatRoster,     setCombatRoster]     = useState([])
+  const [combatSelectedId, setCombatSelectedId] = useState(null)
   // Map state
   const [activeMap,    setActiveMap]    = useState(null)
   const [maps,         setMaps]         = useState([])
@@ -83,6 +86,16 @@ export default function PlayerMapView({ campaignId, broadcastMsg }) {
   useEffect(() => {
     if (!broadcastMsg) return
 
+    if (broadcastMsg.type === 'combat:update') {
+      setCombatRoster(broadcastMsg.payload?.combatants ?? [])
+      return
+    }
+
+    if (broadcastMsg.type === 'combat:select') {
+      setCombatSelectedId(broadcastMsg.payload?.combatantId ?? null)
+      return
+    }
+
     if (broadcastMsg.type === 'map:set') {
       window.electronAPI.db.maps.getById(broadcastMsg.payload.mapId).then(map => {
         if (map) {
@@ -146,6 +159,8 @@ export default function PlayerMapView({ campaignId, broadcastMsg }) {
   return (
     <div style={s.mapRoot} ref={mapContainerRef}>
       <MapCanvas
+        combatRoster={combatRoster}
+        combatSelectedId={combatSelectedId}
         map={activeMap}
         mode="player"
         onFogChange={null}
