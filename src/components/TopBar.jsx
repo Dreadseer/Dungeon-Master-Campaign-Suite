@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useCampaignStore    from '../stores/campaignStore'
+import { describeSavedCombat } from '../utils/combatPersistence'
 import usePlayerStore      from '../stores/playerStore'
 import WorldSearch         from './world/WorldSearch'
 import NetworkSessionPanel from './network/NetworkSessionPanel'
@@ -15,6 +16,7 @@ export default function TopBar() {
   const [aiMode,       setAiMode]       = useState(null)
   const [serverRunning, setServerRunning] = useState(false)
   const [showNetwork,   setShowNetwork]   = useState(false)
+  const [liveCombat,    setLiveCombat]    = useState(null)
   const navigate = useNavigate()
   const activeCampaign     = useCampaignStore(s => s.activeCampaign)
   const showPlayerPanel    = usePlayerStore(s => s.showPlayerPanel)
@@ -35,6 +37,27 @@ export default function TopBar() {
     return () => clearInterval(id)
   }, [])
 
+  // A fight left running is easy to forget about once the DM navigates away, so
+  // the bar carries it on every screen. Polled on the same cadence as the server
+  // status rather than pushed, because combat is saved from the renderer and a
+  // broadcast would not reach this component in the pop-out window case.
+  useEffect(() => {
+    if (!activeCampaign) { setLiveCombat(null); return }
+    let cancelled = false
+    const check = async () => {
+      try {
+        const row = await window.electronAPI.db.combat.getActiveForCampaign(activeCampaign.id)
+        if (!cancelled) setLiveCombat(describeSavedCombat(row))
+      } catch {
+        // Silent: a toast every five seconds would be worse than no indicator.
+        if (!cancelled) setLiveCombat(null)
+      }
+    }
+    check()
+    const id = setInterval(check, 5000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [activeCampaign])
+
   const modeConf = aiMode ? (MODE_CONFIG[aiMode] || MODE_CONFIG['no-ai']) : null
 
   return (
@@ -42,6 +65,16 @@ export default function TopBar() {
     <header style={styles.bar}>
       <span style={styles.title}>⚔ DM Campaign Suite</span>
       <div style={styles.right}>
+        {liveCombat && (
+          <button
+            style={styles.combatBtn}
+            onClick={() => navigate('/encounters')}
+            title={`${liveCombat.encounterName ?? 'Combat'} — ${liveCombat.living} of ${liveCombat.combatants} still standing`}
+          >
+            ⚔ Combat in progress — round {liveCombat.round}
+          </button>
+        )}
+
         {activeCampaign && <WorldSearch />}
 
         {/* Network session toggle */}
@@ -121,6 +154,11 @@ const styles = {
     fontSize: '0.75rem', fontWeight: 'bold', padding: '0.25rem 0.75rem',
     borderRadius: 4, border: '1px solid', cursor: 'pointer',
     letterSpacing: '0.03em',
+  },
+  combatBtn: {
+    fontSize: '0.8rem', padding: '0.25rem 0.75rem', borderRadius: 4,
+    border: '1px solid #8a6a2a', background: '#2a2010', color: '#c9a84c',
+    cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap',
   },
   playerBtn: {
     fontSize: '0.8rem', padding: '0.25rem 0.75rem', borderRadius: 4,

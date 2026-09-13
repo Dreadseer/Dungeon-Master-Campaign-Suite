@@ -28,6 +28,8 @@ export default function EncounterBuilder() {
   const [loadError, setLoadError]     = useState('')
   const [showCreate, setShowCreate]   = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(null)   // encounter id
+  // encounter_id -> round, for every fight left unfinished in this campaign
+  const [savedCombats, setSavedCombats] = useState({})
 
   // ── Create-modal state ───────────────────────────────────────────────────
   const [locations, setLocations]     = useState([])
@@ -55,6 +57,23 @@ export default function EncounterBuilder() {
   }, [activeCampaign])
 
   useEffect(() => { loadEncounters() }, [loadEncounters])
+
+  // Which encounters have a fight still in progress. Loaded alongside the list
+  // so a DM who closed the app mid-combat can see where they left off without
+  // opening each encounter to find out.
+  const loadSavedCombats = useCallback(async () => {
+    if (!activeCampaign) return
+    try {
+      const rows = await window.electronAPI.db.combat.getAll(activeCampaign.id)
+      setSavedCombats(Object.fromEntries(rows.map(r => [r.encounter_id, r.round_count])))
+    } catch (err) {
+      // Not being able to tell is a worse outcome than a toast, but it must not
+      // stop the encounter list itself from rendering.
+      notifyError(err, 'Check for combats in progress')
+    }
+  }, [activeCampaign])
+
+  useEffect(() => { loadSavedCombats() }, [loadSavedCombats])
 
   // Load campaign characters on mount (needed for difficulty badges + tracker)
   useEffect(() => {
@@ -267,7 +286,7 @@ export default function EncounterBuilder() {
     // Shared editor header
     const editorHeader = (
       <div style={s.editorHeader}>
-        <button style={s.backBtn} onClick={() => { setActiveEncounter(null); loadEncounters() }}>
+        <button style={s.backBtn} onClick={() => { setActiveEncounter(null); loadEncounters(); loadSavedCombats() }}>
           ← Encounters
         </button>
         <h2 style={s.editorTitle}>{activeEncounter.name}</h2>
@@ -522,6 +541,12 @@ export default function EncounterBuilder() {
                   </span>
                 </div>
 
+                {savedCombats[enc.id] !== undefined && (
+                  <div style={s.resumeBanner}>
+                    ⚔ Combat in progress — round {savedCombats[enc.id]}
+                  </div>
+                )}
+
                 <div style={s.cardMeta}>
                   {enc.location_name && (
                     <span style={s.cardLocation}>📍 {enc.location_name}</span>
@@ -538,7 +563,14 @@ export default function EncounterBuilder() {
                 </div>
 
                 <div style={s.cardActions}>
-                  <button style={s.openBtn} onClick={() => openEncounter(enc)}>Open</button>
+                  <button
+                    style={savedCombats[enc.id] !== undefined ? s.resumeBtn : s.openBtn}
+                    onClick={() => openEncounter(enc)}
+                  >
+                    {savedCombats[enc.id] !== undefined
+                      ? `Resume combat (round ${savedCombats[enc.id]})`
+                      : 'Open'}
+                  </button>
                   <button style={s.dupBtn} onClick={() => handleDuplicate(enc)}>Duplicate</button>
                   {deleteConfirm === enc.id ? (
                     <>
@@ -689,6 +721,16 @@ const s = {
   confirmNo: {
     padding: '4px 10px', background: '#2a2a2a', color: '#888',
     border: '1px solid #444', borderRadius: 4, cursor: 'pointer', fontSize: 12,
+  },
+  resumeBanner: {
+    fontSize: 11, color: '#c9a84c', background: '#2a2010',
+    border: '1px solid #5a4010', borderRadius: 4,
+    padding: '3px 8px', marginBottom: 8,
+  },
+  resumeBtn: {
+    padding: '6px 12px', background: '#2a2010', border: '1px solid #8a6a2a',
+    color: '#c9a84c', cursor: 'pointer', fontSize: 12, borderRadius: 4,
+    fontWeight: 600,
   },
   statusBadge: {
     fontSize: 11, fontWeight: 600, padding: '2px 8px',
