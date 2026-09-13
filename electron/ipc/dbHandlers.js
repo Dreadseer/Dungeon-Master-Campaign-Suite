@@ -14,6 +14,12 @@ const POLYMORPHIC_TYPES = ['npc', 'location', 'faction', 'lore']
 // Without this, deleting an NPC left its connection rows behind pointing at an
 // id that no longer exists; the Connections page then rendered them as
 // "Unknown", and the Mind Map kept a position row for a node it could not draw.
+//
+// Phase 4.5 adds `reveals` to the same sweep. Phase 4 introduced it with the
+// same polymorphic shape and the same problem: deleting a revealed NPC left a
+// reveals row pointing at a dead id, which the player's "What you know" view
+// then silently skipped — invisible rather than wrong, but still an orphan, and
+// worse, a NEW entity could later be given that id and inherit the reveal.
 function deleteWithPolymorphicRefs(db, table, entityType, id) {
   if (!POLYMORPHIC_TYPES.includes(entityType)) {
     throw new Error(`Unknown polymorphic entity type: ${entityType}`)
@@ -27,6 +33,10 @@ function deleteWithPolymorphicRefs(db, table, entityType, id) {
     )
     db.run(
       'DELETE FROM mind_map_positions WHERE entity_type = ? AND entity_id = ?',
+      [entityType, id]
+    )
+    db.run(
+      'DELETE FROM reveals WHERE entity_type = ? AND entity_id = ?',
       [entityType, id]
     )
     return db.run(`DELETE FROM ${table} WHERE id = ?`, [id])

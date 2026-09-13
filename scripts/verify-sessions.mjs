@@ -252,6 +252,50 @@ console.log('\n=== C. Sessions: create increments the count ===\n')
     return dbApi.get("SELECT COUNT(*) c FROM reveals WHERE entity_id=5").c === 2
   })())
 
+  // ── E2. Deleting an entity clears its reveals (Phase 4.5) ───────────────
+  console.log('\n=== E2. Orphaned reveals ===\n')
+
+  // Mirrors deleteWithPolymorphicRefs in electron/ipc/dbHandlers.js.
+  const deleteWithPolymorphicRefs = (table, entityType, id) => {
+    dbApi.run(`DELETE FROM connections
+               WHERE (entity_a_type = ? AND entity_a_id = ?)
+                  OR (entity_b_type = ? AND entity_b_id = ?)`, [entityType, id, entityType, id])
+    dbApi.run('DELETE FROM mind_map_positions WHERE entity_type = ? AND entity_id = ?', [entityType, id])
+    dbApi.run('DELETE FROM reveals WHERE entity_type = ? AND entity_id = ?', [entityType, id])
+    return dbApi.run(`DELETE FROM ${table} WHERE id = ?`, [id])
+  }
+
+  // An NPC that is revealed, connected, and positioned on the mind map.
+  dbApi.run("INSERT INTO npcs (id, campaign_id, name) VALUES (77, 1, 'Doomed NPC')")
+  revealIt('npc', 77, null)
+  dbApi.run(`INSERT INTO connections (campaign_id, entity_a_type, entity_a_id, entity_b_type, entity_b_id, relationship)
+             VALUES (1, 'npc', 77, 'faction', 1, 'member of')`)
+  dbApi.run("INSERT INTO mind_map_positions (campaign_id, entity_type, entity_id, x_pos, y_pos) VALUES (1,'npc',77,10,10)")
+
+  check('setup: the NPC has a reveal, a connection and a position',
+    dbApi.get("SELECT COUNT(*) c FROM reveals WHERE entity_type='npc' AND entity_id=77").c === 1 &&
+    dbApi.get("SELECT COUNT(*) c FROM connections WHERE entity_a_id=77").c === 1 &&
+    dbApi.get("SELECT COUNT(*) c FROM mind_map_positions WHERE entity_id=77").c === 1)
+
+  deleteWithPolymorphicRefs('npcs', 'npc', 77)
+
+  check('deleting the NPC leaves ZERO orphaned reveals',
+    dbApi.get("SELECT COUNT(*) c FROM reveals WHERE entity_type='npc' AND entity_id=77").c === 0)
+  check('  its connections are gone too',
+    dbApi.get('SELECT COUNT(*) c FROM connections WHERE entity_a_id=77').c === 0)
+  check('  its mind-map position is gone',
+    dbApi.get('SELECT COUNT(*) c FROM mind_map_positions WHERE entity_id=77').c === 0)
+  check('  the NPC itself is gone', !dbApi.get('SELECT 1 FROM npcs WHERE id=77'))
+
+  // A different entity type that happens to share the id must be untouched.
+  dbApi.run("INSERT INTO locations (id, campaign_id, name, type) VALUES (77, 1, 'Same Id Location', 'town')")
+  revealIt('location', 77, null)
+  dbApi.run("INSERT INTO npcs (id, campaign_id, name) VALUES (78, 1, 'Another NPC')")
+  revealIt('npc', 78, null)
+  deleteWithPolymorphicRefs('npcs', 'npc', 78)
+  check("deleting an NPC does not touch a LOCATION with the same id",
+    dbApi.get("SELECT COUNT(*) c FROM reveals WHERE entity_type='location' AND entity_id=77").c === 1)
+
   // ── F. Lore body search ─────────────────────────────────────────────────
   console.log('\n=== F. Searching inside a lore entry body ===\n')
 
