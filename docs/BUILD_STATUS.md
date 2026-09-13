@@ -1348,6 +1348,14 @@ and are recorded here because each would otherwise look like a regression: monst
 `count` rather than `quantity`, and the encounter and character create handlers stringify their own
 JSON, so passing pre-stringified values double-encoded them.
 
+### A second thing the screenshots found
+
+A banner under the tracker header still read *"Combat state is not saved. Closing the app will
+reset initiative."* All sixteen checks passed with it on screen — no assertion looks at text
+nobody thought to assert on. It was caught by opening the PNGs, and is fixed in `a9a666f`: the
+line now states that combat is saved and what clears it, or that the fight was resumed. That also
+gave the `resumed` flag its first reader.
+
 ### Deferred / known issues
 
 - **`srd_cache` has no writer on the preload bridge.** `srd:seedAll` fetches from dnd5eapi.co, so a
