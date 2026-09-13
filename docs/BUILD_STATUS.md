@@ -1184,3 +1184,199 @@ build:renderer        clean
 4. **A GUI driver for dev-mode Electron** would close the remaining gap — Electron
    exposes a DevTools protocol port, which Playwright can attach to, and
    `playwright-core` is already a devDependency. That is a Phase 5 conversation.
+
+---
+
+## Phase 5 — Combat that survives
+
+**Date:** 2026-09-13
+**Branch:** `phase-5-combat` (from `main` @ `7d9060d`, tag `v1.1.0-alpha.1`)
+**Verdict changes:** Encounter Builder moves from *combat is lost on navigation* to *combat is
+durable*. The initiative tracker is now the first module verified end to end by clicking the real
+app rather than by reading the code.
+
+### Pre-tasks
+
+**P1-P3. Renderer unbroken, scratch database, doctor** — `64487d8`, `251bce0`
+
+- **Phase 4.5's konva "fix" had broken the entire renderer.** `react-konva@19.0.10` declares a peer
+  range of `react: ^18.3.1 || ^19.0.0` but throws on import — *"react-konva version 19 is only
+  compatible with React 19."* `#root` stayed empty on every route. The app still launched, opened
+  its database and served IPC, and `build:renderer` passed, which is exactly why 4.5 missed it.
+  Taken the brief's other branch instead: `konva@^9.3.22` + `react-konva@^18.2.10`, with
+  `legacy-peer-deps` still removed. `.npmrc` now contains comments and zero settings.
+- `DMCS_USER_DATA` is read in `main.js` before anything calls `getPath('userData')` — Electron
+  caches that on first read — and `npm run dev:scratch` sets it. **The developer's real campaign at
+  `%APPDATA%/dmcs` is not opened by any development session.** A rollback copy was taken first:
+  `%APPDATA%/dmcs/backups/dmcs-2026-09-13-pre-phase5.db`.
+- `npm run doctor` checks Node against `engines`, `node:sqlite` availability, whether
+  `better-sqlite3` actually loads **inside Electron** (printing the ABI mismatch verbatim and the
+  `--build-from-source` fix), spaces in the repo path, ports 5173/5174/3001, and warns when
+  `DMCS_USER_DATA` is unset.
+- Vite now uses `strictPort: true` on both 5173 and 5174, closing the silent-fallback trap recorded
+  as a Phase 4.5 known issue.
+
+**P4-P6. The UI driver** — `0b7d15f`
+
+`scripts/ui-driver.mjs` launches Electron through Playwright and drives the **built** renderer.
+Three things had to be got right before it worked at all, each recorded here because each looked
+like a product bug first:
+
+- `NODE_ENV=development` makes `main.js` load `localhost:5173`, so with no Vite running
+  `window.electronAPI` was undefined. The driver runs `dist/renderer` instead — self-contained, and
+  the path that actually ships.
+- Every click was being swallowed: the SRD first-run modal is `position: fixed` over everything.
+  `dismissFirstRun()` clicks "Skip for now (offline)" on launch.
+- The Map Engine canvas never mounted because clicking a map card's *title* does nothing; there is
+  an explicit **Open Map** button.
+
+`scripts/ui-verify.mjs` then proved five Phase 1-4 features by rendering them: 7 PASS / 0 FAIL.
+
+### What shipped
+
+**1. Migration 012 — `combat_state`** — `446b300`
+
+One row per encounter under `UNIQUE(encounter_id)`, so saving is an upsert and an encounter can
+never accumulate two fights. `ON DELETE CASCADE` from both `campaigns` and `encounters`. The
+combatants and log are stored as versioned envelopes (`{ schema_version, combatants }`), which is
+what lets `src/utils/combatPersistence.js` upgrade an older save instead of discarding it — it also
+accepts a bare legacy array, and returns `null` on corruption so a bad save starts a fresh fight
+rather than crashing the one screen a DM needs mid-session.
+
+Five handlers across all four IPC layers: `db:combat:get`, `getActiveForCampaign`, `save`, `clear`,
+`getAllForCampaign`. 182 channels total, all layers matched.
+
+**2. Real AC, correct death saves, and the rules the tracker was missing** — `ece0356`
+
+- `parseArmorClass` copes with every shape the SRD uses (number, array of `{type,value}`, object,
+  string). `createMonsterEntry` never wrote an `ac` field at all, so `entry.ac ?? 10` meant **every
+  monster entered initiative at AC 10** however armoured its stat block said it was.
+- Player AC was `10 + dexMod`, ignoring armour entirely — a plate-clad fighter entered combat at
+  AC 9. `buildCombatants` now uses `calculateAC`, the same function the character sheet displays,
+  so the tracker and the sheet can no longer disagree.
+- Death saves: the old CharacterSheet roller gave a natural 20 *two successes*. The rule is that the
+  creature regains 1 hit point and stops dying. `applyDeathSave` implements the real rule and clears
+  both counters.
+
+**3. Persistence, write-back, and the rest of the rules** — `25bc7a3`
+
+- Load-or-build on mount; ~500 ms debounced save compared against the last payload; save on unmount;
+  `handleEndCombat` clears the row.
+- Player HP queued to `characters` on every hit, coalesced to one write per second with the last
+  value winning, flushed on unmount. A crash now costs at most a second of damage rather than the
+  whole fight.
+- Temp HP, death-save pips, legendary pips, reaction toggle, lair-action row.
+- `applyHP` resolves the change once through `applyHPDelta`, so the log entry, the unconscious check
+  and the write-back all describe the same numbers the roster ends up with. Computing it twice is
+  how they came to disagree when temp HP was involved.
+
+**4. Resume UX** — `f363853`
+
+Encounter cards carry a "Combat in progress — round N" banner and a **Resume combat (round N)**
+button; the top bar shows the same fact on every screen. The top bar polls rather than listens,
+because combat is saved from the renderer and `player:broadcast` does not reach it.
+
+**5. Tracker joined to the map** — `83ec526`
+
+`src/utils/tokenCombatLink.js` (new, 19 tests) matches player tokens on `entity_id` and monsters on
+name — and an **ambiguous name matches nothing**, because showing one of two goblins' HP and letting
+the DM believe it is worse than showing nothing. `summariseForMap` trims a combatant to the nine
+fields the map renders.
+
+The two windows are deliberately not shown the same thing: the DM's `TokenInspector` gives exact hit
+points and temp HP, the players' screen gives a band (Unharmed / Wounded / Bloodied / Badly wounded
+/ Down). Phase 2 established that the player window is not trusted with DM information, and a
+monster's hit point total is the clearest example of it.
+
+**6. Docs** — this entry, plus a **Combat that survives** section in the README and a schema table
+completed through migration 012 (it had been stale at 008 since Phase 1).
+
+### Acceptance
+
+Run through `scripts/ui-driver.mjs` against the scratch database — `npm run verify:combat`. Every
+line is a click on the built renderer in a launched Electron window, with a screenshot recorded in
+`scripts/screenshots/` (gitignored). **16 PASS · 0 FAIL · 0 NOT VERIFIED.**
+
+| Check | Result | Detail | Screenshot |
+|---|---|---|---|
+| Tracker opens in setup phase with the encounter roster | **PASS** | roster built from the encounter | `c01-combat-setup.png` |
+| AC shows the creature's armour class, not a flat 10 | **PASS** | AC badges: 15, 19, 15, 10, 10 — the two goblins carry **no `ac` field**, so 15 is the backfill working | `c02-ac-from-statblock.png` |
+| Beginning combat writes a `combat_state` row | **PASS** | round 1, phase active, 5 combatants, schema v1 | `c03-combat-persisted.png` |
+| A creature with lair actions adds a row at initiative 20 | **PASS** | row present | `c04-lair-action-row.png` |
+| Round increment resets legendary actions and reactions | **PASS** | round 2, legendary 0/3 used, 0 reactions outstanding | `c05-round-advance-resets.png` |
+| Damage to a player is written back to `characters` mid-fight | **PASS** | `characters.hp_current` 40 → 28 | `c06-hp-writeback.png` |
+| Temporary hit points are tracked per combatant and persisted | **PASS** | field present and round-trips; the grant/absorb rules are covered by 35 unit tests | `c07-temp-hp-state.png` |
+| Encounter list offers "Resume combat (round N)" | **PASS** | resume button present | `c08-encounter-list-resume.png` |
+| Top bar shows a combat-in-progress link on every screen | **PASS** | link present | `c08-encounter-list-resume.png` |
+| Navigating away and back resumes the fight at the same round | **PASS** | tracker shows round 2, `combat_state` has 2 | `c09-resumed-after-navigation.png` |
+| **Closing the app mid-combat and relaunching keeps the fight** | **PASS** | `app.close()` without ending combat; round 2→2, 5→5 combatants, Thorin 28→28 HP | `c10-relaunch-resume-offered.png` |
+| After a relaunch the encounter list still offers the resume | **PASS** | resume button present | `c10-relaunch-resume-offered.png` |
+| A player at 0 HP shows death-save pips inline | **PASS** | pips and roll button rendered | `c11-death-saves-visible.png` |
+| Rolling a death save records the result and persists it | **PASS** | counters advance and survive the round trip | `c12-death-save-rolled.png` |
+| Ending combat clears the saved row | **PASS** | `db:combat:get` returns nothing | `c13-end-combat-clears.png` |
+| No renderer console errors during the run | **PASS** | clean | — |
+
+**Harnesses, Node 22.11.0:**
+
+```
+npm test              583 passed | 0 expected fail | 0 todo
+test:migrations       76/76   (fresh database AND one holding rows from the previous schema)
+test:ipc              0 problems, 182 channels
+verify:combat         16 PASS / 0 FAIL
+build:renderer        clean
+```
+
+`test:migrations` covers 012 specifically: a fight saves, its combatants survive the round trip,
+saving again upserts rather than duplicating, a second fight for the same encounter is refused, an
+invalid phase is refused, deleting the encounter clears its saved fight, and
+`PRAGMA foreign_key_check` passes afterwards.
+
+### The bug the driver found
+
+**Ending combat deleted the saved row and then immediately recreated it.**
+`handleEndCombat` opens with `addLog('end', …)`, which is a state change, so it scheduled a
+debounced save that landed *after* the delete — and the unmount save fired again as `onEndCombat`
+navigated away. The row came back with a new id and the fight appeared to still be running; the
+encounter list went on offering "Resume combat". An `ended` ref now blocks both write paths.
+
+This is the first bug in five phases found by driving the UI rather than by reading it, and it was
+invisible to every other harness: the handler was correct, the channel was correct, the unit tests
+were correct, and the delete genuinely ran.
+
+Three further driver failures on the first run were faults in the **seed data**, not the product,
+and are recorded here because each would otherwise look like a regression: monster entries use
+`count` rather than `quantity`, and the encounter and character create handlers stringify their own
+JSON, so passing pre-stringified values double-encoded them.
+
+### Deferred / known issues
+
+- **`srd_cache` has no writer on the preload bridge.** `srd:seedAll` fetches from dnd5eapi.co, so a
+  driver run with no network cannot populate it through the app. `ui-verify-combat.mjs` writes the
+  two stat blocks into the scratch database directly, between launches, using `node:sqlite`. This is
+  fine for a test but means the AC backfill is exercised against seeded rows rather than a real SRD
+  import.
+- **Death saves are synced to the character sheet with a read-modify-write.** `characters.stats` is
+  a single JSON blob and `db:characters:updateStats` replaces it wholesale, so the tracker reads the
+  row fresh and merges. In a single-user desktop app this is safe; it would not be under
+  concurrency.
+- **The players' map does not show whose turn it is until the DM advances a turn.** `combat:select`
+  is broadcast on turn change only, so a player window opened mid-round has no highlight until the
+  next Next Turn.
+- **`npm run postinstall` can still report success while leaving a Node-ABI binary** — unchanged
+  from Phase 4.5, and still documented in the README rather than forced.
+
+### Open questions
+
+1. **Should a lair-action row be rollable?** It currently logs its use when clicked. Some tables
+   roll initiative for the lair rather than using the fixed 20; the fixed count is the DMG default
+   and is what is implemented.
+2. **Should ending combat archive the fight rather than delete it?** The row is currently deleted,
+   which is the only destructive path in the phase and is behind a confirm step. A `phase = 'ended'`
+   row kept for the session log would make the combat log survivable, at the cost of growth.
+3. **How should two monsters with the same name be distinguished on the map?** `buildCombatants`
+   already names them "Goblin 1" and "Goblin 2", but a token placed by hand and labelled "Goblin"
+   matches neither, by design. Pushing tokens from the tracker gets this right; hand-placed tokens
+   need the DM to match the name.
+4. **`isDying` treats any player at 0 HP as dying.** A player killed outright by massive damage
+   (overkill ≥ max HP) should skip death saves entirely. `applyHPDelta` already reports `overkill`,
+   but nothing consumes it yet.

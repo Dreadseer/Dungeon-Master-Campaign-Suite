@@ -29,12 +29,14 @@ DMCS solves the "twelve browser tabs and a stack of PDFs" problem. Everything a 
 9. [Database Schema](#database-schema)
 10. [Modules](#modules)
 11. [AI Layer](#ai-layer)
-12. [Player Views](#player-views)
-13. [Testing](#testing)
-14. [Building the Windows Installer](#building-the-windows-installer)
-15. [Troubleshooting](#troubleshooting)
-16. [Open Questions](#open-questions)
-17. [License](#license)
+12. [Sessions, plot threads and reveals](#sessions-plot-threads-and-reveals)
+13. [Combat that survives](#combat-that-survives)
+14. [Player Views](#player-views)
+15. [Testing](#testing)
+16. [Building the Windows Installer](#building-the-windows-installer)
+17. [Troubleshooting](#troubleshooting)
+18. [Open Questions](#open-questions)
+19. [License](#license)
 
 ---
 
@@ -117,7 +119,7 @@ npm run dev
 
 On first launch DMCS will, automatically:
 1. Create its SQLite database under the OS user-data directory (see [Where is the database?](#where-is-the-database)).
-2. Run all **8** database migrations in order (`DatabaseService.runMigrations()`).
+2. Run all **12** database migrations in order (`DatabaseService.runMigrations()`).
 3. Seed the SRD cache (monsters, spells, equipment, classes) from `https://www.dnd5eapi.co` — **once**, over the network, then cached locally.
 
 **Verified in this environment:** `npm install` and `npm run build:renderer` (`vite build`) both succeed. The full installer build is covered in [Building the Windows Installer](#building-the-windows-installer). `npm run dev` opens a GUI and was not exercised headlessly.
@@ -210,7 +212,7 @@ Dungeon Master Campaign Suite/
 ├── electron/                 # MAIN process (Node.js)
 │   ├── main.js               # Entry: window creation, service wiring, IPC registration
 │   ├── preload.js            # contextBridge → window.electronAPI (the only renderer bridge)
-│   ├── database/             # DatabaseService.js — SQLite connection, 8 migrations, CRUD
+│   ├── database/             # DatabaseService.js — SQLite connection, 12 migrations, CRUD
 │   ├── services/             # AIService, EmbeddingService, RAGService, PdfIngestionService,
 │   │                         #   SrdService, KeyService
 │   ├── ipc/                  # *Handlers.js — ipcMain.handle for db:/ai:/srd:/pdf:/embed:/…
@@ -228,8 +230,9 @@ Dungeon Master Campaign Suite/
 │   ├── main.jsx / PlayerWebApp.jsx / index.html / components/
 │
 ├── tools/                     # dmcs-agent.mjs — unrelated LM Studio experiment (see tools/README.md)
-├── scripts/                  # verify-migration-009.mjs + verify-ipc-layers.mjs (npm-wired),
-│                             # plus manual verify-*.js scripts and the screenshot driver
+├── scripts/                  # verify-*.mjs harnesses (npm-wired: migrations, ipc, rag,
+│                             # sessions, player server), doctor.mjs, and the Playwright
+│                             # UI driver (ui-driver.mjs + ui-verify*.mjs)
 ├── assets/                   # electron-builder buildResources (icon.png)
 ├── vite.config.js            # DM renderer build (base './', outDir dist/renderer)
 ├── vite.player.config.js     # Browser player build (root player/, outDir dist/player, dev :5174)
@@ -324,8 +327,20 @@ The database is created and migrated automatically on first launch — you never
 | 006 | `subclasses` | `subclasses` table (+ seed subclasses) |
 | 007 | `encounter_map_loc_fields` | Encounter ↔ map/location linking fields |
 | 008 | `compendium_source_book` | Source-book / page attribution fields on compendium entries |
+| 009 | `referential_integrity` | Foreign keys and `ON DELETE` behaviour across the world tables (Phase 1) |
+| 010 | `shared_pdf_sources` | Drops `NOT NULL` from `pdf_sources.campaign_id`, so an SRD source can be shared (Phase 3) |
+| 011 | `sessions_plots_reveals` | `sessions`, `plot_threads`, `reveals` and their link tables; copies each campaign description into a first session (Phase 4) |
+| 012 | `combat_state` | One saved fight per encounter, so combat survives navigation and relaunch (Phase 5) |
 
-> Registered at `electron/database/DatabaseService.js:24-32`. Exact column definitions live in the `MIGRATION_00N` constants in that file.
+> Registered at `electron/database/DatabaseService.js:24-46`. Exact column definitions live in the `MIGRATION_0NN` constants in that file.
+
+`combat_state` holds the whole fight as two JSON blobs — `combatants` and
+`log_entries` — under a `UNIQUE(encounter_id)`, so saving is an upsert and an
+encounter can never accumulate two fights. Both blobs are written inside a
+versioned envelope (`{ schema_version, combatants }`), which is what lets
+`src/utils/combatPersistence.js` upgrade an older save rather than discard it. A
+row is deleted only when the DM ends combat; `ON DELETE CASCADE` from both
+`campaigns` and `encounters` takes care of the rest.
 
 Several columns store JSON strings (SQLite has no JSON type) — always `JSON.parse()` on read and `JSON.stringify()` on write. Examples: `characters.stats`, `characters.inventory`, `characters.spell_slots`, `maps.fog_data`, `maps.tokens`, `encounters.monsters`, `subclasses.features`.
 
@@ -383,7 +398,7 @@ migrated and some not, and any idempotence check then skips the rest forever.
 | Map Engine | Upload battle maps, paint fog of war, place tokens; opens a pop-out combat-map window. Changing a map's grid size re-indexes the fog mask, so saving a new size on a painted map asks for confirmation and then clears the fog. |
 | Compendium | Browse SRD monsters/spells/equipment + homebrew, **and** the [Source Book Importer](DMCS_Source_Book_Importer.md) (📥 Single / 📦 Bulk) that turns indexed PDF passages into structured entries via AI. |
 | Character Sheets | Full 5e sheets (stats, inventory, spell slots, death saves) with a level-up wizard and AI assistant. |
-| Encounter Builder | Build encounters from SRD monsters; XP/difficulty calculator; initiative tracker with HP sync back to characters. |
+| Encounter Builder | Build encounters from SRD monsters; XP/difficulty calculator; initiative tracker. **Combat is saved as it happens** (Phase 5) — see below. |
 | Combat Calculator | Standalone XP/CR calculator. |
 | AI Assistant | Streaming chat with campaign context injected; "Rules Q&A" routes through the RAG pipeline. |
 | AI Sources | Upload PDFs, monitor indexing, trigger embedding. |
@@ -502,6 +517,69 @@ campaign that already has a session is skipped.
 
 ---
 
+## Combat that survives
+
+Before Phase 5 the initiative tracker rebuilt itself from the encounter on every
+mount. Leaving the tracker and coming back lost the fight — initiative order, HP,
+conditions, the log, all of it — and player HP only reached the `characters`
+table when combat *ended*, so a crash mid-fight left every character at full
+health.
+
+**What is saved.** Every change to the roster, round, phase or log is written to
+`combat_state` about half a second later, keyed on the encounter. The save is
+skipped while the payload is unchanged, because React hands out new array
+identities on every render and an idle tracker would otherwise rewrite the row
+continuously. The tracker also saves on unmount, which is what navigating away
+actually does.
+
+**Resuming.** Opening an encounter loads its saved fight and falls back to
+building a fresh one only when there is nothing stored. A fight left running is
+advertised in two places, so it cannot be silently forgotten:
+
+- the encounter card carries a "Combat in progress — round N" banner and its
+  Open button becomes **Resume combat (round N)**;
+- the top bar shows a **⚔ Combat in progress — round N** link on every screen,
+  with the encounter name and how many combatants are still standing in the
+  tooltip.
+
+**Player HP** is written back to `characters` on every hit rather than at the
+end, throttled to one write per second per character with the last value winning.
+A crash now costs at most a second of damage.
+
+**Ending combat** deletes the saved row. Nothing else does — this is the only
+destructive path, and it is behind a confirm step.
+
+### Rules the tracker now implements
+
+| Rule | Behaviour |
+|---|---|
+| Temporary hit points | Absorb damage before real HP, take the *higher* of two grants rather than adding, and are never restored by healing. Granted through a third mode on the HP panel, shown as a badge beside the HP bar. |
+| Death saves | Shown inline as pips for any player at 0 HP. A natural 20 revives at 1 HP and clears both counters; a natural 1 counts twice; healing a dying character clears the counters too. Synced into the character's `stats` blob. |
+| Legendary actions | Clickable pips on any creature that has them; right-click a pip to undo a mis-click. Reset on round increment. |
+| Reactions | A per-round toggle, also reset on round increment. |
+| Lair actions | A row at initiative 20 that **loses** initiative ties, per the DMG. Display-only: it is not a creature, so it takes no turn, is never saved as a combatant, and gets no token on the map. |
+| Armour class | Read from the stat block. Entries saved before Phase 5 carry no `ac`, so the tracker looks the creature up by its `source_index` rather than defaulting every monster to AC 10 forever. |
+
+### The map follows the fight
+
+`src/utils/tokenCombatLink.js` joins map tokens to combatants. Player tokens
+match on `entity_id`; monsters exist only in the encounter's JSON, so they match
+on name — and an **ambiguous name matches nothing**, because showing one of two
+goblins' HP and letting the DM believe it is worse than showing nothing.
+
+The tracker broadcasts `combat:update` with a trimmed roster and `combat:select`
+on every turn change, and the pop-out map selects the token whose turn it is.
+`player:broadcast` reaches the pop-out only, so the DM's own map polls
+`db:combat:getActiveForCampaign` instead.
+
+The two windows are deliberately **not** shown the same thing. The DM's
+`TokenInspector` gives exact hit points and temp HP; the players' screen gives a
+band — Unharmed / Wounded / Bloodied / Badly wounded / Down. Working out a
+monster's hit point total is most of what a fight is, and per the player-server
+security model below, the player window is not trusted with DM information.
+
+---
+
 ## Player Views
 
 DMCS has **two** distinct ways for players to see content:
@@ -555,12 +633,34 @@ server.
 ```bash
 npm test              # vitest run — one pass, exits non-zero on failure
 npm run test:watch
-npm run test:migrations   # replays migrations 001-009 on a fresh AND a populated database
+npm run test:migrations   # replays migrations 001-012 on a fresh AND a populated database
 npm run test:ipc          # cross-checks channel names across the preload/handler layers
 npm run test:server       # starts a real player server and checks auth, scoping and fog
 npm run test:rag          # indexes the SRD and runs real queries, including in no-ai mode
 npm run test:sessions     # migration 011, the notes import, and the sessions/plots/reveals SQL
+npm run verify:combat     # Phase 5 acceptance, driven through the real app (see below)
 ```
+
+### Driving the real app
+
+`npm run verify:combat` launches Electron through Playwright, clicks the **built**
+renderer, and records a screenshot per acceptance line into `scripts/screenshots/`
+(gitignored). It is the answer to Phases 0-4 having shipped UI that was never
+rendered once.
+
+Two things make it safe and reproducible:
+
+- every launch sets `DMCS_USER_DATA` to a scratch directory, so a driver run can
+  never open the developer's campaign at `%APPDATA%/dmcs`;
+- it drives `dist/renderer`, not the Vite dev server, so each run is
+  self-contained and exercises the path that actually ships.
+
+The crash-and-relaunch check closes the app with `app.close()` *without* ending
+combat, relaunches against the same scratch directory, and compares the round,
+the combatant count and a player's HP across the restart.
+
+`scripts/ui-driver.mjs` exports the same helpers if you want to script a
+scenario of your own.
 
 None of the five `node` scripts need a working native `better-sqlite3` build:
 they use Node's built-in `node:sqlite`, plain source parsing, or a stub database.
