@@ -25,7 +25,8 @@
     "test:server": "node scripts/verify-player-server.mjs",
     "test:rag": "node --experimental-sqlite scripts/verify-rag.mjs",
     "test:sessions": "node --experimental-sqlite scripts/verify-sessions.mjs",
-    "doctor": "node scripts/doctor.mjs"
+    "doctor": "node scripts/doctor.mjs",
+    "verify:combat": "node --experimental-sqlite scripts/ui-verify-combat.mjs"
   },
   "build": {
     "appId": "com.dmcs.app",

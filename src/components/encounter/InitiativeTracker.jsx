@@ -149,9 +149,14 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
   // the row continuously.
   const saveTimer = useRef(null)
   const lastSaved = useRef(null)
+  // Once the DM ends combat the row is deleted, and nothing may write it back.
+  // Without this the end sequence resurrected it twice over: addLog('end') is a
+  // state change, so it schedules a debounced save that lands AFTER the delete,
+  // and the unmount save fires again as the tracker is torn down.
+  const ended = useRef(false)
 
   useEffect(() => {
-    if (!hydrated || phase === 'setup' || combatants.length === 0) return
+    if (ended.current || !hydrated || phase === 'setup' || combatants.length === 0) return
 
     const payload = serialiseCombat({
       campaignId, encounterId: encounter.id,
@@ -201,7 +206,7 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
   // is exactly what happens when the DM navigates away mid-fight.
   useEffect(() => () => {
     clearTimeout(saveTimer.current)
-    if (!hydratedRef.current || phaseRef.current === 'setup') return
+    if (ended.current || !hydratedRef.current || phaseRef.current === 'setup') return
     const payload = serialiseCombat({
       campaignId, encounterId: encounter.id,
       combatants: combatantsRef.current, round: roundRef.current,
@@ -500,7 +505,10 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
     addLog('end', `🏁 Combat ended — ${roundCount} round${roundCount !== 1 ? 's' : ''}`)
     setEndConfirm(false)
 
-    // Stop the debounced save from resurrecting the row we are about to delete.
+    // Stop every path that could write the row back after the delete: the
+    // pending debounce, the one addLog('end') just scheduled, and the unmount
+    // save that fires when onEndCombat navigates away.
+    ended.current = true
     clearTimeout(saveTimer.current)
     try {
       await window.electronAPI.db.combat.clear(encounter.id)

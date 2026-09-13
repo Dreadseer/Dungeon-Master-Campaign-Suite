@@ -34,3 +34,5 @@ Thumbs.db
 # The real campaign lives in %APPDATA%/dmcs and must never be opened by a dev session.
 .scratch-userdata/
 scripts/.ui-userdata/
+scripts/.combat-userdata/
+scripts/.probe-userdata/
