@@ -643,7 +643,15 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
         </button>
       </div>
 
-      <p style={s.saveNote}>⚠ Combat state is not saved. Closing the app will reset initiative.</p>
+      {/* This line used to read "Combat state is not saved. Closing the app will
+          reset initiative." As of Phase 5 that is simply untrue, and a warning
+          that lies is worse than no warning — a DM who believes it will avoid
+          navigating away for no reason. */}
+      <p style={s.saveNote}>
+        {resumed
+          ? '↻ Resumed from a saved fight — every change since has been saved too.'
+          : '💾 Combat is saved as you go. Closing the app keeps the fight; End Combat clears it.'}
+      </p>
 
       {/* Concentration alert */}
       {concAlert && (
