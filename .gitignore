@@ -29,3 +29,8 @@ npm-debug.log*
 # OS cruft
 .DS_Store
 Thumbs.db
+
+# Scratch user-data for development runs and the UI driver (npm run dev:scratch).
+# The real campaign lives in %APPDATA%/dmcs and must never be opened by a dev session.
+.scratch-userdata/
+scripts/.ui-userdata/

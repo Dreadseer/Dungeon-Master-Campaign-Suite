@@ -3,6 +3,26 @@ const { registerHandler, registerListener } = require('./ipc/registerHandler')
 const fs   = require('fs')
 const path = require('path')
 
+// ── Scratch user-data directory ───────────────────────────────────────────────
+//
+// DMCS_USER_DATA redirects EVERYTHING Electron keeps per-user — the SQLite
+// database, map images, the vectra index, rag-settings.json, the encrypted key
+// files — to a directory of the caller's choosing.
+//
+// This exists because the developer's real campaign lives at the default path,
+// and a development session that runs migrations or writes test rows must never
+// touch it. `npm run dev:scratch` and the UI driver both set it.
+//
+// It must run BEFORE any app.getPath('userData') call. Electron caches the path
+// on first read, so a later setPath would leave some services pointed at the old
+// location and some at the new one — the worst possible outcome.
+if (process.env.DMCS_USER_DATA) {
+  const scratch = path.resolve(process.env.DMCS_USER_DATA)
+  fs.mkdirSync(scratch, { recursive: true })
+  app.setPath('userData', scratch)
+  console.log('[DB] userData redirected to:', scratch)
+}
+
 // ── Player window ─────────────────────────────────────────────────────────────
 let playerWindow = null
 

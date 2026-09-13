@@ -12,6 +12,9 @@ export default defineConfig({
   },
   server: {
     port: 5174,
+    // Same reasoning as vite.config.js: a silent port slide is worse than
+    // a loud failure, because the thing that breaks is somewhere else.
+    strictPort: true,
     proxy: {
       '/api':       { target: 'http://localhost:3001', changeOrigin: true },
       '/socket.io': { target: 'http://localhost:3001', ws: true },
