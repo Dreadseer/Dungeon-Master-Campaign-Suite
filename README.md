@@ -60,6 +60,7 @@ Versions are transcribed from `package.json` (semver ranges as written there).
 | PDF parsing | pdf-parse | `1.1.1` (pinned via `overrides`) |
 | Vector search | vectra | `^0.15.0` |
 | Remote Player Network | express / socket.io / socket.io-client | `^5.2.1` / `^4.8.3` / `^4.8.3` |
+| Canvas | konva / react-konva | `^10.3.0` / `~19.0.10` — **pinned with `~`, not `^`**: react-konva 19.0.8 is the first release accepting konva 10, and 19.0.x still supports React 18. 19.2.x requires React 19, which a caret range would drift onto. |
 | Tunnel / QR | @ngrok/ngrok / qrcode | `^1.7.0` / `^1.5.4` |
 | Image export | html-to-image | `^1.11.13` |
 | Packaging | electron-builder / @electron/rebuild | `^25.1.8` / `^4.0.4` |
@@ -78,7 +79,7 @@ Versions are transcribed from `package.json` (semver ranges as written there).
   - **macOS:** Xcode Command Line Tools
   - These are needed only to *install/build* the app, never by end users of the packaged installer.
 
-> ⚠️ **Path-with-spaces caveat:** `node-gyp` (used during `npm install`'s native build) can fail on directories containing spaces. If `npm install` fails on `better-sqlite3`, install from a space-free path (e.g. `C:\dev\dmcs`).
+> ⚠️ **Path-with-spaces caveat — confirmed, not theoretical.** `node-gyp` fails on directories containing spaces. Verified in Phase 4.5: the same tree that would not build at `C:\Users\...\Dungeon Master Campaign Suite` built cleanly at `C:\dev\dmcs` with no other change. **Clone or move to a space-free path before `npm install`.**
 
 ### Optional (only for AI features)
 

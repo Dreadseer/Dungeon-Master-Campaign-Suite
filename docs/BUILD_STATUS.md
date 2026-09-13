@@ -950,3 +950,237 @@ item appear in the player tab. That needs the app running.
 3. **Migration numbering has drifted from the brief twice** (Phase 3's 010, this phase's 011). Later
    phase briefs that name a migration number will be off by two. Worth a note in the plan document.
 4. **konva / react-konva peer mismatch** — unchanged since Phase 0.
+
+---
+
+## Phase 4.5 — Pre-flight: runnable app, merged main
+
+**Date:** 2026-09-13
+**Branch:** `phase-4.5-fixes` → merged to **`main`**, tagged **`v1.1.0-alpha.1`**.
+**Verdict changes:** none. No new features.
+
+### The headline: the app runs
+
+```
+[DB] Path: C:\Users\chris\AppData\Roaming\dmcs\dmcs.db
+[AI] Mode: offline-ollama
+WINDOW: DM Campaign Suite
+```
+
+`npm run dev` opens the DM window on **Node 22.11.0** from **`C:\dev\dmcs`** with no
+`NODE_MODULE_VERSION` error. The five-phase ABI blocker is gone.
+
+### 1. Diagnosis — the toolchain was never the problem
+
+| Check | Result |
+|---|---|
+| Repo path | `C:\Users\chris\Desktop\Dungeon Master Campaign Suite` — **contains spaces** |
+| Python | **3.14.5 present** |
+| Visual Studio C++ Build Tools | **Visual Studio Community 2026 (18.6.11819.183) present** |
+| Node | 24.13.1 — outside the `>=20 <23` pin |
+
+Both toolchain prerequisites were already installed. The two real causes were the
+path and the Node version, exactly as the README's Troubleshooting section
+predicted.
+
+**The working tree was CLONED, not moved,** to `C:\dev\dmcs`. Your Desktop copy is
+untouched and still the canonical repo — all branches and the merge live there.
+`C:\dev\dmcs` is a build/run environment only.
+
+> **Recommendation, your call:** the Desktop path can never run `npm install`
+> cleanly, because node-gyp still chokes on the spaces. Either work from
+> `C:\dev\dmcs` permanently, or move the Desktop folder somewhere space-free.
+
+### 2. Node pinned
+
+nvm-windows 1.2.2 installed via winget; **Node 22.11.0** installed and active.
+Note that nvm-windows put itself in `%LOCALAPPDATA%\nvm` with symlink
+`C:\nvm4w\nodejs` — neither is on the inherited `PATH` in a non-interactive
+shell, so scripted use needs `NVM_HOME`/`NVM_SYMLINK` prepended.
+
+### 3. The native build — `postinstall` was lying
+
+A clean `npm install` (empty `node_modules`, no lockfile) printed
+`✔ Rebuild Complete`, and the binary was **still wrong**. Verbose output gave the
+reason:
+
+```
+electron-rebuild assuming is prebuild-install powered: better-sqlite3
+electron-rebuild triggering prebuild download step: better-sqlite3
+electron-rebuild installed prebuilt module: better-sqlite3
+```
+
+`electron-rebuild` **does not compile** better-sqlite3 — it detects
+`prebuild-install` and downloads a prebuilt binary, and the one it fetched was
+the Node-ABI build. `--build-from-source` forces a real compile and produces the
+correct ABI-130 binary:
+
+```
+better-sqlite3 under Electron 33.4.11 (ABI 130): loads, CREATE/INSERT/SELECT work
+better-sqlite3 under Node 22.11.0  (ABI 127): NODE_MODULE_VERSION 130 vs 127 — correctly rejected
+```
+
+**This means `npm run postinstall` as written can leave a broken binary while
+reporting success.** Not changed in this phase — changing the postinstall script
+affects every install and deserves its own decision — but it is the single most
+likely thing to waste the next person's afternoon. See Open Questions.
+
+### 4. konva — resolved, not suppressed
+
+Checked rather than assumed, as the brief required:
+
+| react-konva | konva peer | react peer |
+|---|---|---|
+| 18.2.10 (was) | ^7/^8/^9 | >=18.0.0 |
+| 19.0.7 | ^7/^8/^9 | ^18.3.1 \|\| ^19.0.0 |
+| **19.0.8 – 19.0.10** | **^7/^8/^9/^10** | **^18.3.1 \|\| ^19.0.0** |
+| 19.2.7 (latest) | ^7/^8/^9/^10 | **^19.2.0** — too new |
+
+`react-konva@19.0.8` is the first release accepting konva 10, and 19.0.x still
+accepts React 18.3.1 — **so konva does not need downgrading and React does not
+need upgrading.** Pinned to `~19.0.10`, not `^19.0.10`: the caret would drift onto
+19.2.x and its React-19 requirement. There is no 19.1.x.
+
+**`legacy-peer-deps=true` is gone from `.npmrc`.** A clean install now resolves
+with no ERESOLVE and no flags. It was never a fix — it told npm to ignore a real
+conflict. Side benefit: reported vulnerabilities dropped from 40 to 18.
+
+### 5. Reveals orphan cleanup
+
+`reveals` joins `connections` and `mind_map_positions` in
+`deleteWithPolymorphicRefs`. Phase 4 introduced the table with the same
+polymorphic shape and inherited the same problem — and it was worse than a
+cosmetic orphan: the player's "What you know" view silently skipped the dead row,
+so it looked fine, but **a new entity later given that id would have inherited the
+reveal**, showing players something never revealed.
+
+Six checks added to `verify-sessions.mjs` (51/51), including that deleting an NPC
+does not touch a *location* sharing its id.
+
+### 6. Click-through — what was and was not verified
+
+**I could not drive the GUI.** The computer-use tool resolves applications by
+installed or running name, and a dev-mode Electron app launched from
+`node_modules` matches none of `DM Campaign Suite`, `Electron`, or `dmcs`. Four
+attempts, all rejected before any dialog reached you. **No item below was verified
+by clicking.**
+
+What I did instead: `scripts/verify-app-electron.mjs` runs **inside Electron**
+against a **fresh database**, driving the real `DatabaseService` (real migrations,
+real seeding, real better-sqlite3) and the real `deleteWithPolymorphicRefs` lifted
+out of `dbHandlers.js`. **52/52.** That proves the behaviour behind each item in
+the shipping code on the real runtime. It does not prove a button is wired to it,
+that anything renders, or that a toast appears.
+
+| # | Click-through item | Result |
+|---|---|---|
+| 1 | Create campaign; set description; card shows it (not session notes) | **PASS (data)** — description stored and unchanged after session notes are written. Card *rendering* not verified. |
+| 2a | Delete a location with an NPC → succeeds, NPC survives with no location | **PASS (data)** — NPC, map and encounter all survive with `location_id` NULL |
+| 2b | Delete an NPC with a connection and a reveal → both rows gone | **PASS (data)** — connection, reveal and mind-map position all removed |
+| 3 | Trigger a handler error → a toast appears, never silence | **PARTIAL** — NOT NULL and CHECK violations throw catchable errors whose text `friendlyIpcError` rewrites (unit-tested, Phase 1). **The toast itself was not seen.** |
+| 4 | `no-ai` mode: suggestion panel shows the API-key message; Rules Q&A shows passages | **NOT VERIFIED** — and not testable as specified: this machine has **Ollama running**, so the app reports `offline-ollama`, not `no-ai`. The `no-ai` paths are covered by `test:rag` (42/42) at the service layer. |
+| 5 | Sessions: create three, type notes, blur → saved indicator; card shows "3 sessions" | **PASS (data)** — three sessions numbered 1..3, `session_count` = 3, `updateNotes` writes notes without clobbering the title, `campaigns.description` untouched. **Indicator and card not seen.** |
+| 6 | CampaignManager textarea edits the current session, not the description | **PASS (data)** — asserted directly: writing session notes leaves `description` byte-identical |
+| 7 | Plot board: create, move through all four statuses, link to a session | **PASS (data)** — open → active → resolved (stamped with session) → reopened (stamp cleared) → abandoned; survives deletion of its opening session with a NULL link |
+| 8 | Reveal toggle on Lore/NPCs/Locations/Factions; secret item asks first | **PARTIAL** — reveal / re-reveal / unreveal semantics PASS. **The confirm dialog is renderer-only and was not seen.** |
+| 9 | Player window "What you know" lists revealed items and nothing DM-only | **PASS (API)** — `test:server` 62/62 includes five checks asserting `secrets`, `motivation`, `notes` and `lore` appear nowhere in the raw response. **The tab was not opened.** |
+| 10 | Mind Map: eight types selectable, default shows three, 20+ nodes render | **NOT VERIFIED** — entirely a rendering claim |
+| 11 | Attached panel shows a location's NPCs, maps and encounters | **PASS (data)** — all three `getByLocation` queries return the right rows. **Panel not seen.** |
+| 12 | Map Engine: upload, paint fog, place token, grid-size prompt, pop-out | **NOT VERIFIED** — entirely rendering and canvas interaction |
+| 13 | Remote player: start server, join with token; `curl` without token → 401 | **PASS (API)** — `test:server` 62/62 against a real running `PlayerServer`, including the 401. **No browser joined.** |
+| 14 | Encounter Builder: 4× CR 2 vs four L5 → Hard | **PASS** — 3600 adjusted XP, "Hard", using the renderer's own `encounterUtils` source |
+
+**Summary: 9 PASS (data/API), 2 PARTIAL, 3 NOT VERIFIED.** Everything not verified
+is a rendering or interaction claim. No data-layer item failed.
+
+### Bonus finding: the migrations ran against your real database
+
+`npm run dev` opened `%APPDATA%\dmcs\dmcs.db` — your actual campaign — which was
+still at **migration 2**. Migrations 3 through 11 applied to it in one go. This
+was not planned (the brief assumed a fresh database) but it is the strongest
+evidence available, so it was verified rather than discarded:
+
+```
+campaigns:  #1 The Chosen's Folly   session_count=1   description=66 chars
+sessions:   #1 campaign 1  session 1  "Imported notes"  notes=66 chars
+            description vs session notes: identical=YES
+row counts: locations 2, factions 2, maps 1, connections 1, srd_cache 902, subclasses 27
+schema:     all six Phase 1/3/4 properties present
+integrity:  foreign_key_check violations 0, integrity_check ok
+```
+
+**Rule 10 held on real data**: the description was copied, not moved, and both
+copies are byte-identical. A snapshot was taken at
+`%APPDATA%\dmcs\dmcs.db.snapshot-after-migrations-009-011-20260912-235341`
+(named for what it is — it was taken *after* the migrations, so it is not a
+pre-migration rollback point).
+
+### 7-9. Merge
+
+All six branches formed a clean linear chain and **every merge fast-forwarded**:
+
+```
+main 08a8f94 → phase-0 → phase-1 → phase-2 → phase-3 → phase-4 → phase-4.5
+main afa9c8a  (71 commits)   tag v1.1.0-alpha.1
+```
+
+`scripts/screenshots/` untracked (17 PNGs, gitignored since Phase 0, files kept
+on disk).
+
+### Acceptance
+
+| Check | Result |
+|---|---|
+| `npm run dev` opens the DM window on Node 20/22 from a space-free path, no ABI error | **PASS** |
+| `.npmrc` no longer needs `legacy-peer-deps` | **PASS** — file contains no settings at all |
+| Every click-through line has a recorded result | **PASS** — 14 lines, none blank; 3 recorded as NOT VERIFIED with the reason |
+| Deleting an entity with a reveal leaves zero orphaned reveals | **PASS** — harness-verified twice (`test:sessions`, `verify-app-electron`) |
+| `main` contains all phases; `npm test` and all `test:*` green on main | **PASS** |
+
+**On main, Node 22.11.0:**
+
+```
+npm test              446 passed | 1 expected fail | 2 todo
+test:sessions         51/51
+test:migrations       62/62
+test:rag              42/42
+test:server           62/62
+test:ipc              0 problems
+verify-app-electron   52/52   (inside Electron, fresh database)
+build:renderer        clean
+```
+
+### Fixed along the way
+
+- **The three `node:sqlite` harnesses did not run on the pinned Node.** They were
+  written on Node 24, where that module is unflagged; Node 22 needs
+  `--experimental-sqlite`, now passed by the npm scripts. **Node 20 has no
+  `node:sqlite` at all**, so those three need Node ≥ 22.5 even though `engines`
+  allows 20.
+
+### Deferred / known issues
+
+- **`npm run postinstall` can report success while leaving a Node-ABI binary.**
+  The fix is `--build-from-source` in the postinstall script, but that makes every
+  install compile from source (slower, and needs the toolchain present), so it is
+  a real trade-off rather than an obvious win. Currently a manual step after
+  install; documented in the README.
+- **`npm run dev` has no port guard.** Vite falls back to 5174 when 5173 is taken,
+  but `wait-on` watches 5173 unconditionally, so Electron silently never launches
+  and the terminal looks like it is still starting. Bit me once during this phase.
+- **The UI is still unclicked.** Nine of fourteen items are verified at the data
+  layer only.
+
+### Open questions
+
+1. **Do you want the Desktop working tree relocated?** It cannot build where it
+   is. I cloned rather than moved, so nothing was disturbed — but that leaves two
+   copies, and only one of them can run.
+2. **Should `postinstall` force `--build-from-source`?** It would make the
+   documented install actually work, at the cost of a slow compile on every
+   install and a hard dependency on the C++ toolchain.
+3. **The `no-ai` click-through item cannot be tested on this machine** without
+   stopping Ollama and removing the API key. Worth doing once deliberately.
+4. **A GUI driver for dev-mode Electron** would close the remaining gap — Electron
+   exposes a DevTools protocol port, which Playwright can attach to, and
+   `playwright-core` is already a devDependency. That is a Phase 5 conversation.
