@@ -428,6 +428,53 @@ function registerDbHandlers(db) {
   registerHandler('db:encounters:getByLocation', (_, locationId) =>
     db.all('SELECT id, name, status, xp_total FROM encounters WHERE location_id = ? ORDER BY name', [locationId]))
 
+  // ── Combat state — Phase 5 ───────────────────────────────────────────────
+  // One row per encounter. Combat used to live only in React state, so
+  // navigating away or crashing lost the whole fight.
+  registerHandler('db:combat:get', (_, encounterId) =>
+    db.get('SELECT * FROM combat_state WHERE encounter_id = ?', [encounterId]))
+
+  // The launch-time question: is there a fight to resume in this campaign?
+  // 'ended' rows are excluded — a finished fight is history, not an invitation.
+  registerHandler('db:combat:getActiveForCampaign', (_, campaignId) =>
+    db.get(`
+      SELECT cs.*, e.name AS encounter_name
+      FROM combat_state cs
+      JOIN encounters e ON e.id = cs.encounter_id
+      WHERE cs.campaign_id = ? AND cs.phase != 'ended'
+      ORDER BY cs.updated_at DESC
+      LIMIT 1`,
+      [campaignId]))
+
+  // Upsert, because UNIQUE(encounter_id) makes one row per encounter the whole
+  // point. The renderer debounces this; the handler stays dumb.
+  registerHandler('db:combat:save', (_, state) =>
+    db.run(`
+      INSERT INTO combat_state
+        (campaign_id, encounter_id, round_count, phase, combatants, log_entries, updated_at)
+      VALUES (?,?,?,?,?,?,datetime('now'))
+      ON CONFLICT(encounter_id) DO UPDATE SET
+        round_count = excluded.round_count,
+        phase       = excluded.phase,
+        combatants  = excluded.combatants,
+        log_entries = excluded.log_entries,
+        updated_at  = excluded.updated_at`,
+      [state.campaign_id, state.encounter_id, state.round_count ?? 1,
+       state.phase ?? 'setup',
+       typeof state.combatants  === 'string' ? state.combatants  : JSON.stringify(state.combatants  ?? []),
+       typeof state.log_entries === 'string' ? state.log_entries : JSON.stringify(state.log_entries ?? [])]))
+
+  registerHandler('db:combat:clear', (_, encounterId) =>
+    db.run('DELETE FROM combat_state WHERE encounter_id = ?', [encounterId]))
+
+  // Encounter list badges: which encounters have a fight to resume.
+  registerHandler('db:combat:getAllForCampaign', (_, campaignId) =>
+    db.all(`
+      SELECT encounter_id, round_count, phase, updated_at
+      FROM combat_state
+      WHERE campaign_id = ? AND phase != 'ended'`,
+      [campaignId]))
+
   // Global world search
   // Searches every table a DM might have written the phrase into, not just the
   // four world tables. The two that mattered most were missing entirely: lore

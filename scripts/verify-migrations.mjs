@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 
 const SRC = readFileSync('electron/database/DatabaseService.js', 'utf8')
-const LAST = 10
+const LAST = 12
 
 let failures = 0
 let checks = 0
@@ -138,12 +138,12 @@ const snapshot = (db) => ({
 })
 
 // ── Scenario A: fresh database ───────────────────────────────────────────────
-console.log('\n=== A. Fresh database: migrations 001-010 ===\n')
+console.log('\n=== A. Fresh database: migrations 001-012 ===\n')
 {
   const db = migrateTo(newDb(), LAST)
 
-  check('all 10 migrations recorded',
-    db.prepare('SELECT COUNT(*) c FROM _migrations').get().c === 10)
+  check('all 12 migrations recorded',
+    db.prepare('SELECT COUNT(*) c FROM _migrations').get().c === 12)
 
   const expected = [
     ['locations', 'parent_location_id', 'locations', 'SET NULL'],
@@ -191,6 +191,22 @@ console.log('\n=== A. Fresh database: migrations 001-010 ===\n')
     ['id', 'campaign_id', 'filename', 'file_path', 'status', 'chunk_count', 'indexed_at']
       .every(c => pdfCols.some(pc => pc.name === c)))
 
+  // ── Migrations 011 and 012 ────────────────────────────────────────────────
+  const tablesA = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r => r.name)
+  for (const t of ['sessions', 'plot_threads', 'reveals', 'combat_state']) {
+    check(`${t} table created`, tablesA.includes(t))
+  }
+
+  const combatDdl = db.prepare("SELECT sql FROM sqlite_master WHERE name='combat_state'").get()?.sql ?? ''
+  check('combat_state has UNIQUE(encounter_id) — one fight per encounter',
+    /UNIQUE\s*\(\s*encounter_id\s*\)/i.test(combatDdl))
+  check('combat_state phase CHECK covers setup/active/ended',
+    ['setup', 'active', 'ended'].every(v => combatDdl.includes(`'${v}'`)))
+  check('combat_state.encounter_id CASCADEs',
+    fkFor(db, 'combat_state', 'encounter_id')?.on_delete === 'CASCADE')
+  check('combat_state.campaign_id CASCADEs',
+    fkFor(db, 'combat_state', 'campaign_id')?.on_delete === 'CASCADE')
+
   // A shared source — the SRD sentinel — can now be inserted.
   db.exec("INSERT INTO pdf_sources (id, campaign_id, filename, file_path, status, chunk_count) VALUES (900, NULL, 'SRD 5.1', NULL, 'embedded', 12)")
   check('a campaign_id=NULL source can be inserted (the SRD sentinel)',
@@ -230,6 +246,8 @@ let populated
 
   applyMigration(db, 9)
   applyMigration(db, 10)
+  applyMigration(db, 11)
+  applyMigration(db, 12)
   const after = snapshot(db)
 
   for (const table of Object.keys(before)) {
@@ -317,6 +335,49 @@ console.log('\n=== C. Acceptance: deletes that used to fail silently ===\n')
   check('the shared SRD source SURVIVES deleting a campaign',
     db.prepare('SELECT COUNT(*) c FROM pdf_sources WHERE id=900').get().c === 1)
 
+  // ── Combat state on a populated database (012) ──────────────────────────
+  console.log('\n=== C2. Saved combat (migration 012) ===\n')
+
+  // This harness talks to node:sqlite directly; the DatabaseService-shaped
+  // helpers used elsewhere are not in scope here.
+  const dbApi = {
+    get: (sql, p = []) => db.prepare(sql).get(...p),
+    run: (sql, p = []) => db.prepare(sql).run(...p),
+  }
+
+  dbApi.run("INSERT INTO campaigns (id, name) VALUES (50, 'Combat Campaign')")
+  dbApi.run("INSERT INTO encounters (id, campaign_id, name, status) VALUES (60, 50, 'Dock Ambush', 'active')")
+  dbApi.run(`INSERT INTO combat_state (campaign_id, encounter_id, round_count, phase, combatants, log_entries)
+             VALUES (50, 60, 3, 'active', ?, ?)`,
+    [JSON.stringify({ schema_version: 1, combatants: [{ id: 'g1', name: 'Goblin 1', hp_current: 2, hp_max: 7 }] }),
+     JSON.stringify({ schema_version: 1, entries: ['Round 1 begins.'] })])
+
+  const saved = dbApi.get('SELECT * FROM combat_state WHERE encounter_id = 60')
+  check('a fight can be saved', !!saved && saved.round_count === 3)
+  check('  its combatants survive the round trip',
+    JSON.parse(saved.combatants).combatants[0].hp_current === 2)
+
+  dbApi.run(`INSERT INTO combat_state (campaign_id, encounter_id, round_count, phase, combatants, log_entries)
+             VALUES (50, 60, 4, 'active', '[]', '[]')
+             ON CONFLICT(encounter_id) DO UPDATE SET round_count = excluded.round_count`)
+  check('saving again upserts rather than duplicating',
+    dbApi.get('SELECT COUNT(*) c FROM combat_state WHERE encounter_id = 60').c === 1 &&
+    dbApi.get('SELECT round_count FROM combat_state WHERE encounter_id = 60').round_count === 4)
+
+  let dupeRejected = false
+  try { dbApi.run('INSERT INTO combat_state (campaign_id, encounter_id) VALUES (50, 60)') }
+  catch { dupeRejected = true }
+  check('a second fight for the same encounter is REFUSED', dupeRejected)
+
+  let badPhase = false
+  try { dbApi.run("INSERT INTO combat_state (campaign_id, encounter_id, phase) VALUES (50, 61, 'nonsense')") }
+  catch { badPhase = true }
+  check('an invalid phase is REFUSED', badPhase)
+
+  dbApi.run('DELETE FROM encounters WHERE id = 60')
+  check('deleting the encounter clears its saved fight',
+    dbApi.get('SELECT COUNT(*) c FROM combat_state WHERE encounter_id = 60').c === 0)
+
   check('database passes foreign_key_check afterwards',
     db.prepare('PRAGMA foreign_key_check').all().length === 0)
 
@@ -328,7 +389,7 @@ console.log('\n=== D. Re-running the migration set is a no-op ===\n')
 {
   const db = migrateTo(newDb(), LAST)
   const ran = new Set(db.prepare('SELECT id FROM _migrations').all().map(r => r.id))
-  check('all 10 ids recorded, so a second launch skips every one', ran.size === 10)
+  check('all 12 ids recorded, so a second launch skips every one', ran.size === 12)
   db.close()
 }
 

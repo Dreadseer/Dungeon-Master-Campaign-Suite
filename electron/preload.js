@@ -29,6 +29,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       update:      (id, data)         => ipcRenderer.invoke('db:locations:update', id, data),
       delete:      (id)               => ipcRenderer.invoke('db:locations:delete', id),
     },
+    combat: {
+      getAll:               (campaignId)  => ipcRenderer.invoke('db:combat:getAllForCampaign', campaignId),
+      get:                  (encounterId) => ipcRenderer.invoke('db:combat:get', encounterId),
+      getActiveForCampaign: (campaignId)  => ipcRenderer.invoke('db:combat:getActiveForCampaign', campaignId),
+      save:                 (state)       => ipcRenderer.invoke('db:combat:save', state),
+      clear:                (encounterId) => ipcRenderer.invoke('db:combat:clear', encounterId),
+    },
     sessions: {
       getAll:      (campaignId)  => ipcRenderer.invoke('db:sessions:getAll', campaignId),
       getById:     (id)          => ipcRenderer.invoke('db:sessions:getById', id),

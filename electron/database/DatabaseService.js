@@ -42,6 +42,8 @@ class DatabaseService {
       // no table is recreated and no foreign key needs disabling. The data
       // import that goes with it runs in `after`, inside the same transaction.
       { id: 11, name: 'sessions_plots_reveals', sql: MIGRATION_011, after: importCampaignNotes },
+      // Purely additive — one CREATE TABLE and one index, no recreate.
+      { id: 12, name: 'combat_state', sql: MIGRATION_012 },
     ]
 
     for (const m of migrations) {
@@ -694,6 +696,43 @@ const MIGRATION_011 = `
   CREATE INDEX IF NOT EXISTS idx_sessions_campaign  ON sessions(campaign_id, session_number DESC);
   CREATE INDEX IF NOT EXISTS idx_plots_campaign     ON plot_threads(campaign_id, status);
   CREATE INDEX IF NOT EXISTS idx_reveals_campaign   ON reveals(campaign_id, entity_type);
+`
+
+// Migration 012 — combat_state.
+//
+// NUMBERING: the review calls this "migration 010"; 010 and 011 are taken, so
+// this is 012. The DDL is the review's Q7e, unchanged apart from that.
+//
+// Combat lived entirely in React state. Navigating away from the tracker, or
+// closing the app, or crashing, lost the whole fight: initiative order, current
+// HP, conditions, the round number and the log. A DM who alt-tabbed to look
+// something up came back to an empty tracker mid-encounter.
+//
+// One row per encounter, so "is there a fight in progress" is a single indexed
+// lookup and resuming is reading one row. UNIQUE(encounter_id) means saving is
+// an upsert and there can never be two half-saved fights for the same encounter.
+//
+// `combatants` and `log_entries` are JSON blobs rather than child tables on
+// purpose: the combatant shape is a renderer concern that changes with the
+// feature set (this phase alone adds death saves, legendary actions, reactions
+// and temp HP), and a schema migration per field would be a migration per
+// feature. src/utils/combatPersistence.js versions the blob instead, so a
+// future shape change migrates lazily on load.
+const MIGRATION_012 = `
+  CREATE TABLE IF NOT EXISTS combat_state (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id   INTEGER NOT NULL REFERENCES campaigns(id)  ON DELETE CASCADE,
+    encounter_id  INTEGER NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
+    round_count   INTEGER NOT NULL DEFAULT 1,
+    phase         TEXT DEFAULT 'setup' CHECK(phase IN ('setup','active','ended')),
+    combatants    TEXT NOT NULL DEFAULT '[]',
+    log_entries   TEXT NOT NULL DEFAULT '[]',
+    updated_at    DATETIME DEFAULT (datetime('now')),
+    UNIQUE(encounter_id)
+  );
+
+  -- "Is a fight in progress in this campaign?" runs on every app launch.
+  CREATE INDEX IF NOT EXISTS idx_combat_campaign ON combat_state(campaign_id, phase);
 `
 
 // ── SRD Subclass Seed Data — 27 subclasses (2–3 per class × 12 classes) ────────
