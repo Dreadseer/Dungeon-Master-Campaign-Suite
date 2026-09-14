@@ -29,6 +29,17 @@ export default function SourceBookImportModal({ initialType = 'spell', onClose, 
   const [sources,     setSources]     = useState([])       // indexed PDF sources
   const [sourceId,    setSourceId]    = useState('')       // '' = all sources
 
+  // Extraction is an AI call. Without a model this modal offered its whole flow
+  // and then failed at the extraction step with a raw service error.
+  const [aiMode, setAiMode] = useState(null)
+  useEffect(() => {
+    // getMode resolves to an OBJECT — destructure it.
+    window.electronAPI.ai.getMode()
+      .then(({ mode }) => setAiMode(mode))
+      .catch(() => setAiMode('no-ai'))
+  }, [])
+  const noAi = aiMode === 'no-ai'
+
   const inputRef = useRef(null)
 
   // Load indexed source books for the filter dropdown
@@ -153,6 +164,29 @@ export default function SourceBookImportModal({ initialType = 'spell', onClose, 
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
+
+  // Nothing in this flow works without a model, so say so instead of letting
+  // the DM fill the form and meet the failure at the end.
+  if (noAi) {
+    return (
+      <div style={s.overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+        <div style={s.modal}>
+          <div style={s.header}>
+            <span style={s.headerTitle}>📥 Import from Source Book</span>
+            <button style={s.closeBtn} onClick={onClose}>✕</button>
+          </div>
+          <div style={s.noAiBox}>
+            <p style={s.noAiTitle}>AI not configured</p>
+            <p style={s.noAiText}>
+              Importing reads the entry out of your source book with an AI call.
+              Add an Anthropic API key in Settings, or install Ollama, to use it.
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={s.overlay} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={s.modal}>
@@ -478,6 +512,13 @@ function SubclassPreview({ data }) {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const s = {
+  noAiBox: {
+    background: '#1a1208', border: '1px solid #3a2a10', borderRadius: 4,
+    padding: '1rem', margin: '1rem',
+  },
+  noAiTitle: { color: '#c9a84c', fontSize: '0.9rem', fontWeight: 'bold', margin: '0 0 0.4rem' },
+  noAiText:  { color: '#6b5a3a', fontSize: '0.85rem', margin: 0, lineHeight: 1.5 },
+
   overlay: {
     position: 'fixed', inset: 0,
     background: 'rgba(0,0,0,0.75)',

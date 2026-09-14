@@ -47,7 +47,9 @@ export default function AICharacterAssistant({ character, characterId, onRefresh
   const activeCampaign = useCampaignStore(st => st.activeCampaign)
 
   const [expanded,   setExpanded]   = useState(false)
-  const [aiMode,     setAiMode]     = useState(null)   // null = checking, 'claude'/'ollama'/'offline'
+  // null = still checking; otherwise the real values ai:getMode returns:
+  // 'online' | 'offline-ollama' | 'no-ai'.
+  const [aiMode,     setAiMode]     = useState(null)
   const [activeKey,  setActiveKey]  = useState(null)
   const [generating, setGenerating] = useState(false)
   const [result,     setResult]     = useState('')
@@ -55,7 +57,11 @@ export default function AICharacterAssistant({ character, characterId, onRefresh
   const [toast,      setToast]      = useState('')
 
   useEffect(() => {
-    window.electronAPI.ai.getMode().then(setAiMode).catch(() => setAiMode('offline'))
+    // getMode resolves to an OBJECT — storing it whole made every check
+    // below false, so this panel showed "Offline" even with a working key.
+    window.electronAPI.ai.getMode()
+      .then(({ mode }) => setAiMode(mode))
+      .catch(() => setAiMode('no-ai'))
   }, [])
 
   function showToast(msg) {
@@ -104,7 +110,11 @@ export default function AICharacterAssistant({ character, characterId, onRefresh
     setCopying(false)
   }
 
-  const isAvailable = aiMode === 'claude' || aiMode === 'ollama'
+  // The values checked here used to be 'claude' and 'ollama', which
+  // ai:getMode has never returned — so even once the object bug above was
+  // fixed this would still have read as unavailable.
+  const isAvailable = aiMode === 'online' || aiMode === 'offline-ollama'
+  const MODE_LABEL = { online: 'Claude API', 'offline-ollama': 'Ollama' }
 
   return (
     <div style={a.root}>
@@ -116,7 +126,7 @@ export default function AICharacterAssistant({ character, characterId, onRefresh
         <span style={a.toggleLabel}>AI Assistant</span>
         {aiMode === null && <span style={a.chip}>…</span>}
         {aiMode && !isAvailable && <span style={{ ...a.chip, background: '#2a1a0a', color: '#8a6a3a', borderColor: '#4a3a1a' }}>Offline</span>}
-        {isAvailable && <span style={{ ...a.chip, background: '#0a2a0a', color: '#6ada6a', borderColor: '#1a5a1a' }}>{aiMode}</span>}
+        {isAvailable && <span style={{ ...a.chip, background: '#0a2a0a', color: '#6ada6a', borderColor: '#1a5a1a' }}>{MODE_LABEL[aiMode] ?? aiMode}</span>}
         <span style={{ marginLeft: 'auto', color: '#6b5a3a', fontSize: '0.7rem' }}>
           {expanded ? '▲' : '▼'}
         </span>

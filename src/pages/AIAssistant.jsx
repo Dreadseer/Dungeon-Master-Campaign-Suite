@@ -144,6 +144,9 @@ export default function AIAssistant() {
   const handleSend = useCallback(async () => {
     const userMessage = input.trim()
     if (!userMessage || isStreaming) return
+    // Belt and braces: the composer is disabled in no-ai mode, but a stale
+    // keystroke must not reach a service that is not there.
+    if (noAi) return
 
     setInput('')
     setIsStreaming(true)
@@ -253,7 +256,7 @@ export default function AIAssistant() {
       window.electronAPI.ai.streamStart(systemPrompt, messages, requestId)
       return prev
     })
-  }, [input, isStreaming, ragMode, hasEmbedded, activeCampaign,
+  }, [input, isStreaming, noAi, ragMode, hasEmbedded, activeCampaign,
       characters, npcs, factions, locations, lore, session, plots, budget, loreSource])
 
   /**
@@ -304,7 +307,10 @@ export default function AIAssistant() {
   }, [])
 
   const modeDisplay = getModeDisplay(aiMode)
-  const noAi = getModeDisplay(aiMode).label.includes('No AI')
+  // Read the mode itself rather than sniffing the display label: renaming a
+  // label should never silently re-enable the AI controls.
+  const modeValue = typeof aiMode === 'object' ? aiMode?.mode : aiMode
+  const noAi = modeValue === 'no-ai'
 
   // Recomputed for the readout only; handleSend builds its own at send time.
   const contextUsage = buildCampaignContext(
@@ -421,19 +427,22 @@ export default function AIAssistant() {
             <textarea
               ref={textareaRef}
               style={s.textarea}
-              placeholder={ragMode && hasEmbedded
-                ? 'Ask a rules question… (searching your source books)'
-                : 'Ask your AI assistant…'}
+              placeholder={noAi
+                ? 'AI not configured — add an API key in Settings, or install Ollama.'
+                : ragMode && hasEmbedded
+                  ? 'Ask a rules question… (searching your source books)'
+                  : 'Ask your AI assistant…'}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={3}
-              disabled={isStreaming}
+              disabled={isStreaming || noAi}
             />
             <button
-              style={(isStreaming || !input.trim()) ? s.btnDisabled : s.btnSend}
+              style={(isStreaming || noAi || !input.trim()) ? s.btnDisabled : s.btnSend}
               onClick={handleSend}
-              disabled={isStreaming || !input.trim()}
+              disabled={isStreaming || noAi || !input.trim()}
+              title={noAi ? 'AI not configured' : undefined}
             >
               {isStreaming ? '⏳' : 'Ask'}
             </button>

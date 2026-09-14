@@ -91,7 +91,11 @@ export default function AIInsightsPanel({ nodes, edges, campaignName }) {
     setNoAi(false)
 
     try {
-      const aiMode = await window.electronAPI.ai.getMode()
+      // ai:getMode resolves to an OBJECT — { mode } (aiHandlers.js). Comparing
+      // the object to a string was always false, so this guard never fired and
+      // a DM with no AI got the raw "No AI service available" error rendered as
+      // an insight. Same slip the capability review found in AISuggestionPanel.
+      const { mode: aiMode } = await window.electronAPI.ai.getMode()
       if (aiMode === 'no-ai') {
         setNoAi(true)
         return
