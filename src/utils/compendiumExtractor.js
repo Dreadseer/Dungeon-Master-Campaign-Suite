@@ -176,22 +176,64 @@ export function buildExtractionPrompt(type, name, chunks) {
 
 // ── Parse and normalise raw AI output into clean data objects ─────────────────
 
-export function parseExtraction(type, rawText) {
+/**
+ * Pull a JSON object out of whatever a model actually returned.
+ *
+ * Local models in particular wrap their answer in markdown fences, or preface it
+ * with "Here is the JSON you asked for:". This strips both and takes the
+ * outermost `{ … }` block. Extracted from parseExtraction so world-suggestion
+ * parsing reuses the same repair rules rather than growing a second, subtly
+ * different copy of them.
+ *
+ * @param {string} rawText
+ * @returns {object} the parsed object
+ * @throws {SyntaxError} when there is no valid JSON object in the text
+ */
+export function extractJsonObject(rawText) {
+  return extractJsonValue(rawText, { allowArray: false })
+}
+
+/**
+ * As above, but will also return a top-level array.
+ *
+ * Asked for `{ "suggestions": [...] }`, local models quite often return just the
+ * array. Handling that here rather than in the caller keeps one set of repair
+ * rules: the alternative is a second copy of the fence-stripping that drifts.
+ *
+ * @param {string} rawText
+ * @param {{allowArray?: boolean}} opts
+ */
+export function extractJsonValue(rawText, { allowArray = true } = {}) {
+  if (typeof rawText !== 'string') {
+    throw new SyntaxError('AI returned no text to parse')
+  }
+
   // Strip markdown fences
-  let cleaned = rawText
+  const cleaned = rawText
     .replace(/```json\s*/gi, '')
     .replace(/```\s*/g, '')
     .trim()
 
-  // If the model added explanatory text before or after the JSON object,
-  // extract just the outermost { … } block.
-  const start = cleaned.indexOf('{')
-  const end   = cleaned.lastIndexOf('}')
-  if (start !== -1 && end > start) {
-    cleaned = cleaned.slice(start, end + 1)
-  }
+  const objStart = cleaned.indexOf('{')
+  const arrStart = cleaned.indexOf('[')
 
-  const data = JSON.parse(cleaned)
+  // Prefer whichever bracket opens first: "[{...}]" must be read as the array,
+  // not as the object inside it.
+  const takeArray = allowArray
+    && arrStart !== -1
+    && (objStart === -1 || arrStart < objStart)
+
+  const start = takeArray ? arrStart : objStart
+  const end   = cleaned.lastIndexOf(takeArray ? ']' : '}')
+
+  // If the model added explanatory text before or after, take just the block.
+  const body = (start !== -1 && end > start) ? cleaned.slice(start, end + 1) : cleaned
+
+  return JSON.parse(body)
+}
+
+export function parseExtraction(type, rawText) {
+  const data = extractJsonObject(rawText)
 
   if (type === 'spell') {
     return {
