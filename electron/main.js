@@ -124,6 +124,7 @@ const registerSrdHandlers   = require('./ipc/srdHandlers')
 const registerAiHandlers    = require('./ipc/aiHandlers')
 const registerPdfHandlers   = require('./ipc/pdfHandlers')
 const registerEmbedHandlers = require('./ipc/embeddingHandlers')
+const CampaignLoreIndex     = require('./services/CampaignLoreIndex')
 const registerServerHandlers = require('./ipc/serverHandlers')
 require('./ipc/fileHandlers')   // file dialog + image copy/read (self-registering)
 
@@ -194,7 +195,8 @@ app.whenReady().then(async () => {
   registerSrdHandlers(global.db, global.srdService)
   registerAiHandlers(global.aiService, global.keyService)
   registerPdfHandlers(global.pdfService, global.db, global.pdfExtractionService, global.embeddingService)
-  registerEmbedHandlers(global.embeddingService)
+  global.campaignLoreIndex = new CampaignLoreIndex(global.db, global.embeddingService)
+  registerEmbedHandlers(global.embeddingService, global.campaignLoreIndex)
   registerServerHandlers(global.playerServer, global.tunnelService, global.keyService)
 
   // Auto-initialize AI with saved key (if any)

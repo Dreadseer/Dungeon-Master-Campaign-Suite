@@ -245,6 +245,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     search:       (queryText, topK, itemName, sourceId) => ipcRenderer.invoke('embed:search', queryText, topK, itemName, sourceId ?? null),
     scanSource:   (sourceId, contentType) => ipcRenderer.invoke('embed:scanSource', sourceId, contentType),
     deleteSource: (sourceId)            => ipcRenderer.invoke('embed:deleteSource',  sourceId),
+    loreStatus:   (campaignId)          => ipcRenderer.invoke('embed:loreStatus',    campaignId),
+    syncLore:     (campaignId, name)    => ipcRenderer.invoke('embed:syncLore',      campaignId, name),
     getStatus:    ()                    => ipcRenderer.invoke('embed:getStatus'),
     onProgress:   (callback)            => ipcRenderer.on('embed:progress',   (_event, data) => callback(data)),
     offProgress:  (callback)            => ipcRenderer.removeListener('embed:progress', callback),

@@ -5,7 +5,8 @@ import AIToolbox     from '../components/ai/AIToolbox'
 import AnswerRenderer from '../components/ai/AnswerRenderer'
 import SuggestionCards from '../components/ai/SuggestionCards'
 import { buildCampaignContext, clampBudget, DEFAULT_CONTEXT_BUDGET } from '../utils/aiContext'
-import { notifyError } from '../stores/toastStore'
+import { describeLoreSync } from '../utils/loreCorpus'
+import { notifyError, notifySuccess } from '../stores/toastStore'
 
 const MAX_HISTORY = 20   // max messages sent to AI per request
 const CURSOR      = '▋'  // blinking cursor appended during streaming
@@ -45,6 +46,13 @@ export default function AIAssistant() {
 
   // "Save as…" — structured extraction over one assistant message (task 4)
   const [extractFrom, setExtractFrom] = useState(null)
+
+  // Campaign lore retrieval (task 7). loreSource is the generated pdf_sources
+  // row, used to scope the search so a question about the campaign does not
+  // come back with passages from the Player's Handbook.
+  const [loreSource, setLoreSource] = useState(null)
+  const [loreState,  setLoreState]  = useState('')
+  const [loreBusy,   setLoreBusy]   = useState(false)
 
   // Chat state — stored in aiStore so it survives page navigation
   const history        = useAiStore(s => s.history)
@@ -99,6 +107,17 @@ export default function AIAssistant() {
     window.electronAPI.rag.getSettings()
       .then(cfg => setBudget(clampBudget(cfg?.contextBudget)))
       .catch(() => setBudget(DEFAULT_CONTEXT_BUDGET))
+
+    window.electronAPI.embed.loreStatus(activeCampaign.id)
+      .then(status => {
+        setLoreSource(status?.sourceId ?? null)
+        setLoreState(describeLoreSync({
+          added: Array(status?.added ?? 0).fill(0),
+          removed: Array(status?.removed ?? 0).fill(0),
+          unchanged: Array(status?.unchanged ?? 0).fill(0),
+        }))
+      })
+      .catch(() => { setLoreSource(null); setLoreState('') })
 
     // Check for embedded sources
     window.electronAPI.db.pdf.getAll(activeCampaign.id)
@@ -201,18 +220,71 @@ export default function AIAssistant() {
       window.electronAPI.ai.offStream()
     })
 
+    // Pull the most relevant campaign lore for THIS message. Scoped to the
+    // generated lore source, so a question about the campaign does not come
+    // back with passages from the Player's Handbook.
+    let retrieved = ''
+    if (loreSource) {
+      try {
+        // search() resolves to an array of { text, score, ... }. Without
+        // Ollama it falls back to keyword matching over the same chunks, so
+        // this still returns something useful rather than nothing.
+        const hits = await window.electronAPI.embed.search(userMessage, 3, null, loreSource)
+        const passages = (Array.isArray(hits) ? hits : [])
+          .map(h => String(h?.text ?? '').trim())
+          .filter(Boolean)
+        if (passages.length) {
+          retrieved = 'Relevant entries from this campaign:\n' +
+            passages.map(t => `---\n${t}`).join('\n')
+        }
+      } catch {
+        // Retrieval is an enhancement. Without Ollama the budgeted summary
+        // still describes the world; the message must still send.
+      }
+    }
+
     // Build messages to send — include full conversation history (last MAX_HISTORY)
     setHistory(prev => {
       const messages = cleanHistory(prev).slice(-MAX_HISTORY)
       const { prompt: systemPrompt } = buildCampaignContext(
         { campaign: activeCampaign, characters, npcs, factions, locations, lore, session, plots },
-        { budget },
+        { budget, extra: retrieved },
       )
       window.electronAPI.ai.streamStart(systemPrompt, messages, requestId)
       return prev
     })
   }, [input, isStreaming, ragMode, hasEmbedded, activeCampaign,
-      characters, npcs, factions, locations, lore, session, plots, budget])
+      characters, npcs, factions, locations, lore, session, plots, budget, loreSource])
+
+  /**
+   * Index the campaign's own tables so the assistant can retrieve from them.
+   *
+   * Kept explicit rather than automatic on every world save: the embedding step
+   * needs Ollama and takes a call per changed entity, so a DM typing into an
+   * NPC's notes should not trigger it on every keystroke. The AI page syncs on
+   * demand and after it writes records itself, which are the two moments the
+   * index is about to be read.
+   */
+  const syncLore = useCallback(async () => {
+    if (!activeCampaign?.id || loreBusy) return
+    setLoreBusy(true)
+    try {
+      const result = await window.electronAPI.embed.syncLore(activeCampaign.id, activeCampaign.name)
+      setLoreSource(result?.sourceId ?? null)
+      if (result?.embedError) {
+        // Not a toast-worthy failure: without Ollama the assistant still gets
+        // the budgeted world summary, it just cannot retrieve passages.
+        setLoreState(`Indexed ${result.total} entries — embedding unavailable (${result.embedError})`)
+      } else {
+        setLoreState(`Indexed ${result.total} entries.`)
+        if (result.added > 0) notifySuccess(`Campaign lore indexed — ${result.added} updated`)
+      }
+    } catch (err) {
+      notifyError(err, 'Index campaign lore')
+    } finally {
+      setLoreBusy(false)
+    }
+  }, [activeCampaign, loreBusy])
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -324,6 +396,24 @@ export default function AIAssistant() {
                 describe it is the long tail of NPC names that is dropped, never the party
                 or the session you are running. Change the budget in Settings.
               </p>
+
+              <div style={s.loreRow}>
+                <span style={s.usageChip}>
+                  📖 Campaign lore index{loreState ? ` — ${loreState}` : ' — not built'}
+                </span>
+                <button
+                  style={loreBusy ? s.loreBtnBusy : s.loreBtn}
+                  onClick={syncLore}
+                  disabled={loreBusy || !activeCampaign}
+                >
+                  {loreBusy ? 'Indexing…' : 'Index now'}
+                </button>
+              </div>
+              <p style={s.usageNote}>
+                Indexing lets the assistant quote your own lore, NPCs, locations and
+                factions back at you instead of guessing. Needs Ollama for the embeddings;
+                without it the summary above is still sent.
+              </p>
             </div>
           )}
 
@@ -360,6 +450,7 @@ export default function AIAssistant() {
           campaign={activeCampaign}
           sourceText={extractFrom}
           world={{ npcs, locations, factions, lore }}
+          loreSourceId={loreSource}
           onClose={() => setExtractFrom(null)}
           onSaved={() => {
             // Re-read the world so the next prompt knows what was just written.
@@ -372,6 +463,9 @@ export default function AIAssistant() {
             ]).then(([n, l, f, lo]) => {
               const val = (r) => (r.status === 'fulfilled' && r.value != null ? r.value : [])
               setNpcs(val(n)); setLocations(val(l)); setFactions(val(f)); setLore(val(lo))
+              // The index is about to be read by the next message, so refresh
+              // it now rather than leaving it stale.
+              syncLore()
             }).catch(err => notifyError(err, 'Reload world'))
           }}
         />
@@ -568,6 +662,15 @@ const s = {
     borderRadius: 8, padding: '1px 7px', color: '#a89060',
   },
   usageChipOut: { color: '#4a4238', borderColor: '#241c10', textDecoration: 'line-through' },
+  loreRow:  { display: 'flex', alignItems: 'center', gap: 6, margin: '8px 0 6px', flexWrap: 'wrap' },
+  loreBtn:  {
+    padding: '2px 10px', background: '#141008', border: '1px solid #8a6a2a',
+    borderRadius: 4, color: '#c9a84c', fontSize: 10.5, cursor: 'pointer',
+  },
+  loreBtnBusy: {
+    padding: '2px 10px', background: '#141008', border: '1px solid #2a2418',
+    borderRadius: 4, color: '#5a5040', fontSize: 10.5, cursor: 'not-allowed',
+  },
   usageNote:  { color: '#5a5040', fontSize: 10.5, margin: 0, lineHeight: 1.5 },
 
   // "Save as…" on an assistant message

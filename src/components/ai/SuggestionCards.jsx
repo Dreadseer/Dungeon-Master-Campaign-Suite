@@ -60,6 +60,7 @@ const ROUTE = {
 export default function SuggestionCards({
   campaign,
   world = {},
+  loreSourceId = null,   // scope the contradiction check to campaign lore
   mode = 'inline',        // 'inline' in the World Builder, 'modal' from chat
   sourceText = null,      // when set, extract from this instead of asking for ideas
   autoRun = false,
@@ -243,8 +244,13 @@ export default function SuggestionCards({
       const query = `${card.suggestion.name} ${Object.values(card.suggestion.fields).filter(v => typeof v === 'string').join(' ')}`
       let chunks = []
       try {
-        const hits = await window.electronAPI.embed.search(query.slice(0, 500), 3)
-        chunks = (hits ?? []).map(h => ({ text: h.text ?? h.chunk_text ?? '', source: h.source ?? h.item_name ?? '' }))
+        // Scoped to the campaign lore index: checking a new faction against
+        // the Player's Handbook would find "conflicts" with published lore the
+        // DM never claimed to be following.
+        const hits = await window.electronAPI.embed.search(query.slice(0, 500), 3, null, loreSourceId)
+        chunks = (Array.isArray(hits) ? hits : [])
+          .map(h => ({ text: String(h?.text ?? '').trim(), source: '' }))
+          .filter(c => c.text)
       } catch {
         // No index yet, or Ollama absent. Fall back to the lore titles/bodies we
         // already hold rather than refusing to check at all.

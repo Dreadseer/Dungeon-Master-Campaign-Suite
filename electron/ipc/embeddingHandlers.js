@@ -1,6 +1,22 @@
 const { registerHandler } = require('./registerHandler')
 
-module.exports = (embeddingService) => {
+module.exports = (embeddingService, campaignLoreIndex) => {
+
+  // ── Campaign lore index (Phase 6 task 7) ─────────────────────────────────
+  //
+  // The campaign's own tables, indexed through the same pipeline as PDFs. See
+  // electron/services/CampaignLoreIndex.js for why it reuses pdf_sources.
+
+  // What a sync would do, without doing it.
+  registerHandler('embed:loreStatus', async (_, campaignId) =>
+    campaignLoreIndex.preview(campaignId))
+
+  // Rebuild the campaign's chunks and embed whatever changed.
+  registerHandler('embed:syncLore', async (event, campaignId, campaignName) =>
+    campaignLoreIndex.sync(campaignId, campaignName, (percent, message) => {
+      event.sender.send('embed:progress', { campaignId, percent, message })
+    }))
+
 
   // Embed all un-embedded chunks for a source; streams progress events back
   registerHandler('embed:source', async (event, sourceId) => {

@@ -427,6 +427,28 @@ class EmbeddingService {
     return count
   }
 
+  // Delete the vectra entries for individual chunks.
+  //
+  // Added in Phase 6 for the campaign lore index, which rewrites the chunks of
+  // edited entities and would otherwise leave their old vectors behind — so a
+  // renamed NPC would keep retrieving under the old name forever. Takes a list
+  // rather than one id because listItems() walks the whole index, and doing
+  // that once per stale chunk is what would make a re-sync slow.
+  async deleteChunks(chunkIds) {
+    const wanted = new Set((chunkIds ?? []).map(Number).filter(Number.isFinite))
+    if (wanted.size === 0) return { deleted: 0 }
+
+    await this.ensureIndex()
+    const items = await this.index.listItems()
+    let deleted = 0
+    for (const item of items) {
+      if (!wanted.has(Number(item.metadata?.chunk_id))) continue
+      await this.index.deleteItem(item.id)
+      deleted++
+    }
+    return { deleted }
+  }
+
   // Delete all vectra index entries belonging to a specific source
   async deleteSource(sourceId) {
     await this.ensureIndex()
