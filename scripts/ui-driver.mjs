@@ -203,10 +203,26 @@ export async function launchApp(opts = {}) {
       return seen
     },
 
+    /**
+     * Capture a screenshot, never failing the run over it.
+     *
+     * A shot taken while the app is mid-work — a local model generating, a
+     * spinner animating — can exceed the default timeout, and losing a whole
+     * acceptance run because one PNG was slow is the wrong trade. Animations
+     * are frozen so a spinner cannot stop the page settling.
+     *
+     * Returns the name on success and null on failure, so the caller records
+     * "no screenshot" rather than crashing.
+     */
     async screenshot(name) {
       const file = path.join(SHOTS, `${name}.png`)
-      await page.screenshot({ path: file })
-      return name
+      try {
+        await page.screenshot({ path: file, timeout: 60000, animations: 'disabled' })
+        return name
+      } catch (err) {
+        console.log(`    \x1b[33m[shot]\x1b[0m ${name} failed: ${err.message.split('\n')[0]}`)
+        return null
+      }
     },
 
     /**

@@ -1,3 +1,4 @@
+import { clampBudget, DEFAULT_CONTEXT_BUDGET } from '../utils/aiContext'
 import { useState, useEffect, useCallback } from 'react'
 import useCampaignStore from '../stores/campaignStore'
 import { notifyError, notifySuccess, notifyInfo } from '../stores/toastStore'
@@ -22,6 +23,7 @@ export default function Settings() {
 
   // ── RAG settings state ─────────────────────────────────────────────────────
   const [topK,            setTopK]            = useState(5)
+  const [contextBudget,   setContextBudget]   = useState(DEFAULT_CONTEXT_BUDGET)
   const [scoreThreshold,  setScoreThreshold]  = useState(0.5)
   const [ollamaModel,     setOllamaModel]     = useState('llama3:latest')
   const [embedModel,      setEmbedModel]      = useState('nomic-embed-text')
@@ -49,6 +51,7 @@ export default function Settings() {
         if (settings.scoreThreshold != null) setScoreThreshold(settings.scoreThreshold)
         if (settings.ollamaModel)            setOllamaModel(settings.ollamaModel)
         if (settings.embedModel)             setEmbedModel(settings.embedModel)
+        if (settings.contextBudget  != null) setContextBudget(clampBudget(settings.contextBudget))
       }
     }).catch(() => {})
 
@@ -118,7 +121,10 @@ export default function Settings() {
   async function handleSaveRagSettings() {
     setRagSaving(true); setRagMsg('')
     try {
-      await window.electronAPI.rag.saveSettings({ topK, scoreThreshold, ollamaModel, embedModel })
+      await window.electronAPI.rag.saveSettings({
+        topK, scoreThreshold, ollamaModel, embedModel,
+        contextBudget: clampBudget(contextBudget),
+      })
       setRagMsg('✅ Settings saved.')
     } catch (err) {
       setRagMsg('❌ ' + err.message)
@@ -323,6 +329,27 @@ export default function Settings() {
       {/* ── RAG Settings ─── */}
       <section style={s.section}>
         <h2 style={s.sectionTitle}>RAG Settings</h2>
+
+        {/* Campaign context budget — Phase 6 task 6.
+            The system prompt used to interpolate every character and every
+            faction with no cap, so a 60-faction campaign sent 60 names on every
+            message. aiContext now fills sections in priority order under this
+            many characters. */}
+        <div style={s.fieldGroup}>
+          <div style={s.sliderHeader}>
+            <label style={s.label}>Campaign context budget</label>
+            <span style={s.sliderValue}>{contextBudget.toLocaleString()} chars</span>
+          </div>
+          <input type="range" min={500} max={20000} step={250}
+            value={contextBudget} onChange={e => setContextBudget(Number(e.target.value))}
+            style={s.slider} />
+          <span style={s.hint}>
+            How much of your world the AI Assistant is told about on every message
+            (roughly {Math.round(contextBudget / 4).toLocaleString()} tokens). Sections are
+            filled in priority order — party and current session first, the long tail of
+            NPC names last. Default 6,000.
+          </span>
+        </div>
 
         {/* topK slider */}
         <div style={s.fieldGroup}>

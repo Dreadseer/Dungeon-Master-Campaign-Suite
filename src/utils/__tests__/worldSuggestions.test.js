@@ -42,6 +42,21 @@ describe('buildSuggestionPrompt', () => {
     expect(user).toMatch(/link/i)
   })
 
+  it('requires all four kinds, not "typically" them', () => {
+    // Asked the softer way, llama3 reliably returned faction + npc + location
+    // and omitted the lore entry — the one carrying the DM's actual fiction.
+    const { user } = buildSuggestionPrompt({ campaign: { name: 'X' }, request: 'a guild' })
+    expect(user).toMatch(/MUST include all four/)
+    for (const kind of ['faction', 'npc', 'location', 'lore']) {
+      expect(user).toContain(`"${kind}"`)
+    }
+  })
+
+  it('asks for at least one lore entry even in the generic case', () => {
+    const { user } = buildSuggestionPrompt({ campaign: { name: 'X' } })
+    expect(user).toMatch(/at least one "lore" entry/)
+  })
+
   it('falls back to the generic ask with a count', () => {
     const { user } = buildSuggestionPrompt({ campaign: { name: 'X' }, count: 5 })
     expect(user).toMatch(/Propose 5 additions/)

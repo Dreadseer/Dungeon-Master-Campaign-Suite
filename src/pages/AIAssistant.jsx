@@ -140,6 +140,16 @@ export default function AIAssistant() {
     return () => window.electronAPI.ai.offStream()
   }, [])
 
+  // Read the mode itself rather than sniffing the display label: renaming a
+  // label should never silently re-enable the AI controls.
+  //
+  // Declared HERE, above handleSend, because handleSend names it in its
+  // dependency array — which is evaluated during render. Declared below it, as
+  // it first was, every render of this page threw
+  // "Cannot access noAi before initialization" and React unmounted the tree.
+  const modeValue = typeof aiMode === 'object' ? aiMode?.mode : aiMode
+  const noAi = modeValue === 'no-ai'
+
   // ── Send message ───────────────────────────────────────────────────────────
   const handleSend = useCallback(async () => {
     const userMessage = input.trim()
@@ -307,10 +317,6 @@ export default function AIAssistant() {
   }, [])
 
   const modeDisplay = getModeDisplay(aiMode)
-  // Read the mode itself rather than sniffing the display label: renaming a
-  // label should never silently re-enable the AI controls.
-  const modeValue = typeof aiMode === 'object' ? aiMode?.mode : aiMode
-  const noAi = modeValue === 'no-ai'
 
   // Recomputed for the readout only; handleSend builds its own at send time.
   const contextUsage = buildCampaignContext(

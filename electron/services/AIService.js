@@ -5,7 +5,10 @@ class AIService {
   constructor() {
     this.mode             = 'offline'
     this.anthropicClient  = null
-    this.ollamaBaseUrl    = 'http://localhost:11434'
+    // Overridable so a DM can run Ollama on another port or machine — and so
+    // the UI driver can point it at a dead port to exercise no-ai mode, which
+    // is otherwise untestable on a machine where Ollama is installed.
+    this.ollamaBaseUrl    = process.env.DMCS_OLLAMA_URL || 'http://localhost:11434'
     this.ollamaModel      = 'llama3:latest'
     this.anthropicModel   = 'claude-sonnet-5'
   }

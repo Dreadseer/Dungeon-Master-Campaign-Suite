@@ -27,7 +27,8 @@
     "test:sessions": "node --experimental-sqlite scripts/verify-sessions.mjs",
     "doctor": "node scripts/doctor.mjs",
     "verify:combat": "node --experimental-sqlite scripts/ui-verify-combat.mjs",
-    "test:lore": "node --experimental-sqlite scripts/verify-lore-index.mjs"
+    "test:lore": "node --experimental-sqlite scripts/verify-lore-index.mjs",
+    "verify:ai": "node scripts/ui-verify-ai.mjs"
   },
   "build": {
     "appId": "com.dmcs.app",

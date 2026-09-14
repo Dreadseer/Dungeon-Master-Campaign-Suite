@@ -25,9 +25,22 @@ export default function Sessions() {
   const [reveals, setReveals]   = useState([])
   const [creating, setCreating] = useState(false)
 
+  // True once the first load has finished, so later refreshes are silent.
+  const hasLoadedRef = useRef(false)
+
   const load = useCallback(async () => {
     if (!activeCampaign?.id) return
-    setLoading(true)
+
+    // Show the skeleton only when there is nothing on screen yet.
+    //
+    // load() also runs as a background refresh after every save, and toggling
+    // `loading` swapped the whole pane for a skeleton — which UNMOUNTED
+    // SessionDetail and discarded its state. A generated recap was written to
+    // the database and then vanished from the box a second later, because the
+    // remount re-initialised from a `detail` prop that had not been refetched.
+    // Any half-typed title or notes edit was lost the same way.
+    if (!hasLoadedRef.current) setLoading(true)
+
     try {
       const rows = await window.electronAPI.db.sessions.getAll(activeCampaign.id)
       setSessions(rows)
@@ -35,6 +48,7 @@ export default function Sessions() {
     } catch (err) {
       notifyError(err, 'Load sessions')
     } finally {
+      hasLoadedRef.current = true
       setLoading(false)
     }
   }, [activeCampaign?.id])

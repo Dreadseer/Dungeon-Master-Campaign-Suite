@@ -9,7 +9,7 @@
 // transformation of the monsters array, so the awkward cases — a count of
 // zero, removing more than are present, a monster the model invented — are
 // tested rather than discovered when a roster silently empties itself.
-import { extractJsonValue } from './compendiumExtractor'
+import { extractJsonValue } from './compendiumExtractor.js'
 
 export const ADVICE_ACTIONS = ['add', 'remove', 'replace']
 

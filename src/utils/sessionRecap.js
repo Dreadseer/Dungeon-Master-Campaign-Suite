@@ -18,7 +18,7 @@
 // so and asks for only what the party witnessed, but the notes themselves are
 // passed through. That is a prompt-level mitigation, not a guarantee, and the
 // UI says as much before the DM shares a player recap.
-import { extractJsonValue } from './compendiumExtractor'
+import { extractJsonValue } from './compendiumExtractor.js'
 
 export const RECAP_AUDIENCES = ['dm', 'players']
 

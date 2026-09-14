@@ -35,4 +35,5 @@ Thumbs.db
 .scratch-userdata/
 scripts/.ui-userdata/
 scripts/.combat-userdata/
+scripts/.ai-userdata/
 scripts/.probe-userdata/
