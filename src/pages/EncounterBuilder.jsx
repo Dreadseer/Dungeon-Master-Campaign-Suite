@@ -317,6 +317,7 @@ export default function EncounterBuilder() {
                 encounter={activeEncounter}
                 monsters={monsters}
                 onDifficultyChange={setCurrentDifficulty}
+                onRosterChange={handleRosterChange}
               />
               {/* Map picker — optional linked map opened when combat starts */}
               {campaignMaps.length > 0 && (

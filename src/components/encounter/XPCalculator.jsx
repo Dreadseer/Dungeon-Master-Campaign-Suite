@@ -7,8 +7,14 @@ import {
   difficultyRating,
 } from '../../utils/encounterUtils'
 import useCampaignStore from '../../stores/campaignStore'
+import {
+  buildAdvicePrompt, parseAdvice, checkAdvice, applyAdvice,
+  describeAdvice, rosterXpTotal,
+} from '../../utils/encounterAdvice'
+import { createMonsterEntry } from '../../utils/encounterUtils'
+import { notifyError, notifySuccess } from '../../stores/toastStore'
 
-export default function XPCalculator({ encounter, monsters, onDifficultyChange }) {
+export default function XPCalculator({ encounter, monsters, onDifficultyChange, onRosterChange }) {
   const activeCampaign = useCampaignStore(st => st.activeCampaign)
 
   // ── Party config ─────────────────────────────────────────────────────────
@@ -19,9 +25,23 @@ export default function XPCalculator({ encounter, monsters, onDifficultyChange }
   const [manualLevel, setManualLevel]     = useState(5)
 
   // ── AI advisor ───────────────────────────────────────────────────────────
+  //
+  // The advisor used to return prose: the DM read "drop one goblin and add an
+  // archer" and then went and did it by hand. It now returns operations on the
+  // roster, each with an Apply button.
   const [aiLoading, setAiLoading]         = useState(false)
-  const [aiResult, setAiResult]           = useState('')
-  const [aiError, setAiError]             = useState('')
+  const [aiSummary, setAiSummary]         = useState('')
+  const [aiAdvice,  setAiAdvice]          = useState(null)   // [{ suggestion, applied, note }]
+  const [aiError,   setAiError]           = useState('')
+  const [aiMode,    setAiMode]            = useState(null)
+  const [applying,  setApplying]          = useState(false)
+
+  useEffect(() => {
+    // getMode resolves to an OBJECT — destructure it.
+    window.electronAPI.ai.getMode()
+      .then(({ mode }) => setAiMode(mode))
+      .catch(() => setAiMode('no-ai'))
+  }, [])
 
   // Load campaign characters when toggled on
   useEffect(() => {
@@ -68,26 +88,86 @@ export default function XPCalculator({ encounter, monsters, onDifficultyChange }
   const handleAskAI = async () => {
     if (!monsters.length) return
     setAiLoading(true)
-    setAiResult('')
+    setAiAdvice(null)
+    setAiSummary('')
     setAiError('')
+
     try {
-      const systemPrompt = `You are an expert D&D 5e Dungeon Master.
-Analyze this encounter and give 2-3 specific, actionable suggestions.
-Be concise — one sentence per suggestion.`
+      const { system, user } = buildAdvicePrompt({
+        encounter, monsters, partySize, avgLevel,
+        difficulty: difficulty.label, adjustedXp: adjusted, thresholds,
+      })
 
-      const monsterList = monsters.map(m => `${m.count}× ${m.name} (CR ${m.cr})`).join(', ')
-      const userMessage = `Encounter: "${encounter?.name ?? 'Unnamed'}"
-Party: ${partySize} player${partySize !== 1 ? 's' : ''}, average level ${avgLevel}
-Monsters: ${monsterList}
-Difficulty: ${difficulty.label} (${adjusted.toLocaleString()} adjusted XP)
-What adjustments would make this encounter better balanced?`
+      const raw = await window.electronAPI.ai.complete(system, user, {
+        maxTokens: 1500, campaignId: activeCampaign?.id ?? null, type: 'encounter-advice',
+      })
 
-      const result = await window.electronAPI.ai.complete(systemPrompt, userMessage)
-      setAiResult(result)
+      const { summary, suggestions } = parseAdvice(raw)
+      setAiSummary(summary)
+      setAiAdvice(suggestions.map(sg => ({ suggestion: sg, applied: false, note: '' })))
     } catch (err) {
       setAiError(err?.message ?? 'AI request failed')
+      notifyError(err, 'Ask the encounter advisor')
     } finally {
       setAiLoading(false)
+    }
+  }
+
+  /**
+   * Apply one suggestion to the roster and persist it.
+   *
+   * Saving goes through db:encounters:updateMonsters — the same channel the
+   * roster itself uses. db:encounters:update would work too, but it rewrites
+   * every column, so a stale name or status held in this component would
+   * silently overwrite what the DM had just typed elsewhere.
+   */
+  const handleApply = async (index) => {
+    if (applying || !encounter?.id) return
+    const entry = aiAdvice?.[index]
+    if (!entry || entry.applied) return
+
+    setApplying(true)
+    try {
+      const sg = entry.suggestion
+      const check = checkAdvice(sg, monsters)
+      if (!check.ok) {
+        notifyError(new Error(check.reason ?? 'Cannot apply'), 'Apply suggestion')
+        return
+      }
+
+      // A monster not already in the roster needs its stat block before it can
+      // be added; without it applyAdvice is a no-op rather than a broken entry.
+      let newEntry = null
+      if (check.needsLookup) {
+        const wantedIndex = sg.action === 'replace' ? sg.replaceWithIndex : sg.monsterIndex
+        const wantedName  = sg.action === 'replace' ? sg.replaceWithName  : sg.monsterName
+        const block = await window.electronAPI.srd.getMonsterByIndex(wantedIndex)
+        if (!block) {
+          notifyError(
+            new Error(`"${wantedName}" is not in the SRD cache — add it from the Monsters panel instead.`),
+            'Apply suggestion',
+          )
+          return
+        }
+        newEntry = createMonsterEntry(block, 'srd')
+      }
+
+      const result = applyAdvice(sg, monsters, newEntry)
+      if (!result.changed) {
+        notifyError(new Error(result.note), 'Apply suggestion')
+        return
+      }
+
+      await window.electronAPI.db.encounters.updateMonsters(
+        encounter.id, result.monsters, rosterXpTotal(result.monsters))
+
+      onRosterChange?.(result.monsters)
+      setAiAdvice(prev => prev.map((a, i) => i === index ? { ...a, applied: true, note: result.note } : a))
+      notifySuccess(result.note)
+    } catch (err) {
+      notifyError(err, 'Apply suggestion')
+    } finally {
+      setApplying(false)
     }
   }
 
@@ -264,22 +344,59 @@ What adjustments would make this encounter better balanced?`
         <div style={s.aiHeader}>
           <div style={s.sectionLabel}>AI Difficulty Advisor</div>
           <button
-            style={{ ...s.aiBtn, ...(aiLoading ? s.aiBtnDisabled : {}) }}
+            style={{ ...s.aiBtn, ...((aiLoading || aiMode === 'no-ai') ? s.aiBtnDisabled : {}) }}
             onClick={handleAskAI}
-            disabled={aiLoading || monsters.length === 0}
+            disabled={aiLoading || monsters.length === 0 || aiMode === 'no-ai'}
           >
             {aiLoading ? '…Thinking' : '✨ Ask AI'}
           </button>
         </div>
-        {monsters.length === 0 && (
+
+        {aiMode === 'no-ai' && (
+          <p style={s.hint}>
+            AI not configured — add an API key in Settings, or install Ollama, to get
+            balance suggestions you can apply.
+          </p>
+        )}
+        {monsters.length === 0 && aiMode !== 'no-ai' && (
           <p style={s.hint}>Add monsters to the roster first.</p>
         )}
         {aiError && <p style={{ ...s.hint, color: '#e05050' }}>⚠ {aiError}</p>}
-        {aiResult && (
+        {aiSummary && <p style={s.aiLine}>{aiSummary}</p>}
+
+        {aiAdvice && aiAdvice.length === 0 && !aiSummary && (
+          <p style={s.hint}>The advisor had no changes to suggest.</p>
+        )}
+
+        {aiAdvice && aiAdvice.length > 0 && (
           <div style={s.aiResult}>
-            {aiResult.split('\n').filter(l => l.trim()).map((line, i) => (
-              <p key={i} style={s.aiLine}>{line}</p>
-            ))}
+            {aiAdvice.map((entry, i) => {
+              const check = checkAdvice(entry.suggestion, monsters)
+              return (
+                <div key={i} style={s.adviceRow}>
+                  <div style={s.adviceText}>
+                    <span style={s.adviceLabel}>{describeAdvice(entry.suggestion)}</span>
+                    {entry.suggestion.reason && (
+                      <span style={s.adviceReason}>{entry.suggestion.reason}</span>
+                    )}
+                    {entry.applied && <span style={s.adviceApplied}>✓ {entry.note}</span>}
+                    {!entry.applied && !check.ok && (
+                      <span style={s.adviceBlocked}>⚠ {check.reason}</span>
+                    )}
+                  </div>
+                  {!entry.applied && (
+                    <button
+                      style={(!check.ok || applying) ? s.applyBtnDisabled : s.applyBtn}
+                      onClick={() => handleApply(i)}
+                      disabled={!check.ok || applying}
+                      title={check.ok ? 'Apply to the roster' : check.reason}
+                    >
+                      Apply
+                    </button>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
@@ -361,6 +478,23 @@ const s = {
     border: '1px solid #4a2a6a', borderRadius: 4, cursor: 'pointer', fontSize: 12,
   },
   aiBtnDisabled: { opacity: 0.5, cursor: 'not-allowed' },
-  aiResult: { display: 'flex', flexDirection: 'column', gap: 4 },
+  aiResult: { display: 'flex', flexDirection: 'column', gap: 6 },
+  adviceRow: {
+    display: 'flex', alignItems: 'flex-start', gap: 8,
+    background: '#141008', border: '1px solid #2a2010', borderRadius: 4, padding: '6px 8px',
+  },
+  adviceText:   { display: 'flex', flexDirection: 'column', gap: 2, flex: 1 },
+  adviceLabel:  { color: '#e0d5c0', fontSize: 12, fontWeight: 600 },
+  adviceReason: { color: '#8a7a5a', fontSize: 11, lineHeight: 1.45 },
+  adviceApplied:{ color: '#7fc272', fontSize: 11 },
+  adviceBlocked:{ color: '#c08050', fontSize: 11 },
+  applyBtn: {
+    padding: '3px 12px', background: '#2d6a2d', border: 'none', borderRadius: 4,
+    color: '#e8f0e0', fontSize: 11, fontWeight: 'bold', cursor: 'pointer', flexShrink: 0,
+  },
+  applyBtnDisabled: {
+    padding: '3px 12px', background: '#232018', border: 'none', borderRadius: 4,
+    color: '#5a5040', fontSize: 11, fontWeight: 'bold', cursor: 'not-allowed', flexShrink: 0,
+  },
   aiLine: { color: '#c9d5a0', fontSize: 13, margin: 0, lineHeight: 1.5 },
 }
