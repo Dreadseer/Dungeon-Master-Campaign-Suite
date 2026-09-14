@@ -201,6 +201,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ai: {
     initialize:    ()                              => ipcRenderer.invoke('ai:initialize'),
     getMode:       ()                              => ipcRenderer.invoke('ai:getMode'),
+    getDetection:  ()                              => ipcRenderer.invoke('ai:getDetection'),
+    redetect:      ()                              => ipcRenderer.invoke('ai:redetect'),
+    getProvider:   ()                              => ipcRenderer.invoke('ai:getProvider'),
+    setProvider:   (provider)                      => ipcRenderer.invoke('ai:setProvider', provider),
+    setModel:      (modelId)                       => ipcRenderer.invoke('ai:setModel', modelId),
+    listModels:    ()                              => ipcRenderer.invoke('ai:listModels'),
+    testClaude:    ()                              => ipcRenderer.invoke('ai:testClaude'),
+    testOllama:    ()                              => ipcRenderer.invoke('ai:testOllama'),
+    onModeChanged: (cb) => {
+      const handler = (_e, data) => cb(data)
+      ipcRenderer.on('ai:modeChanged', handler)
+      // Returns its own unsubscribe, so a component can clean up exactly the
+      // listener it added rather than removing everyone's.
+      return () => ipcRenderer.removeListener('ai:modeChanged', handler)
+    },
     complete:      (systemPrompt, message, options) => ipcRenderer.invoke('ai:complete',  systemPrompt, message, options),
     saveKey:       (key)                           => ipcRenderer.invoke('ai:saveKey',   key),
     deleteKey:     ()                              => ipcRenderer.invoke('ai:deleteKey'),

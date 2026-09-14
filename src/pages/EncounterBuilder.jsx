@@ -1,3 +1,4 @@
+import { parseIpcError } from '../utils/ipcError'
 import { useState, useEffect, useCallback } from 'react'
 import useCampaignStore    from '../stores/campaignStore'
 import MonsterRoster       from '../components/encounter/MonsterRoster'
@@ -52,7 +53,7 @@ export default function EncounterBuilder() {
       const list = await window.electronAPI.db.encounters.getAll(activeCampaign.id)
       setEncounters(list)
     } catch (err) {
-      setLoadError(err?.message ?? 'Failed to load encounters')
+      setLoadError(parseIpcError(err).message)
     }
   }, [activeCampaign])
 
@@ -138,7 +139,7 @@ export default function EncounterBuilder() {
       setShowCreate(false)
       await loadEncounters()
     } catch (err) {
-      setFormErr(err?.message ?? 'Failed to create encounter')
+      setFormErr(parseIpcError(err).message)
     } finally {
       setCreating(false)
     }
@@ -165,7 +166,7 @@ export default function EncounterBuilder() {
     } catch (err) {
       // setLoadError alone was not enough: the banner it feeds is not rendered
       // in the list view, which is exactly where deleting happens.
-      setLoadError(err?.message ?? 'Delete failed')
+      setLoadError(parseIpcError(err).message)
       notifyError(err, 'Delete encounter')
     }
   }
@@ -185,7 +186,7 @@ export default function EncounterBuilder() {
       })
       await loadEncounters()
     } catch (err) {
-      setLoadError(err?.message ?? 'Duplicate failed')
+      setLoadError(parseIpcError(err).message)
     }
   }
 
@@ -257,7 +258,7 @@ export default function EncounterBuilder() {
       await loadEncounters()
       setActiveEncounter(null)
     } catch (err) {
-      setLoadError(err?.message ?? 'Reuse failed')
+      setLoadError(parseIpcError(err).message)
     }
   }
 

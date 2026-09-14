@@ -1,3 +1,4 @@
+import useAiMode from '../../hooks/useAiMode'
 import { useState, useEffect, useCallback } from 'react'
 import {
   buildSuggestionPrompt,
@@ -67,21 +68,15 @@ export default function SuggestionCards({
   onClose,
   onSaved,
 }) {
-  const [aiMode,   setAiMode]   = useState(null)
+  // Subscribed, not sampled: selecting a provider in Settings must flip these
+  // cards without a reload (task 9b).
+  const { mode: aiMode } = useAiMode()
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState('')
   const [request,  setRequest]  = useState('')
   const [cards,    setCards]    = useState(null)   // [{ suggestion, saved, savedId, checking, conflicts }]
   const [note,     setNote]     = useState('')
   const [savingAll, setSavingAll] = useState(false)
-
-  useEffect(() => {
-    // ai:getMode resolves to an OBJECT — { mode }. Comparing the object to a
-    // string is the bug the capability review found in this very panel.
-    window.electronAPI.ai.getMode()
-      .then(({ mode: m }) => setAiMode(m))
-      .catch(err => { notifyError(err, 'Check AI status'); setAiMode('no-ai') })
-  }, [])
 
   const generate = useCallback(async () => {
     if (!campaign?.id) return

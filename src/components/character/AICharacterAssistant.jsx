@@ -1,3 +1,4 @@
+import useAiMode from '../../hooks/useAiMode'
 import { useState, useEffect } from 'react'
 import useCampaignStore from '../../stores/campaignStore'
 
@@ -49,20 +50,12 @@ export default function AICharacterAssistant({ character, characterId, onRefresh
   const [expanded,   setExpanded]   = useState(false)
   // null = still checking; otherwise the real values ai:getMode returns:
   // 'online' | 'offline-ollama' | 'no-ai'.
-  const [aiMode,     setAiMode]     = useState(null)
+  const { mode: aiMode } = useAiMode()
   const [activeKey,  setActiveKey]  = useState(null)
   const [generating, setGenerating] = useState(false)
   const [result,     setResult]     = useState('')
   const [copying,    setCopying]    = useState(false)
   const [toast,      setToast]      = useState('')
-
-  useEffect(() => {
-    // getMode resolves to an OBJECT — storing it whole made every check
-    // below false, so this panel showed "Offline" even with a working key.
-    window.electronAPI.ai.getMode()
-      .then(({ mode }) => setAiMode(mode))
-      .catch(() => setAiMode('no-ai'))
-  }, [])
 
   function showToast(msg) {
     setToast(msg)

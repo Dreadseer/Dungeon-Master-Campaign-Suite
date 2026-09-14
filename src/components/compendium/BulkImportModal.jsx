@@ -1,3 +1,5 @@
+import { parseIpcError } from '../../utils/ipcError'
+import useAiMode from '../../hooks/useAiMode'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import useCampaignStore from '../../stores/campaignStore'
 import {
@@ -38,14 +40,7 @@ export default function BulkImportModal({ initialType = 'monster', onClose, onIm
   // Extraction is an AI call per entry, so with no model there is nothing this
   // modal can do. Before Phase 6 it offered the whole flow and failed at the
   // first extraction with a raw service error.
-  const [aiMode, setAiMode] = useState(null)
-  useEffect(() => {
-    // getMode resolves to an OBJECT — destructure it.
-    window.electronAPI.ai.getMode()
-      .then(({ mode }) => setAiMode(mode))
-      .catch(() => setAiMode('no-ai'))
-  }, [])
-  const noAi = aiMode === 'no-ai'
+  const { noAi } = useAiMode()
 
   // Load indexed source books
   useEffect(() => {
@@ -88,7 +83,7 @@ export default function BulkImportModal({ initialType = 'monster', onClose, onIm
       setChecked(new Set(names.filter(n => !existingNames.has(n.toLowerCase()))))
       setPhase('review')
     } catch (err) {
-      setScanError(err.message ?? 'Scan failed')
+      setScanError(parseIpcError(err).message)
       setPhase('idle')
     }
   }, [sourceId, contentType, existingNames])

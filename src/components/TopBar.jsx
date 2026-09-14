@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useCampaignStore    from '../stores/campaignStore'
+import useAiMode           from '../hooks/useAiMode'
 import { describeSavedCombat } from '../utils/combatPersistence'
 import usePlayerStore      from '../stores/playerStore'
 import WorldSearch         from './world/WorldSearch'
@@ -12,8 +13,52 @@ const MODE_CONFIG = {
   'no-ai':          { label: 'No AI — Check Settings', color: '#6a1a1a', text: '#e05050', border: '#8a2a2a' },
 }
 
+/**
+ * The badge names the PROVIDER, with the model where one is known (task 9b).
+ *
+ * "online" told a DM nothing about which provider was actually answering, which
+ * matters once the choice is theirs to make.
+ */
+function badgeLabel(mode, detection) {
+  if (mode === 'online') {
+    const model = detection?.claude?.model
+    return model ? `Claude API — ${model}` : 'Claude API'
+  }
+  if (mode === 'offline-ollama') {
+    const model = detection?.ollama?.chatModel
+    return model ? `Ollama — ${model}` : 'Local AI (Ollama)'
+  }
+  return MODE_CONFIG['no-ai'].label
+}
+
+/** The same two lines Settings shows, as a tooltip (task 6). */
+function badgeTooltip(mode, detection) {
+  const c = detection?.claude
+  const o = detection?.ollama
+  const lines = []
+
+  if (c?.attempted === false) lines.push(`Claude: not checked — ${c.message || 'no key saved'}`)
+  else if (c?.ok) lines.push(`Claude: ready — ${c.model ?? 'model unknown'}`)
+  else if (c) lines.push(`Claude: ${c.message ?? 'unavailable'}`)
+
+  if (o?.attempted === false) lines.push(`Ollama: not checked — ${o.message || 'not selected'}`)
+  else if (o?.ok) {
+    lines.push(o.missing?.length
+      ? `Ollama: reachable, but ${o.missing.join(' and ')} not pulled`
+      : `Ollama: ready at ${o.url}`)
+  } else if (o) lines.push(`Ollama: ${o.message ?? 'unreachable'}`)
+
+  if (detection?.provider && detection.provider !== 'auto') {
+    lines.push(`Provider locked to ${detection.provider === 'claude' ? 'Claude API' : 'Ollama'}.`)
+  }
+  lines.push('Click to open Settings.')
+  return lines.join('\n')
+}
+
 export default function TopBar() {
-  const [aiMode,       setAiMode]       = useState(null)
+  // Subscribed, so saving a key or switching provider updates the badge
+  // without a restart — the gap that made a saved key look inert.
+  const { mode: aiMode, detection } = useAiMode()
   const [serverRunning, setServerRunning] = useState(false)
   const [showNetwork,   setShowNetwork]   = useState(false)
   const [liveCombat,    setLiveCombat]    = useState(null)
@@ -22,10 +67,6 @@ export default function TopBar() {
   const showPlayerPanel    = usePlayerStore(s => s.showPlayerPanel)
   const setShowPlayerPanel = usePlayerStore(s => s.setShowPlayerPanel)
   const playerWindowOpen   = usePlayerStore(s => s.playerWindowOpen)
-
-  useEffect(() => {
-    window.electronAPI.ai.getMode().then(({ mode }) => setAiMode(mode))
-  }, [])
 
   useEffect(() => {
     const check = () =>
@@ -119,9 +160,9 @@ export default function TopBar() {
           <button
             onClick={() => navigate('/settings')}
             style={{ ...styles.badge, background: modeConf.color, color: modeConf.text, borderColor: modeConf.border }}
-            title="Click to open Settings"
+            title={badgeTooltip(aiMode, detection)}
           >
-            {modeConf.label}
+            {badgeLabel(aiMode, detection)}
           </button>
         )}
         <span style={{ ...styles.campaign, color: activeCampaign?.name ? '#c9a84c' : '#6b5a3a' }}>

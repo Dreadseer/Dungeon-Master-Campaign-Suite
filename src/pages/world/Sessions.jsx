@@ -1,3 +1,4 @@
+import useAiMode from '../../hooks/useAiMode'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import useCampaignStore from '../../stores/campaignStore'
 import Skeleton from '../../components/ui/Skeleton'
@@ -197,14 +198,7 @@ function SessionDetail({ session, plots, reveals, recapMaterial, campaign, onSav
   const [recap, setRecap]             = useState(session.recap ?? '')
   const [recapBusy, setRecapBusy]     = useState(false)
   const [recapAudience, setRecapAudience] = useState(null)   // which variant produced it
-  const [aiMode, setAiMode]           = useState(null)
-
-  useEffect(() => {
-    // getMode resolves to an OBJECT — destructure it.
-    window.electronAPI.ai.getMode()
-      .then(({ mode }) => setAiMode(mode))
-      .catch(() => setAiMode('no-ai'))
-  }, [])
+  const { mode: aiMode } = useAiMode()
 
   // The last value written, so a blur that changed nothing does not fire a
   // pointless write and flash "Saved" at someone who only clicked away.

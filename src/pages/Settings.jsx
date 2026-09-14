@@ -1,4 +1,6 @@
 import { clampBudget, DEFAULT_CONTEXT_BUDGET } from '../utils/aiContext'
+import useAiMode from '../hooks/useAiMode'
+import { parseIpcError } from '../utils/ipcError'
 import { useState, useEffect, useCallback } from 'react'
 import useCampaignStore from '../stores/campaignStore'
 import { notifyError, notifySuccess, notifyInfo } from '../stores/toastStore'
@@ -16,7 +18,6 @@ export default function Settings() {
   // ── API Key state ──────────────────────────────────────────────────────────
   const [keyInput,   setKeyInput]   = useState('')
   const [hasKey,     setHasKey]     = useState(false)
-  const [aiMode,     setAiMode]     = useState('')
   const [statusMsg,  setStatusMsg]  = useState('')
   const [testing,    setTesting]    = useState(false)
   const [saving,     setSaving]     = useState(false)
@@ -24,6 +25,18 @@ export default function Settings() {
   // ── RAG settings state ─────────────────────────────────────────────────────
   const [topK,            setTopK]            = useState(5)
   const [contextBudget,   setContextBudget]   = useState(DEFAULT_CONTEXT_BUDGET)
+
+  // ── AI provider, model and detection (Phase 6.1) ─────────────────────────
+  const { mode: liveMode, detection } = useAiMode()
+  const [provider,      setProvider]      = useState('auto')
+  const [claudeModel,   setClaudeModel]   = useState('')
+  const [modelList,     setModelList]     = useState(null)
+  const [fetchingModels, setFetchingModels] = useState(false)
+  const [redetecting,   setRedetecting]   = useState(false)
+  const [switching,     setSwitching]     = useState(false)
+  const [claudeTest,    setClaudeTest]    = useState(null)
+  const [ollamaTest,    setOllamaTest]    = useState(null)
+  const [keyReadable,   setKeyReadable]   = useState(true)
   const [scoreThreshold,  setScoreThreshold]  = useState(0.5)
   const [ollamaModel,     setOllamaModel]     = useState('llama3:latest')
   const [embedModel,      setEmbedModel]      = useState('nomic-embed-text')
@@ -41,8 +54,8 @@ export default function Settings() {
 
   // ── Load on mount ──────────────────────────────────────────────────────────
   useEffect(() => {
-    window.electronAPI.ai.hasKey().then(({ hasKey: h }) => setHasKey(h))
-    window.electronAPI.ai.getMode().then(r => setAiMode(r?.mode ?? r))
+    // hasKey and the mode are both refreshed by the detection effect below,
+    // which re-runs on every ai:modeChanged broadcast.
     window.electronAPI.server.ngrok.hasToken().then(r => setHasNgrokToken(r.hasToken)).catch(() => {})
 
     window.electronAPI.rag.getSettings().then(settings => {
@@ -52,6 +65,7 @@ export default function Settings() {
         if (settings.ollamaModel)            setOllamaModel(settings.ollamaModel)
         if (settings.embedModel)             setEmbedModel(settings.embedModel)
         if (settings.contextBudget  != null) setContextBudget(clampBudget(settings.contextBudget))
+        if (settings.anthropicModel)         setClaudeModel(settings.anthropicModel)
       }
     }).catch(() => {})
 
@@ -71,27 +85,29 @@ export default function Settings() {
     if (!keyInput.trim()) return
     setSaving(true); setStatusMsg('')
     try {
+      // saveKey re-detects in the main process and broadcasts ai:modeChanged,
+      // so the badge and every gated component update without a restart — the
+      // gap that made a freshly saved key look like it had done nothing.
       const result = await window.electronAPI.ai.saveKey(keyInput.trim())
       const mode   = result?.mode ?? result
-      setAiMode(mode)
       setHasKey(true)
       setKeyInput('')
       setStatusMsg(mode === 'online'
-        ? '✅ Key saved — Claude API connected.'
-        : '⚠ Key saved but connection failed. Check your key.')
+        ? `✅ Key saved — Claude API connected (${result?.detection?.claude?.model ?? 'model unknown'}).`
+        : `⚠ Key saved, but Claude is not usable: ${result?.detection?.claude?.message ?? 'reason unknown'}`)
     } catch (err) {
-      setStatusMsg('❌ Error: ' + err.message)
+      setStatusMsg('❌ ' + parseIpcError(err).message)
     }
     setSaving(false)
   }
 
   async function handleRemove() {
     try {
-      await window.electronAPI.ai.deleteKey()
+      const result = await window.electronAPI.ai.deleteKey()
       setHasKey(false); setKeyInput('')
-      const result = await window.electronAPI.ai.getMode()
-      setAiMode(result?.mode ?? result)
-      setStatusMsg('Key removed.')
+      // deleteKey re-detects too, so removing a key falls back to Ollama
+      // immediately rather than sitting on a stale 'online'.
+      setStatusMsg(`Key removed. Mode: ${result?.mode ?? 'unknown'}`)
     } catch (err) {
       // Was silent: a failed delete left the key in place while the UI cleared
       // the field, so the next launch looked like the key had come back.
@@ -99,22 +115,104 @@ export default function Settings() {
     }
   }
 
-  async function handleTest() {
-    setTesting(true); setStatusMsg('')
+  // ── Provider tests (task 10) ─────────────────────────────────────────────
+  //
+  // Neither goes through ai:complete. That reports the MODE, so a DM whose key
+  // was fine but whose mode had landed on no-ai got "No AI service available"
+  // and learned nothing about their key.
+  async function handleTestClaude() {
+    setTesting(true); setClaudeTest(null)
     try {
-      const reply = await window.electronAPI.ai.complete('You are a helpful assistant.', 'Reply with only the word CONNECTED.')
-      setStatusMsg('✅ Connection test: ' + reply.trim())
+      setClaudeTest(await window.electronAPI.ai.testClaude())
     } catch (err) {
-      setStatusMsg('❌ Test failed: ' + err.message)
+      // parseIpcError strips Electron's "Error invoking remote method '…':"
+      // prefix, the redundant "Error: ", and registerHandler's channel tag.
+      // Settings used raw err.message, which is why the prefix leaked (task 11).
+      setClaudeTest({ ok: false, message: parseIpcError(err).message })
     }
     setTesting(false)
   }
 
+  async function handleTestOllama() {
+    setOllamaTest(null)
+    try {
+      setOllamaTest(await window.electronAPI.ai.testOllama())
+    } catch (err) {
+      setOllamaTest({ ok: false, message: parseIpcError(err).message })
+    }
+  }
+
+  async function handleRedetect() {
+    setRedetecting(true); setStatusMsg('')
+    try {
+      const result = await window.electronAPI.ai.redetect()
+      setStatusMsg(`Re-detected. Mode: ${result?.mode ?? 'unknown'}`)
+    } catch (err) {
+      notifyError(err, 'Re-detect AI')
+    }
+    setRedetecting(false)
+  }
+
   async function handleOllamaCheck() {
-    setStatusMsg('')
-    const result = await window.electronAPI.ai.initialize()
-    setAiMode(result?.mode ?? result)
-    setStatusMsg('Ollama check complete. Mode: ' + (result?.mode ?? result))
+    // Checking Ollama also re-runs detection, so a DM who just started it does
+    // not have to restart the app (task 9).
+    await handleTestOllama()
+    await handleRedetect()
+  }
+
+  /** Switch provider (task 9b). A failure keeps the selection and says why. */
+  async function handleProvider(next) {
+    if (switching || next === provider) return
+    setSwitching(true); setStatusMsg('')
+    const previous = provider
+    setProvider(next)
+    try {
+      const result = await window.electronAPI.ai.setProvider(next)
+      const mode = result?.mode
+      if (mode === 'online') {
+        notifySuccess(`Switched to Claude API — ${result?.detection?.claude?.model ?? 'model unknown'}`)
+      } else if (mode === 'offline-ollama') {
+        notifySuccess(`Switched to Ollama — ${result?.detection?.ollama?.chatModel ?? 'llama3'}`)
+      } else {
+        // Deliberately NOT falling back to the other provider: the choice
+        // stands and the reason is shown, so the DM can fix it.
+        notifyError(new Error(describeFailure(result?.detection, next)), 'Switch provider')
+      }
+    } catch (err) {
+      setProvider(previous)
+      notifyError(err, 'Switch provider')
+    }
+    setSwitching(false)
+  }
+
+  function describeFailure(det, which) {
+    const side = which === 'ollama' ? det?.ollama : det?.claude
+    return side?.message
+      ? `${which === 'ollama' ? 'Ollama' : 'Claude API'} selected but unavailable: ${side.message}`
+      : `${which === 'ollama' ? 'Ollama' : 'Claude API'} selected but unavailable.`
+  }
+
+  async function handleFetchModels() {
+    setFetchingModels(true)
+    try {
+      const { models } = await window.electronAPI.ai.listModels()
+      setModelList(models ?? [])
+      if ((models ?? []).length === 0) notifyInfo('The API returned no models for this key.')
+    } catch (err) {
+      notifyError(err, 'Fetch available models')
+      setModelList(null)
+    }
+    setFetchingModels(false)
+  }
+
+  async function handleSaveModel(id) {
+    setClaudeModel(id)
+    try {
+      await window.electronAPI.ai.setModel(id)
+      notifySuccess(`Model set to ${id}`)
+    } catch (err) {
+      notifyError(err, 'Set model')
+    }
   }
 
   // ── RAG settings handlers ──────────────────────────────────────────────────
@@ -244,6 +342,24 @@ export default function Settings() {
   const ragRow  = usageRow('Rules Q&A (RAG)', 'rag')
   const ragFbRow = usageRow('RAG fallback',   'rag_fallback')
 
+  // Detection is the source of truth for what the UI says; it arrives with
+  // every ai:modeChanged broadcast, so no part of this page can go stale.
+  useEffect(() => {
+    if (detection?.provider) setProvider(detection.provider)
+    if (detection?.claude?.model && !claudeModel) setClaudeModel(detection.claude.model)
+  }, [detection]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    window.electronAPI.ai.hasKey()
+      .then(r => { setHasKey(r.hasKey); setKeyReadable(r.readable !== false) })
+      .catch(() => {})
+  }, [liveMode, detection])
+
+  const detectionLines = describeDetectionLines(detection)
+  const pullCommand = (detection?.ollama?.missing ?? []).length
+    ? detection.ollama.missing.map(m => `ollama pull ${m}`).join(' && ')
+    : ''
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={s.page}>
@@ -252,14 +368,66 @@ export default function Settings() {
       {/* ── AI Configuration ─── */}
       <section style={s.section}>
         <h2 style={s.sectionTitle}>AI Configuration</h2>
-        <p style={s.modeLabel}>Current mode: <strong style={s.modeValue}>{aiMode || '…'}</strong></p>
 
-        <label style={s.label}>Anthropic API Key</label>
+        <p style={s.modeLabel}>
+          Current mode: <strong style={s.modeValue}>{liveMode || '…'}</strong>
+        </p>
+
+        {/* The app never says no-ai without saying why (task 6). */}
+        <div style={s.detectionBox}>
+          {detectionLines.map((line, i) => (
+            <p key={i} style={line.startsWith('Claude') ? s.detectLine : { ...s.detectLine, marginBottom: 0 }}>
+              {line}
+            </p>
+          ))}
+          {pullCommand && (
+            <p style={s.detectFix}>Run: <code style={s.code}>{pullCommand}</code></p>
+          )}
+        </div>
+
+        {/* Provider choice (task 9b) */}
+        <label style={s.label}>Provider</label>
+        <div style={s.segmented}>
+          {[['auto', 'Auto'], ['claude', 'Claude API'], ['ollama', 'Ollama']].map(([value, label]) => (
+            <button
+              key={value}
+              style={provider === value ? { ...s.segment, ...s.segmentActive } : s.segment}
+              onClick={() => handleProvider(value)}
+              disabled={switching}
+            >
+              {label}
+            </button>
+          ))}
+          {provider !== 'auto' && liveMode === 'no-ai' && (
+            <button style={s.btnSecondary} onClick={() => handleProvider('auto')} disabled={switching}>
+              ↺ Switch back to Auto
+            </button>
+          )}
+        </div>
+        <span style={s.hint}>
+          Auto tries Claude first, then Ollama. Choosing a provider uses only that one and
+          will not silently fall back. Embeddings for PDF and lore retrieval always use
+          Ollama whichever you pick — the Claude path has no embedding model — so with
+          Claude selected and Ollama stopped, chat works and retrieval falls back to
+          keyword search.
+        </span>
+
+        <label style={{ ...s.label, marginTop: '1rem' }}>Anthropic API Key</label>
         {hasKey ? (
-          <div style={s.row}>
-            <input style={s.input} type="password" value="••••••••••••••••" readOnly />
-            <button style={s.btnDanger} onClick={handleRemove}>Remove Key</button>
-          </div>
+          <>
+            <div style={s.row}>
+              <input style={s.input} type="password" value="••••••••••••••••" readOnly />
+              <button style={s.btnDanger} onClick={handleRemove}>Remove Key</button>
+            </div>
+            {!keyReadable && (
+              // The Phase 6.1 root cause, stated where the DM will see it.
+              <p style={s.warn}>
+                ⚠ A key is saved but cannot be decrypted on this machine or user account —
+                so the app has been running as though no key were set. Remove it and enter
+                it again.
+              </p>
+            )}
+          </>
         ) : (
           <div style={s.row}>
             <input
@@ -273,11 +441,61 @@ export default function Settings() {
           </div>
         )}
 
+        {/* Model id, no longer hard-locked (task 8) */}
+        <label style={{ ...s.label, marginTop: '1rem' }}>Claude model</label>
         <div style={s.row}>
-          <button style={s.btnSecondary} onClick={handleTest} disabled={testing}>
-            {testing ? 'Testing…' : 'Test Connection'}
+          {modelList?.length ? (
+            <select
+              style={s.input}
+              value={claudeModel}
+              onChange={e => handleSaveModel(e.target.value)}
+            >
+              {!modelList.some(m => m.id === claudeModel) && claudeModel && (
+                <option value={claudeModel}>{claudeModel} (not in list)</option>
+              )}
+              {modelList.map(m => <option key={m.id} value={m.id}>{m.id}</option>)}
+            </select>
+          ) : (
+            <input
+              style={s.input}
+              value={claudeModel}
+              placeholder={detection?.claude?.model ?? 'claude-sonnet-5'}
+              onChange={e => setClaudeModel(e.target.value)}
+              onBlur={e => e.target.value.trim() && handleSaveModel(e.target.value.trim())}
+            />
+          )}
+          <button style={s.btnSecondary} onClick={handleFetchModels} disabled={fetchingModels || !hasKey}>
+            {fetchingModels ? 'Fetching…' : 'Fetch available models'}
           </button>
         </div>
+        <span style={s.hint}>
+          Fetched live from your account with GET /v1/models. Until you fetch it, the app
+          uses a built-in default that has not been checked against your key.
+        </span>
+
+        {/* Provider tests (task 10) */}
+        <div style={{ ...s.row, marginTop: '1rem' }}>
+          <button style={s.btnSecondary} onClick={handleTestClaude} disabled={testing}>
+            {testing ? 'Testing…' : 'Test Claude'}
+          </button>
+          <button style={s.btnSecondary} onClick={handleTestOllama}>Test Ollama</button>
+          <button style={s.btnSecondary} onClick={handleRedetect} disabled={redetecting}>
+            {redetecting ? 'Detecting…' : '↻ Re-detect AI'}
+          </button>
+        </div>
+
+        {claudeTest && (
+          <p style={claudeTest.ok ? s.status : s.statusBad}>
+            {claudeTest.ok ? '✅' : '❌'} Claude
+            {claudeTest.status ? ` — HTTP ${claudeTest.status}` : ''}: {claudeTest.message}
+          </p>
+        )}
+        {ollamaTest && (
+          <p style={ollamaTest.ok ? s.status : s.statusBad}>
+            {ollamaTest.ok ? '✅' : '❌'} Ollama — {ollamaTest.message}
+            {ollamaTest.models?.length ? ` (${ollamaTest.models.join(', ')})` : ''}
+          </p>
+        )}
         {statusMsg && <p style={s.status}>{statusMsg}</p>}
       </section>
 
@@ -575,7 +793,49 @@ function SrdStatusPill({ status }) {
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
+/** The two explanatory lines, mirroring electron/services/aiDetection.cjs. */
+function describeDetectionLines(detection) {
+  const c = detection?.claude
+  const o = detection?.ollama
+
+  const claudeLine = !c ? 'Claude: not checked yet'
+    : !c.attempted ? `Claude: not checked — ${c.message || 'no key saved'}`
+      : c.ok ? `Claude: ready — ${c.model || 'model unknown'}`
+        : c.kind === 'key' ? `Claude: rejected — ${c.message}. Re-enter your API key.`
+          : c.kind === 'model' ? `Claude: model '${c.model}' not found (HTTP ${c.status ?? 404}) — the key may be fine; pick another model below.`
+            : c.kind === 'unreadable-key' ? `Claude: a key is saved but could not be decrypted — ${c.message}`
+              : `Claude: ${c.message}`
+
+  const ollamaLine = !o ? 'Ollama: not checked yet'
+    : !o.attempted ? `Ollama: not checked — ${o.message || 'not selected'}`
+      : o.ok
+        ? (o.missing?.length
+          ? `Ollama: reachable at ${o.url}, but ${o.missing.join(' and ')} ${o.missing.length === 1 ? 'is' : 'are'} not pulled`
+          : `Ollama: ready at ${o.url}`)
+        : `Ollama: unreachable — ${o.message} (${o.url})`
+
+  return [claudeLine, ollamaLine]
+}
+
 const s = {
+  detectionBox: {
+    background: '#14100a', border: '1px solid #2a2010', borderRadius: 4,
+    padding: '0.6rem 0.8rem', margin: '0 0 1rem',
+  },
+  detectLine: { color: '#a89060', fontSize: '0.8rem', margin: '0 0 0.3rem', lineHeight: 1.5 },
+  detectFix:  { color: '#c9a84c', fontSize: '0.8rem', margin: '0.4rem 0 0' },
+  warn: {
+    color: '#e0a050', fontSize: '0.82rem', lineHeight: 1.55,
+    background: '#2a2010', border: '1px solid #5a4010', borderRadius: 4,
+    padding: '0.5rem 0.7rem', margin: '0.5rem 0 0',
+  },
+  statusBad: { color: '#e08080', fontSize: '0.85rem', margin: '0.5rem 0 0' },
+  segmented: { display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' },
+  segment: {
+    padding: '0.4rem 0.9rem', background: '#1a1408', border: '1px solid #3a2a10',
+    borderRadius: 4, color: '#a89060', cursor: 'pointer', fontSize: '0.82rem',
+  },
+  segmentActive: { background: '#2a2010', borderColor: '#c9a84c', color: '#c9a84c', fontWeight: 'bold' },
   srdStatusRow: { display: 'flex', alignItems: 'center', gap: 10, margin: '10px 0' },
   srdPill:      { fontSize: '0.75rem', padding: '3px 10px', borderRadius: 12, border: '1px solid' },
   srdCounts:    { color: '#6b5a3a', fontSize: '0.8rem' },

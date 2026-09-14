@@ -1,3 +1,5 @@
+import { parseIpcError } from '../../utils/ipcError'
+import useAiMode from '../../hooks/useAiMode'
 import { useState, useCallback, useRef, useEffect } from 'react'
 import useCampaignStore from '../../stores/campaignStore'
 import {
@@ -31,14 +33,7 @@ export default function SourceBookImportModal({ initialType = 'spell', onClose, 
 
   // Extraction is an AI call. Without a model this modal offered its whole flow
   // and then failed at the extraction step with a raw service error.
-  const [aiMode, setAiMode] = useState(null)
-  useEffect(() => {
-    // getMode resolves to an OBJECT — destructure it.
-    window.electronAPI.ai.getMode()
-      .then(({ mode }) => setAiMode(mode))
-      .catch(() => setAiMode('no-ai'))
-  }, [])
-  const noAi = aiMode === 'no-ai'
+  const { noAi } = useAiMode()
 
   const inputRef = useRef(null)
 
@@ -109,7 +104,7 @@ export default function SourceBookImportModal({ initialType = 'spell', onClose, 
       setError(
         err.message?.includes('JSON')
           ? 'AI returned unexpected format. Try again or try a more specific name.'
-          : err.message ?? 'Extraction failed'
+          : parseIpcError(err).message
       )
       setPhase('error')
     }
@@ -150,7 +145,7 @@ export default function SourceBookImportModal({ initialType = 'spell', onClose, 
       onImported?.()
 
     } catch (err) {
-      setError(err.message ?? 'Save failed')
+      setError(parseIpcError(err).message)
       setPhase('error')
     }
   }, [extracted, editName, contentType, activeCampaign?.id, onImported])

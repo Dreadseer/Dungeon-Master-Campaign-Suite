@@ -1,3 +1,4 @@
+import { parseIpcError } from '../../utils/ipcError'
 import { useState } from 'react'
 
 const RELATIONSHIP_PRESETS = [
@@ -90,7 +91,7 @@ export default function EdgeCreationModal({
         onSave(newEdge)
       }
     } catch (err) {
-      setError(err.message ?? 'Failed to save connection')
+      setError(parseIpcError(err).message)
       setSaving(false)
     }
   }

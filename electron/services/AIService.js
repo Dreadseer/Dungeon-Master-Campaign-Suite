@@ -1,5 +1,9 @@
 const Anthropic = require('@anthropic-ai/sdk')
 const { net }   = require('electron')
+const {
+  classifyClaudeError, classifyOllamaError, missingOllamaModels,
+  normaliseProvider, shouldFallBackToOllama, DEFAULT_CLAUDE_MODEL,
+} = require('./aiDetection.cjs')
 
 class AIService {
   constructor() {
@@ -10,34 +14,173 @@ class AIService {
     // is otherwise untestable on a machine where Ollama is installed.
     this.ollamaBaseUrl    = process.env.DMCS_OLLAMA_URL || 'http://localhost:11434'
     this.ollamaModel      = 'llama3:latest'
-    this.anthropicModel   = 'claude-sonnet-5'
+    this.anthropicModel   = DEFAULT_CLAUDE_MODEL
+
+    // Why the app is in the mode it is in (Phase 6.1 task 6).
+    //
+    // Before this, initialize() used a bare `catch {}`: a bad key, a bad model
+    // id, and a dead network were indistinguishable, and the DM saw "no-ai"
+    // with a saved key on screen and no explanation. Every detection now leaves
+    // a record, and the UI renders it.
+    this.lastDetection = {
+      mode: 'offline',
+      provider: 'auto',
+      claude: { attempted: false, ok: false, message: 'not checked yet' },
+      ollama: { attempted: false, ok: false, message: 'not checked yet' },
+      at: null,
+    }
   }
 
-  async initialize(apiKey) {
-    if (apiKey) {
-      try {
-        const client = new Anthropic({ apiKey })
-        await client.messages.create({
-          model: this.anthropicModel,
-          max_tokens: 10,
-          messages: [{ role: 'user', content: 'ping' }],
-        })
-        this.anthropicClient = client
-        this.mode = 'online'
-        return { mode: this.mode }
-      } catch {
-        // fall through to Ollama check
-      }
+  /** The DM's provider choice: 'auto' | 'claude' | 'ollama' (task 9b). */
+  _preferredProvider() {
+    return normaliseProvider(global.ragSettings?.preferredProvider)
+  }
+
+  /** Active Claude model: the saved setting, else the fallback constant (task 8). */
+  _claudeModel() {
+    const configured = global.ragSettings?.anthropicModel
+    return (typeof configured === 'string' && configured.trim())
+      ? configured.trim()
+      : this.anthropicModel
+  }
+
+  /**
+   * Try the Claude path. Never throws — it reports.
+   *
+   * `keyError` is passed when the key could not even be read, so the result can
+   * say "a key is saved but could not be decrypted" rather than the misleading
+   * "no key saved" the old code produced for that case.
+   */
+  async _checkClaude(apiKey, keyError = null) {
+    const model = this._claudeModel()
+
+    if (keyError) {
+      return { attempted: true, ok: false, kind: 'unreadable-key', model, message: keyError }
+    }
+    if (!apiKey) {
+      return { attempted: false, ok: false, kind: 'no-key', model, message: 'no key saved' }
     }
 
     try {
-      await this._ollamaGet('/api/tags')
-      this.mode = 'offline-ollama'
-    } catch {
-      this.mode = 'no-ai'
+      const client = new Anthropic({ apiKey })
+      await client.messages.create({
+        model,
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'ping' }],
+      })
+      this.anthropicClient = client
+      return { attempted: true, ok: true, kind: 'ok', model, status: 200, message: 'ready' }
+    } catch (err) {
+      const c = classifyClaudeError(err)
+      return { attempted: true, ok: false, kind: c.kind, status: c.status, model, message: c.message }
+    }
+  }
+
+  /** Try the Ollama path. Never throws — it reports, including missing models. */
+  async _checkOllama() {
+    const url = this.ollamaBaseUrl
+    try {
+      const body = await this._ollamaGet('/api/tags')
+      const tags = body?.models ?? []
+      const missing = missingOllamaModels(tags)
+      return {
+        attempted: true, ok: true, url,
+        chatModel: this._ollamaModel(),
+        models: tags.map(t => t.name).filter(Boolean),
+        missing,
+        message: missing.length ? `missing ${missing.join(', ')}` : 'ready',
+      }
+    } catch (err) {
+      const c = classifyOllamaError(err)
+      return { attempted: true, ok: false, url, kind: c.kind, missing: [], message: c.message }
+    }
+  }
+
+  /**
+   * Decide the mode, and record why.
+   *
+   * @param {string|null} apiKey   the decrypted key, or null
+   * @param {object} opts
+   *   keyError — why the key could not be read, when that is the situation
+   */
+  async initialize(apiKey, opts = {}) {
+    const provider = this._preferredProvider()
+    const keyError = opts.keyError ?? null
+
+    const skipped = (why) => ({ attempted: false, ok: false, message: why })
+
+    // With a provider explicitly chosen, only that provider is checked, and a
+    // failure does NOT silently fall through to the other one (task 9b).
+    let claude = provider === 'ollama'
+      ? skipped('not selected — provider is set to Ollama')
+      : await this._checkClaude(apiKey, keyError)
+
+    let ollama = provider === 'claude'
+      ? skipped('not selected — provider is set to Claude API')
+      : await this._checkOllama()
+
+    let mode
+    if (provider === 'claude') {
+      mode = claude.ok ? 'online' : 'no-ai'
+    } else if (provider === 'ollama') {
+      mode = ollama.ok ? 'offline-ollama' : 'no-ai'
+    } else if (claude.ok) {
+      mode = 'online'
+    } else if (!shouldFallBackToOllama(claude)) {
+      // A bad MODEL id is one editable field. Falling back here is how a DM
+      // with a working paid key ends up on a local model wondering why.
+      mode = 'no-ai'
+    } else {
+      mode = ollama.ok ? 'offline-ollama' : 'no-ai'
     }
 
-    return { mode: this.mode }
+    if (mode !== 'online') this.anthropicClient = null
+    this.mode = mode
+    this.lastDetection = { mode, provider, claude, ollama, at: new Date().toISOString() }
+
+    return { mode, detection: this.lastDetection }
+  }
+
+  getDetection() {
+    return this.lastDetection
+  }
+
+  /**
+   * Test the Claude provider directly (task 10).
+   *
+   * Deliberately NOT routed through complete(): that reports the MODE, so a DM
+   * whose key is fine but whose mode is 'no-ai' got "No AI service available"
+   * and learned nothing. This talks to the provider whatever the mode is.
+   */
+  async testClaude(apiKey, keyError = null) {
+    const result = await this._checkClaude(apiKey, keyError)
+    return {
+      ok: result.ok,
+      status: result.status ?? null,
+      model: result.model,
+      kind: result.kind,
+      message: result.ok ? `HTTP 200 — ${result.model} responded` : result.message,
+    }
+  }
+
+  /** Test the Ollama provider directly, including which models are pulled. */
+  async testOllama() {
+    const result = await this._checkOllama()
+    return {
+      ok: result.ok,
+      url: result.url,
+      models: result.models ?? [],
+      missing: result.missing ?? [],
+      message: result.message,
+    }
+  }
+
+  /** The account's real model list, for the Settings dropdown (task 8). */
+  async listClaudeModels(apiKey) {
+    if (!apiKey) throw new Error('No API key saved.')
+    const client = new Anthropic({ apiKey })
+    const page = await client.models.list({ limit: 100 })
+    return (page?.data ?? []).map(m => ({ id: m.id, name: m.display_name ?? m.id }))
   }
 
   // Active model: prefer saved setting, fall back to constructor default
@@ -89,7 +232,7 @@ class AIService {
 
     if (this.mode === 'online') {
       const response = await this.anthropicClient.messages.create({
-        model:      this.anthropicModel,
+        model:      this._claudeModel(),
         max_tokens: options.maxTokens || 1024,
         // Disable thinking: this is a structured extraction/chat call, and on
         // models where thinking is on by default it would both consume the
@@ -131,7 +274,7 @@ class AIService {
   async stream(systemPrompt, messages, onChunk, onDone) {
     if (this.mode === 'online') {
       const stream = await this.anthropicClient.messages.stream({
-        model:      this.anthropicModel,
+        model:      this._claudeModel(),
         max_tokens: 1024,
         thinking:   { type: 'disabled' },
         system:     systemPrompt,

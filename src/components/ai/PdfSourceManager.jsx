@@ -1,3 +1,4 @@
+import { parseIpcError } from '../../utils/ipcError'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import useCampaignStore from '../../stores/campaignStore'
 
@@ -49,7 +50,7 @@ export default function PdfSourceManager() {
       const rows = await window.electronAPI.db.pdf.getAll(activeCampaign.id)
       setSources(rows)
     } catch (err) {
-      setError(err.message ?? 'Failed to load PDF sources')
+      setError(parseIpcError(err).message)
     }
   }, [activeCampaign?.id])
 
@@ -121,7 +122,7 @@ export default function PdfSourceManager() {
       await window.electronAPI.embed.source(source.id)
       await loadSources()
     } catch (err) {
-      setError(err.message ?? 'Embedding failed')
+      setError(parseIpcError(err).message)
     } finally {
       setIngesting(false)
     }
@@ -142,7 +143,7 @@ export default function PdfSourceManager() {
       }
       await loadSources()
     } catch (err) {
-      setError(err.message ?? 'Re-ingestion failed')
+      setError(parseIpcError(err).message)
     } finally {
       setIngesting(false)
     }
@@ -159,7 +160,7 @@ export default function PdfSourceManager() {
       setProgress(prev => { const next = { ...prev }; delete next[source.id]; return next })
       setPreviews(prev => { const next = { ...prev }; delete next[source.id]; return next })
     } catch (err) {
-      setError(err.message ?? 'Delete failed')
+      setError(parseIpcError(err).message)
     }
   }, [])
 

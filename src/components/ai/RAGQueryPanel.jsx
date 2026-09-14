@@ -1,3 +1,5 @@
+import { parseIpcError } from '../../utils/ipcError'
+import useAiMode from '../../hooks/useAiMode'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import useCampaignStore from '../../stores/campaignStore'
 import { notifyError } from '../../stores/toastStore'
@@ -42,6 +44,7 @@ export default function RAGQueryPanel() {
       // result to a string is silently always false (aiHandlers.js:9).
       const { mode } = await window.electronAPI.ai.getMode()
       setAiMode(mode)
+      // Also subscribed below, so a provider switch is picked up live.
     } catch { setAiMode('no-ai') }
   }, [activeCampaign?.id])
 
@@ -74,7 +77,7 @@ export default function RAGQueryPanel() {
         : await window.electronAPI.ai.ragQuery(q, activeCampaign.id, { topK: 5 })
       setResult(res)
     } catch (err) {
-      setError(err.message ?? 'Query failed')
+      setError(parseIpcError(err).message)
       notifyError(err, situation ? 'Situation lookup' : 'Rules lookup')
     } finally {
       setLoading(false)

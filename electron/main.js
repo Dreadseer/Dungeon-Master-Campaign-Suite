@@ -199,10 +199,17 @@ app.whenReady().then(async () => {
   registerEmbedHandlers(global.embeddingService, global.campaignLoreIndex)
   registerServerHandlers(global.playerServer, global.tunnelService, global.keyService)
 
-  // Auto-initialize AI with saved key (if any)
-  const savedKey = global.keyService.loadKey()
-  const result   = await global.aiService.initialize(savedKey)
+  // Auto-initialize AI with the saved key (if any).
+  //
+  // readKey rather than loadKey: a key that exists but cannot be decrypted is
+  // reported as exactly that, instead of being indistinguishable from no key.
+  const { key: savedKey, error: keyError } = global.keyService.readKey()
+  console.log('[AI] Key file:', global.keyService.keyPath)
+  const result = await global.aiService.initialize(savedKey, { keyError })
   console.log('[AI] Mode:', result.mode)
+  for (const line of require('./services/aiDetection.cjs').describeDetection(result.detection)) {
+    console.log('[AI]  ', line)
+  }
 
   createWindow()
 

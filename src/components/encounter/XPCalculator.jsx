@@ -1,3 +1,5 @@
+import { parseIpcError } from '../../utils/ipcError'
+import useAiMode from '../../hooks/useAiMode'
 import { useState, useEffect, useMemo } from 'react'
 import {
   partyThresholds,
@@ -33,15 +35,8 @@ export default function XPCalculator({ encounter, monsters, onDifficultyChange, 
   const [aiSummary, setAiSummary]         = useState('')
   const [aiAdvice,  setAiAdvice]          = useState(null)   // [{ suggestion, applied, note }]
   const [aiError,   setAiError]           = useState('')
-  const [aiMode,    setAiMode]            = useState(null)
+  const { mode: aiMode }                  = useAiMode()
   const [applying,  setApplying]          = useState(false)
-
-  useEffect(() => {
-    // getMode resolves to an OBJECT — destructure it.
-    window.electronAPI.ai.getMode()
-      .then(({ mode }) => setAiMode(mode))
-      .catch(() => setAiMode('no-ai'))
-  }, [])
 
   // Load campaign characters when toggled on
   useEffect(() => {
@@ -106,7 +101,7 @@ export default function XPCalculator({ encounter, monsters, onDifficultyChange, 
       setAiSummary(summary)
       setAiAdvice(suggestions.map(sg => ({ suggestion: sg, applied: false, note: '' })))
     } catch (err) {
-      setAiError(err?.message ?? 'AI request failed')
+      setAiError(parseIpcError(err).message)
       notifyError(err, 'Ask the encounter advisor')
     } finally {
       setAiLoading(false)

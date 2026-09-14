@@ -1,3 +1,5 @@
+import { parseIpcError } from '../../utils/ipcError'
+import useAiMode from '../../hooks/useAiMode'
 import { useState, useCallback } from 'react'
 
 const SYSTEM_PROMPT = `You are an expert D&D Dungeon Master narrative analyst.
@@ -91,10 +93,9 @@ export default function AIInsightsPanel({ nodes, edges, campaignName }) {
     setNoAi(false)
 
     try {
-      // ai:getMode resolves to an OBJECT — { mode } (aiHandlers.js). Comparing
-      // the object to a string was always false, so this guard never fired and
-      // a DM with no AI got the raw "No AI service available" error rendered as
-      // an insight. Same slip the capability review found in AISuggestionPanel.
+      // Read live rather than sampled at mount, so a provider switch takes
+      // effect here too. The object-vs-string trap that made this guard dead
+      // for two phases is gone with it — useAiMode destructures once, centrally.
       const { mode: aiMode } = await window.electronAPI.ai.getMode()
       if (aiMode === 'no-ai') {
         setNoAi(true)
@@ -106,7 +107,7 @@ export default function AIInsightsPanel({ nodes, edges, campaignName }) {
       const result      = await window.electronAPI.ai.complete(SYSTEM_PROMPT, userMessage)
       setInsights(parseInsights(result))
     } catch (err) {
-      setError(err.message ?? 'AI request failed')
+      setError(parseIpcError(err).message)
     } finally {
       setLoading(false)
     }
