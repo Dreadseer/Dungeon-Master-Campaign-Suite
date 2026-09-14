@@ -97,6 +97,9 @@ async function main() {
   await ui.click('AI World Suggestions')
   await sleep(700)
 
+  await ui.page.locator('input[placeholder*="What should I add"]').first()
+    .scrollIntoViewIfNeeded().catch(() => {})
+  await sleep(400)
   const panelShot = await ui.screenshot('a01-suggestion-panel')
   const hasAsk = await ui.page.locator('input[placeholder*="What should I add"]').count()
   record('World Builder offers a free-text request box', hasAsk > 0 ? 'PASS' : 'FAIL',
@@ -129,6 +132,11 @@ async function main() {
       if (i > 3 && !(await thinking())) break   // finished, or failed
     }
 
+    // Scroll the cards into view before capturing: the evidence for this line
+    // is the cards themselves, and they sit below the fold on a populated page.
+    await ui.page.locator('button', { hasText: /^Save$/ }).first()
+      .scrollIntoViewIfNeeded().catch(() => {})
+    await sleep(500)
     const cardsShot = await ui.screenshot('a02-suggestion-cards')
     record('Request "a rival thieves\' guild in Waterdeep" returns saveable cards',
       cardCount > 0 ? 'PASS' : 'FAIL',
