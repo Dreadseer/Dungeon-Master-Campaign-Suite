@@ -1872,3 +1872,31 @@ runtime: *"react-konva version 19 is only compatible with React 19."* On main
 4. **Should the model list be cached?** "Fetch available models" hits the API
    every time. Caching it per key would make the dropdown available offline, at
    the cost of going stale when Anthropic ships a model.
+
+### Part C results — main is runnable again
+
+Merged 2026-09-14, all three fast-forward, no merge commits:
+`7d9060d` → `phase-5-combat` (12) → `phase-6-ai-writes` (9) → `phase-6.1-ai-mode` (4).
+25 commits onto main, tagged **v1.1.0-alpha.2**.
+
+Everything below was run **on main after the merge**:
+
+| Harness | Result |
+|---|---|
+| `npm run doctor` | No problems (one expected WARN: `DMCS_USER_DATA` unset) |
+| `npm test` | **924 passing**, 24 files, 0 expected-fail, 0 todo |
+| `test:migrations` | 76/76 |
+| `test:ipc` | 0 problems — 192 channels, all layers matched, no duplicate preload keys |
+| `test:lore` | 44/44 |
+| `test:sessions` | 51/51 |
+| `test:rag` | 42/42 |
+| `test:server` | 62/62 |
+| `build:renderer` | clean, both bundles |
+| `verify:combat` | **16 PASS / 0 FAIL** |
+| `verify:ai` | **14 PASS / 0 FAIL** (against real Ollama) |
+| `verify:aimode` | **14 PASS / 0 FAIL / 1 NOT VERIFIED** |
+
+**The renderer renders**, which is the thing main could not do before this
+merge: launched through the Playwright driver, `#root` has children, body text
+is present, `window.Konva` is an object, and the console is clean.
+`main-renderer-renders.png`.
