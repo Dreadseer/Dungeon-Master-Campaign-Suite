@@ -409,11 +409,79 @@ migrated and some not, and any idempotence check then skips the rest forever.
 
 ## AI Layer
 
-On startup the app picks a mode (shown as a badge in the TopBar):
+### Choosing a provider
 
-1. Valid Anthropic key in `safeStorage` → **`online`** (Claude API, model `claude-sonnet-5`).
-2. Else Ollama reachable at `http://localhost:11434` → **`offline-ollama`** (`llama3:latest` chat).
-3. Else **`no-ai`** — AI-generated content hides; the rest of the app works normally, **including rules Q&A** (see below).
+**Settings → AI Configuration → Provider** is a three-way choice:
+
+| Setting | Behaviour |
+|---|---|
+| **Auto** (default) | Claude if the key works, else Ollama, else `no-ai`. |
+| **Claude API** | Only Claude is checked. If it fails the app stays on your choice and says why — it does **not** quietly drop to Ollama. |
+| **Ollama** | Only Ollama is checked. |
+
+The choice persists across restarts, and the TopBar badge names the provider and
+model (`Claude API — claude-sonnet-5`, `Ollama — llama3:latest`) rather than just
+"online".
+
+> **Embeddings always use Ollama**, whichever provider you pick, because the
+> Claude path has no embedding model. With Claude selected and Ollama stopped,
+> chat works and retrieval falls back to keyword search.
+
+### Why the app is in the mode it is in
+
+Detection records a reason for every outcome and Settings shows it as two lines
+under "Current mode" — the same text appears in the badge's tooltip:
+
+```
+Claude: rejected — the key was rejected (HTTP 401). Re-enter your API key.
+Ollama: unreachable — net::ERR_CONNECTION_REFUSED (http://localhost:11434)
+```
+
+The app will not report `no-ai` without saying why. The distinctions it draws
+are the ones that change what you should do:
+
+| Outcome | What it means | What the app does |
+|---|---|---|
+| 401 / 403 | the key is wrong or expired | prefers Ollama, and says the key was rejected |
+| 404 / `not_found_error` | the **model id** is wrong; the key may be fine | stays on Claude and names the model, rather than hiding a one-field fix behind a silent downgrade |
+| 429 | rate limited | transient — does not fall back |
+| network error | nothing can be concluded | prefers Ollama, quoting the transport error |
+| a key that will not decrypt | the stored key can no longer be read on this machine | says exactly that, and asks you to re-enter it |
+
+That last row is worth knowing about: the key is encrypted with Electron's
+`safeStorage`, which is tied to your OS user account. A Windows credential
+change, a different account, or a restored profile can leave a key file that
+exists but cannot be decrypted. Before Phase 6.1 the app treated that as "no key
+saved" while still showing a masked key and a "Remove Key" button.
+
+### Changing the model
+
+The Claude model id is a Settings field, not a constant. **Fetch available
+models** calls `GET /v1/models` with your key and turns the field into a
+dropdown of what your account can actually use. Until you fetch it, the app uses
+a built-in default that has not been checked against your key, and says so.
+
+### Nothing needs a restart
+
+Saving or removing a key, switching provider, changing the model, checking
+Ollama, or pressing **Re-detect AI** all re-run detection and broadcast the
+result. The badge and every AI surface update immediately.
+
+**Test Claude** and **Test Ollama** talk to each provider directly rather than
+going through the chat path, so they can tell you a key is fine even when the
+app has settled on a different provider. The Ollama test reports which of
+`llama3` / `nomic-embed-text` are missing and prints the exact `ollama pull`
+command.
+
+`DMCS_OLLAMA_URL` overrides the Ollama endpoint for a DM running it on another
+port or machine.
+
+### Modes
+
+1. **`online`** — Claude API.
+2. **`offline-ollama`** — local `llama3:latest`.
+3. **`no-ai`** — AI-generated content hides behind a clear "AI not configured"
+   panel; the rest of the app works normally, **including rules Q&A** (see below).
 
 ### Rules Q&A
 
@@ -536,7 +604,12 @@ Two properties worth knowing:
 - **Editing one entity re-embeds one entity.** Chunks are matched by text, so
   unchanged ones keep their row and their vector.
 
-Index it from the AI page (🧠 budget pill → **Index now**). Each message then
+The index also refreshes itself: any write to an NPC, location, faction or lore
+entry schedules a re-index of that campaign two seconds later, coalesced so a
+burst of edits costs one pass. It is hooked in the main process, where every
+world write already passes through, rather than in each editing screen.
+
+Index it manually from the AI page (🧠 budget pill → **Index now**). Each message then
 pulls the top 3 relevant campaign entries into context, scoped to that source so
 a question about your campaign does not come back with passages from the
 Player's Handbook. The **Check for contradictions** button on a suggestion card
@@ -780,7 +853,12 @@ npm run test:sessions     # migration 011, the notes import, and the sessions/pl
 npm run verify:combat     # Phase 5 acceptance, driven through the real app (see below)
 npm run test:lore         # the campaign lore index, against a real database
 npm run verify:ai         # Phase 6 acceptance — calls a real model, needs Ollama
+npm run verify:aimode     # Phase 6.1 acceptance — detection, provider switch, batch save
 ```
+
+`npx electron scripts/probe-anthropic.cjs` answers "is my saved key actually
+usable, and which models does it see?" from outside the app. It never prints the
+key and opens no database.
 
 ### Driving the real app
 

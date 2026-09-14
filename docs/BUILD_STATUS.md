@@ -1734,3 +1734,141 @@ not an API-confirmed one, and that is stated in the UI.
    wrapped correctly, and `src/utils/ipcError.js` strips the prefix properly.
    `Settings.handleTest` (`Settings.jsx:108`) and `handleTestTunnel`
    (`Settings.jsx:231`) simply use raw `err.message` instead of the helper.
+
+### What shipped (Part B)
+
+| # | Task | Where |
+|---|---|---|
+| 6 | `lastDetection` + `ai:getDetection`, rendered as two lines in Settings and in the badge tooltip | `AIService.js`, `aiDetection.cjs`, `Settings.jsx`, `TopBar.jsx` |
+| 7 | 401/403 = bad key · 404 = bad model, key may be fine · network = offline · 429 = transient | `aiDetection.cjs` |
+| 8 | Model id is a Settings field with "Fetch available models" (`GET /v1/models`) | `ai:setModel`, `ai:listModels` |
+| 9 | Re-detect on key save/remove, provider switch, Ollama check, and a "Re-detect AI" button; `ai:modeChanged` broadcast | `aiHandlers.js`, `src/hooks/useAiMode.js` |
+| 9b | `ai.preferredProvider` = auto/claude/ollama, persisted, no silent fallback | `ai:setProvider` |
+| 10 | `ai:testClaude` / `ai:testOllama` talk to providers directly | `AIService.testClaude/testOllama` |
+| 11 | 16 call sites switched from raw `err.message` to `parseIpcError` | across `src/` |
+| 12 | Missing Ollama models named, with the exact `ollama pull` command | `missingOllamaModels` |
+| 16 | `db:world:saveBatch` / `undoBatch` in one transaction; central debounced lore re-index | `dbHandlers.js`, `loreReindexQueue.cjs` |
+
+The key fix is `KeyService.readKey()`: it reports a decryption failure instead of
+returning `null` as though no key existed, and `ai:hasKey` now returns `readable`
+alongside `hasKey`. Settings says, in as many words, that a saved key cannot be
+read and must be re-entered.
+
+`electron/services/aiDetection.cjs` holds the classification logic — pure, and
+CommonJS so `AIService` requires it while Vitest imports the same copy. That
+avoids the renderer/main duplication `CampaignLoreIndex` had to accept in Phase
+6, and the Phase 6 entry's "they can drift" caveat does not apply here.
+
+### Acceptance
+
+`npm run verify:aimode` — every line clicked in a launched Electron window
+against a scratch database, screenshot each. **14 PASS · 0 FAIL · 1 NOT VERIFIED.**
+
+| Check | Result | Detail | Screenshot |
+|---|---|---|---|
+| No key and no Ollama: `no-ai` with two explanatory lines | **PASS** | `Claude: not checked — no key saved` / `Ollama: unreachable — net::ERR_CONNECTION_REFUSED` | `m01-no-ai-with-reasons.png` |
+| The reason names the real transport error | **PASS** | `net::ERR_CONNECTION_REFUSED (http://127.0.0.1:59999)` | `m01-no-ai-with-reasons.png` |
+| Re-detect flips the mode without a restart | **PASS** | `offline-ollama`, `Ollama: ready at http://localhost:11434` | `m02-redetect-ollama.png` |
+| The badge names the provider, not just the mode | **PASS** | `Ollama — llama3:latest` | `m02-redetect-ollama.png` |
+| A bogus model id is reported as a model problem | **NOT VERIFIED** | needs a key that authenticates; without one the model check is never reached — see below | `m03-bogus-model.png` |
+| Selecting Ollama switches to it, badge says so | **PASS** | `offline-ollama`, badge `Ollama — llama3:latest` | `m04-provider-ollama.png` |
+| Claude selected without a usable key: no silent fallback | **PASS** | `no-ai`; Ollama line reads `not selected — provider is set to Claude API` | `m05-provider-claude-no-key.png` |
+| "Switch back to Auto" offered | **PASS** | button present | `m05-provider-claude-no-key.png` |
+| The selection survives a restart | **PASS** | `provider = "claude"` after relaunch | `m06-provider-persisted.png` |
+| Switching back to Auto restores the working provider | **PASS** | `offline-ollama` | `m07-back-to-auto.png` |
+| No `Error invoking remote method` prefix in test output | **PASS** | clean | `m08-provider-tests.png` |
+| "Test Ollama" reports the provider directly, with models | **PASS** | `✅ Ollama — ready (nomic-embed-text:latest, llama3:latest)` | `m08-provider-tests.png` |
+| A failing item in "Save all" writes NOTHING | **PASS** | threw; counts before `{npcs:1,locations:0,factions:1,connections:0}` after identical | `m09-batch-rollback.png` |
+| A good batch writes everything and Undo removes exactly it | **PASS** | 2 records + 1 connection written; undo removed 2; 0 connections left | `m10-batch-undo.png` |
+| No unexpected renderer console errors | **PASS** | clean | — |
+
+#### The NOT VERIFIED lines, and why
+
+Three acceptance lines need **a key that authenticates**, and this environment
+has none: the developer's stored key cannot be decrypted, which is the root
+cause itself. Nothing was faked to make them pass.
+
+- **"Save a valid key → mode flips to online; Test Claude returns 200."** Not
+  run. What *is* verified is the path taken with no usable key: the mode holds,
+  the reason is shown, and there is no silent fallback.
+- **"Set the model id to a bogus value → 404 warning naming the model."** The
+  404 branch is unit-tested (`classifyClaudeError`, `describeClaude`,
+  `shouldFallBackToOllama` — a 404 must NOT fall back), but no live 404 was
+  observed, because authentication fails first.
+- **"With both providers available, send a message under each and confirm
+  `ai_usage_log` records the selected provider."** Only the Ollama half could be
+  exercised.
+
+`scripts/probe-anthropic.cjs` performs the live check and prints the model list
+and the newest Sonnet id. Run it after re-entering a key to close these three.
+
+### Bugs found
+
+Two the unit tests caught:
+
+1. **`statusOf` read a port as an HTTP status.** `ECONNREFUSED 1.2.3.4:443`
+   became "HTTP 443", so a refused connection classified as `unknown` rather
+   than `offline`. It now requires an explicit status marker.
+2. **`shouldFallBackToOllama` was an allow list, and `'no-key'` was not on it** —
+   so the commonest setup of all, no key with a healthy Ollama, reported `no-ai`.
+   It is an exception list now: an unrecognised kind falls back rather than
+   stranding the DM.
+
+Two that only launching the app could find:
+
+3. **A dead Ollama classified as `unknown`.** Electron's `net` module speaks
+   Chromium's `net::ERR_*`, not Node's errno codes; the pattern matched only the
+   latter.
+4. **`db.world.saveBatch` did not exist.** A second `world: {` key was added to
+   preload's `db` object; in a JS object literal the later key wins, so the
+   earlier block and both its channels were silently discarded. `test:ipc`
+   passed throughout, because every channel string was present in the file. It
+   surfaced as the rollback acceptance line passing **for the wrong reason** —
+   it threw before any SQL ran. `verify-ipc-layers.mjs` now checks for duplicate
+   keys per object scope; the check was confirmed to fail on the real bug and
+   pass once merged.
+
+### Part C — merge
+
+`phase-5-combat` carries the react-konva fix main lacks (`64487d8`). Versions
+that work together, all three confirmed installed:
+
+| Package | main (broken) | merged |
+|---|---|---|
+| `react` | 18.3.1 | 18.3.1 |
+| `react-konva` | ~19.0.10 — **throws on import** | ^18.2.10 |
+| `konva` | ^10.3.0 | ^9.3.22 |
+
+`react-konva@19` declares a peer of `react: ^18.3.1 || ^19.0.0` but refuses at
+runtime: *"react-konva version 19 is only compatible with React 19."* On main
+`#root` stays empty on every route, so no UI check of any kind could run there.
+
+### Deferred / known issues
+
+- **Three acceptance lines need a working key** (above). The code paths are
+  unit-tested; the live confirmations are not done.
+- **The model default is not API-confirmed.** `DEFAULT_CLAUDE_MODEL` is what to
+  try before anyone has fetched the account's list. Settings says so, and
+  "Fetch available models" replaces it with the real thing.
+- **`CampaignLoreIndex` still duplicates `buildLoreChunks`** from
+  `src/utils/loreCorpus.js` (Phase 6's caveat). `aiDetection.cjs` shows the way
+  out — a CJS module both sides import — and the lore copy could follow, but
+  that was not in this phase's scope.
+- **The re-index hook falls back to `global.activeCampaignId` for deletes**,
+  which no code currently sets; in practice a delete is followed by an edit or a
+  manual re-index. Wiring the active campaign into the main process would make
+  deletes self-healing.
+
+### Open questions
+
+1. **Should a key that will not decrypt be deleted automatically?** Today the
+   app explains and waits. Removing it silently would be tidier and would lose
+   the evidence that something changed under the DM's feet.
+2. **Should `no-ai` be reachable deliberately?** There is no "off" setting; the
+   only way to get `no-ai` with Ollama running is to select Claude and have it
+   fail. A fourth segment ("None") would make that explicit.
+3. **Should Undo cover single-card saves too?** Only "Save all" is transactional
+   and undoable. A card saved on its own is still one insert with no way back.
+4. **Should the model list be cached?** "Fetch available models" hits the API
+   every time. Caching it per key would make the dropdown available offline, at
+   the cost of going stale when Anthropic ships a model.
