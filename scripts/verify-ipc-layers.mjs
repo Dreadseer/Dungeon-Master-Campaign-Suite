@@ -82,5 +82,47 @@ const unused = [...registered.keys()]
   .filter(c => !invoked.has(c) && !listened.has(c) && !mainOnlyEvents.has(c))
 report('handlers no preload path reaches (informational)', unused, false)
 
+// ── Duplicate keys in the preload object ────────────────────────────────────
+//
+// A blind spot this check exists to close. Phase 6.1 added a second `world: {`
+// block to the `db` object; in a JS object literal the LATER key wins, so the
+// earlier one — and both channels it exposed — was silently discarded. Every
+// check above still passed, because the channel strings were all present in the
+// file. The renderer simply got "is not a function" at runtime.
+//
+// Nesting is tracked by brace depth, since the same key name is legitimate at
+// different levels (`db.maps` alongside a top-level `maps`, say).
+const duplicateKeys = (() => {
+  const found = []
+  const stack = [{ depth: 0, keys: new Map() }]
+  let depth = 0
+
+  for (const [i, line] of preload.split(/\r?\n/).entries()) {
+    // Strip line comments and string literals so braces inside them cannot
+    // shift the depth.
+    const code = line.replace(/\/\/.*$/, '').replace(/'(?:[^'\\]|\\.)*'/g, "''")
+
+    const opener = /^\s*([A-Za-z_$][\w$]*)\s*:\s*\{\s*$/.exec(code)
+    if (opener) {
+      const scope = stack[stack.length - 1]
+      const name = opener[1]
+      if (scope.keys.has(name)) {
+        found.push(`"${name}" declared twice in one object — preload.js:${scope.keys.get(name)} and :${i + 1}; the later wins and the earlier is lost`)
+      } else {
+        scope.keys.set(name, i + 1)
+      }
+      stack.push({ depth: depth + 1, keys: new Map() })
+      depth++
+      continue
+    }
+
+    depth += (code.match(/\{/g) ?? []).length
+    depth -= (code.match(/\}/g) ?? []).length
+    while (stack.length > 1 && stack[stack.length - 1].depth > depth) stack.pop()
+  }
+  return found
+})()
+report('duplicate keys in preload.js', duplicateKeys)
+
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${failures} problem(s)\n`)
 process.exit(failures === 0 ? 0 : 1)

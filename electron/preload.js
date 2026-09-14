@@ -93,6 +93,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     world: {
       search: (campaignId, query) => ipcRenderer.invoke('db:world:search', campaignId, query),
+      // One transaction for a whole suggestion batch, so a mid-batch failure
+      // rolls back rather than leaving half a guild behind.
+      saveBatch: (batch) => ipcRenderer.invoke('db:world:saveBatch', batch),
+      undoBatch: (batch) => ipcRenderer.invoke('db:world:undoBatch', batch),
     },
     lore: {
       getAll:   (campaignId) => ipcRenderer.invoke('db:lore:getAll', campaignId),

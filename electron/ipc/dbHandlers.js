@@ -203,6 +203,99 @@ function registerDbHandlers(db) {
          OR (entity_b_type = ? AND entity_b_id = ?)`,
       [entityType, entityId, entityType, entityId]))
 
+  // ── Batched world save (Phase 6.1 task 16) ───────────────────────────────
+  //
+  // "Save all" on the AI suggestion cards used to run one create per card and
+  // then one insert per connection, each its own statement. A failure partway
+  // through — a CHECK-violating location type, a missing column — left the
+  // campaign holding half a guild, with no way to tell which half.
+  //
+  // One transaction: everything lands or nothing does. The ids come back so the
+  // renderer can offer an Undo that deletes exactly what this call wrote.
+  const WORLD_INSERTS = {
+    npc: (d) => db.run(
+      `INSERT INTO npcs (campaign_id, name, race, class, role, location_id, faction_id,
+         notes, secrets, motivation, is_alive, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,1,datetime('now'))`,
+      [d.campaign_id, d.name, d.race, d.class, d.role, d.location_id ?? null,
+       d.faction_id ?? null, d.notes, d.secrets, d.motivation]),
+
+    location: (d) => db.run(
+      `INSERT INTO locations (campaign_id, name, type, description, lore,
+         parent_location_id, created_at)
+       VALUES (?,?,?,?,?,?,datetime('now'))`,
+      [d.campaign_id, d.name, d.type, d.description, d.lore, d.parent_location_id ?? null]),
+
+    faction: (d) => db.run(
+      `INSERT INTO factions (campaign_id, name, description, alignment, notes, created_at)
+       VALUES (?,?,?,?,?,datetime('now'))`,
+      [d.campaign_id, d.name, d.description, d.alignment, d.notes]),
+
+    lore: (d) => db.run(
+      `INSERT INTO compendium_custom (campaign_id, type, name, data, source, created_at)
+       VALUES (?,'lore',?,?,'custom',datetime('now'))`,
+      [d.campaign_id, d.name,
+       JSON.stringify({ content: d.content, category: d.category, is_secret: d.is_secret ?? false })]),
+  }
+
+  const WORLD_DELETES = {
+    npc:      (id) => db.run('DELETE FROM npcs WHERE id = ?', [id]),
+    location: (id) => db.run('DELETE FROM locations WHERE id = ?', [id]),
+    faction:  (id) => db.run('DELETE FROM factions WHERE id = ?', [id]),
+    lore:     (id) => db.run(`DELETE FROM compendium_custom WHERE id = ? AND type = 'lore'`, [id]),
+  }
+
+  /**
+   * @param records     [{ kind, payload }]
+   * @param connections [{ fromIndex, toKind, toId, toIndex, relationship }]
+   *                    fromIndex/toIndex point into `records`; toKind/toId name
+   *                    an entity that already existed.
+   */
+  registerHandler('db:world:saveBatch', (_, { records = [], connections = [] } = {}) =>
+    db.transaction(() => {
+      const saved = []
+
+      for (const { kind, payload } of records) {
+        const insert = WORLD_INSERTS[kind]
+        if (!insert) throw new Error(`Unknown record kind "${kind}"`)
+        const { lastInsertRowid } = insert(payload)
+        saved.push({ kind, id: Number(lastInsertRowid), name: payload.name })
+      }
+
+      const written = []
+      for (const link of connections) {
+        // Resolve now that every record has an id.
+        const from = saved[link.fromIndex]
+        if (!from) continue
+        const to = link.toIndex != null ? saved[link.toIndex] : { kind: link.toKind, id: link.toId }
+        if (!to || to.id == null) continue
+
+        const { lastInsertRowid } = db.run(
+          `INSERT INTO connections
+             (campaign_id, entity_a_type, entity_a_id, entity_b_type, entity_b_id, relationship, notes)
+           VALUES (?,?,?,?,?,?,?)`,
+          [link.campaign_id, from.kind, from.id, to.kind, to.id, link.relationship ?? 'related to', ''])
+        written.push(Number(lastInsertRowid))
+      }
+
+      return { records: saved, connectionIds: written }
+    }))
+
+  /** Undo exactly what one saveBatch wrote (task 16). */
+  registerHandler('db:world:undoBatch', (_, { records = [], connectionIds = [] } = {}) =>
+    db.transaction(() => {
+      // Connections first: deleting an entity while a row still points at it is
+      // the failure mode this ordering avoids.
+      for (const id of connectionIds) db.run('DELETE FROM connections WHERE id = ?', [id])
+      let removed = 0
+      for (const r of records) {
+        const del = WORLD_DELETES[r.kind]
+        if (!del) continue
+        removed += del(r.id).changes ?? 0
+      }
+      return { removed, connections: connectionIds.length }
+    }))
+
   registerHandler('db:connections:create', (_, data) =>
     db.run(`
       INSERT INTO connections

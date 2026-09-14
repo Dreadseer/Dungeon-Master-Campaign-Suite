@@ -1,11 +1,11 @@
 import useAiMode from '../../hooks/useAiMode'
 import { useState, useEffect, useCallback } from 'react'
 import {
+  nameKey,
   buildSuggestionPrompt,
   parseSuggestions,
   toCreatePayload,
   buildEntityIndex,
-  buildConnectionRows,
   findNameClashes,
   buildContradictionPrompt,
   parseContradictions,
@@ -77,6 +77,8 @@ export default function SuggestionCards({
   const [cards,    setCards]    = useState(null)   // [{ suggestion, saved, savedId, checking, conflicts }]
   const [note,     setNote]     = useState('')
   const [savingAll, setSavingAll] = useState(false)
+  // What the last batch wrote, so it can be taken back for 30 seconds.
+  const [undoable,  setUndoable]  = useState(null)
 
   const generate = useCallback(async () => {
     if (!campaign?.id) return
@@ -188,45 +190,102 @@ export default function SuggestionCards({
    *
    * Connections come last on purpose: a link can only be resolved once both
    * ends have ids, and a half-written connection row is worse than none.
+   *
+   * One transaction (Phase 6.1 task 16). Previously each card was its own
+   * insert and each link its own statement, so a failure partway through — a
+   * CHECK-violating location type, say — left the campaign holding half a guild
+   * with no way to tell which half. Now everything lands or nothing does.
    */
   const handleSaveAll = async () => {
     if (!cards || savingAll) return
     setSavingAll(true)
 
-    const saved = []
-    for (let i = 0; i < cards.length; i++) {
-      if (cards[i].saved) {
-        saved.push({ kind: cards[i].suggestion.kind, id: cards[i].savedId, name: cards[i].suggestion.name })
-        continue
-      }
-      const one = await saveOne(i)
-      if (one) saved.push(one)
+    try {
+      const pending = cards
+        .map((c, i) => ({ card: c, i }))
+        .filter(({ card }) => !card.saved)
+
+      if (pending.length === 0) { setSavingAll(false); return }
+
+      const records = pending.map(({ card }) => ({
+        kind: card.suggestion.kind,
+        payload: toCreatePayload(card.suggestion, campaign.id),
+      }))
+
+      // Links are resolved against position in `records` for anything in this
+      // batch, and against a real id for anything that already existed — the
+      // batch has no ids yet, so the handler fills them in after inserting.
+      const positionOf = new Map(pending.map(({ card }, n) => [nameKey(card.suggestion.name), n]))
+      const existingIndex = buildEntityIndex({ existing: world })
+
+      const connections = []
+      let unresolved = 0
+      pending.forEach(({ card }, fromIndex) => {
+        for (const link of card.suggestion.links ?? []) {
+          const key = nameKey(link.to)
+          const toIndex = positionOf.get(key)
+          if (toIndex != null) {
+            if (toIndex === fromIndex) continue
+            connections.push({
+              campaign_id: campaign.id, fromIndex, toIndex,
+              relationship: link.relationship || 'related to',
+            })
+            continue
+          }
+          const existing = existingIndex.get(key)
+          if (existing) {
+            connections.push({
+              campaign_id: campaign.id, fromIndex,
+              toKind: existing.type, toId: existing.id,
+              relationship: link.relationship || 'related to',
+            })
+            continue
+          }
+          unresolved++
+        }
+      })
+
+      const result = await window.electronAPI.db.world.saveBatch({ records, connections })
+
+      setCards(prev => {
+        const next = [...prev]
+        pending.forEach(({ i }, n) => {
+          next[i] = { ...next[i], saved: true, savedId: result.records[n]?.id ?? null }
+        })
+        return next
+      })
+
+      setUndoable(result)
+      // 30 seconds, then the offer lapses — an Undo button that lives forever
+      // becomes a way to delete a session's work by accident.
+      setTimeout(() => setUndoable(cur => (cur === result ? null : cur)), 30000)
+
+      notifySuccess(
+        `Saved ${result.records.length} record${result.records.length === 1 ? '' : 's'}` +
+        (result.connectionIds.length ? ` and ${result.connectionIds.length} connection${result.connectionIds.length === 1 ? '' : 's'}` : '') +
+        // Never silently write fewer links than the cards promised.
+        (unresolved ? ` — ${unresolved} link${unresolved === 1 ? '' : 's'} could not be matched` : ''),
+      )
+      onSaved?.()
+    } catch (err) {
+      // Nothing was written: the transaction rolled back.
+      notifyError(err, 'Save all')
+    } finally {
+      setSavingAll(false)
     }
+  }
 
-    if (saved.length === 0) { setSavingAll(false); return }
-
-    const index = buildEntityIndex({ saved, existing: world })
-    const { rows, unresolved } = buildConnectionRows(cards.map(c => c.suggestion), index, campaign.id)
-
-    let written = 0
-    for (const row of rows) {
-      try {
-        await window.electronAPI.db.connections.create(row)
-        written++
-      } catch (err) {
-        notifyError(err, 'Save connection')
-      }
+  const handleUndo = async () => {
+    if (!undoable) return
+    try {
+      const { removed } = await window.electronAPI.db.world.undoBatch(undoable)
+      setUndoable(null)
+      setCards(prev => prev.map(c => (c.saved ? { ...c, saved: false, savedId: null } : c)))
+      notifySuccess(`Undone — ${removed} record${removed === 1 ? '' : 's'} removed`)
+      onSaved?.()
+    } catch (err) {
+      notifyError(err, 'Undo save')
     }
-
-    notifySuccess(
-      `Saved ${saved.length} record${saved.length === 1 ? '' : 's'}` +
-      (written ? ` and ${written} connection${written === 1 ? '' : 's'}` : '') +
-      // Never silently write fewer links than the cards promised.
-      (unresolved.length ? ` — ${unresolved.length} link${unresolved.length === 1 ? '' : 's'} could not be matched` : ''),
-    )
-
-    setSavingAll(false)
-    onSaved?.()
   }
 
   /** Ask the model whether this clashes with lore already on record (task 7). */
@@ -338,6 +397,11 @@ export default function SuggestionCards({
             >
               {savingAll ? 'Saving…' : `Save all (${unsaved}) + links`}
             </button>
+            {undoable && (
+              <button style={s.btnUndo} onClick={handleUndo} title="Delete everything that last save wrote">
+                ↶ Undo save ({undoable.records.length})
+              </button>
+            )}
             <button style={s.btnGhost} onClick={generate} disabled={loading}>↺ Regenerate</button>
             {mode === 'modal' && <button style={s.btnGhost} onClick={onClose}>Close</button>}
           </div>
@@ -468,6 +532,7 @@ const s = {
   btnDisabled:{ background: '#2a2418', color: '#6b5a3a', border: 'none', padding: '0.5rem 1.1rem', borderRadius: 4, cursor: 'not-allowed', fontWeight: 'bold', fontSize: '0.85rem', whiteSpace: 'nowrap' },
   btnGhost:   { background: 'transparent', color: '#a89060', border: '1px solid #a89060', padding: '0.4rem 0.9rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem' },
   btnGhostSmall: { background: 'transparent', color: '#7a6a4a', border: '1px solid #3a2a10', padding: '0.3rem 0.7rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.75rem' },
+  btnUndo:    { background: '#2a1a10', color: '#e0a050', border: '1px solid #8a5a2a', padding: '0.4rem 0.9rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem' },
   btnSave:    { background: '#2d6a2d', color: '#e8f0e0', border: 'none', padding: '0.35rem 1rem', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8rem' },
 
   spinner:    { color: '#a89060', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '0.4rem' },

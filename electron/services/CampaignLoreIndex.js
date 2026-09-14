@@ -81,6 +81,8 @@ function buildLoreChunks({ lore = [], npcs = [], locations = [], factions = [] }
 
 class CampaignLoreIndex {
   constructor(db, embeddingService) {
+    // Public so the re-index queue can look up a campaign's name without
+    // needing its own database handle.
     this.db = db
     this.embeddingService = embeddingService
   }

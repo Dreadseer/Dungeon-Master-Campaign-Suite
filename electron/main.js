@@ -125,6 +125,7 @@ const registerAiHandlers    = require('./ipc/aiHandlers')
 const registerPdfHandlers   = require('./ipc/pdfHandlers')
 const registerEmbedHandlers = require('./ipc/embeddingHandlers')
 const CampaignLoreIndex     = require('./services/CampaignLoreIndex')
+const LoreReindexQueue      = require('./services/loreReindexQueue.cjs')
 const registerServerHandlers = require('./ipc/serverHandlers')
 require('./ipc/fileHandlers')   // file dialog + image copy/read (self-registering)
 
@@ -196,6 +197,11 @@ app.whenReady().then(async () => {
   registerAiHandlers(global.aiService, global.keyService)
   registerPdfHandlers(global.pdfService, global.db, global.pdfExtractionService, global.embeddingService)
   global.campaignLoreIndex = new CampaignLoreIndex(global.db, global.embeddingService)
+
+  // Debounced background re-indexing after any world write (Phase 6.1 task 16).
+  global.loreReindexQueue = new LoreReindexQueue(global.campaignLoreIndex, {
+    log: (msg) => console.log(msg),
+  })
   registerEmbedHandlers(global.embeddingService, global.campaignLoreIndex)
   registerServerHandlers(global.playerServer, global.tunnelService, global.keyService)
 
