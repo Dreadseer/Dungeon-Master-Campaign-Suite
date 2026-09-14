@@ -1619,3 +1619,118 @@ survive.
 4. **Is the 6,000-character default right?** It is ~1,500 tokens, comfortable for
    Claude and about a fifth of llama3's context. A local-model default of 3,000
    and an online default of 12,000 might serve both better than one number.
+
+---
+
+## Phase 6.1 — AI mode detection, provider choice, and making main runnable
+
+**Date:** 2026-09-14
+**Branch:** `phase-6.1-ai-mode`, from `phase-6-ai-writes`
+
+### Diagnosis (Part A) — evidence first
+
+**The app was never told the key was unreadable, so it behaved as though there
+were no key while the UI insisted there was one.**
+
+`%APPDATA%\dmcs\dmcs.key` exists (139 bytes, written 2026-07-23), which is why
+Settings showed a masked field and a "Remove Key" button — `KeyService.hasKey()`
+(`KeyService.js:30`) only calls `fs.existsSync`. But
+`safeStorage.decryptString` **fails** on that file today, and
+`KeyService.loadKey()` (`KeyService.js:16-24`) catches the failure and returns
+`null`. `AIService.initialize(null)` then skips the Claude branch entirely —
+`if (apiKey)` is false (`AIService.js:17`) — so **no API call is ever attempted**
+and there is no 401 or 404 to report. Detection falls through to Ollama; with
+Ollama unreachable at that moment the mode lands on `no-ai`, with a saved key on
+screen and no explanation anywhere.
+
+Evidence, from `npx electron scripts/probe-anthropic.cjs --profile real`:
+
+```
+safeStorage      : available
+key file         : 139 bytes, header "v10…"
+fresh blob       : 47 bytes, header "v10…"
+fresh round-trip : WORKS — encryption is healthy right now
+decrypt stored   : FAILS — "Error while decrypting the ciphertext provided to
+                   safeStorage.decryptString"
+```
+
+A fresh encrypt/decrypt round-trip succeeds **now**, and the stored blob carries
+the same `v10` backend marker as a freshly written one — so this is not a
+format or backend mismatch and safeStorage is not broken. The blob is simply no
+longer decryptable by this OS user's current crypto key, which is what happens
+after a Windows credential change or when the file was written under a different
+account. **The developer must re-enter the key.** The app's fault is that it
+never said so.
+
+**Ollama is up right now**, so it is not the current obstacle:
+
+```
+curl http://localhost:11434/api/tags   →  HTTP 200
+ollama list                            →  llama3:latest (4.7 GB)
+                                          nomic-embed-text:latest (274 MB)
+```
+
+Detection runs **once**, at startup (`main.js:203-205`). Nothing re-runs it when
+Ollama later comes up. So a DM who starts the app before Ollama is stuck on
+`no-ai` until they restart — which alone explains a `no-ai` badge on a machine
+where Ollama is currently reachable.
+
+**Which profile.** `KeyService` captures `app.getPath('userData')` at
+construction (`KeyService.js:7`), after `main.js` has applied `DMCS_USER_DATA`.
+So the key lives per-profile. The key is in the **real** profile
+(`C:\Users\chris\AppData\Roaming\dmcs\dmcs.key`); every scratch profile
+(`.scratch-userdata`, `scripts/.ai-userdata`, `.ui-userdata`,
+`.combat-userdata`) exists but holds **no** key. The developer's screenshot was
+therefore a real-profile run (`npm run dev`), not a scratch one.
+
+#### How the online check decided a key was "valid" (before this phase)
+
+It made a real `POST /v1/messages` call with `max_tokens: 10` and the message
+"ping", using the hard-coded model `claude-sonnet-5` (`AIService.js:13, 19-24`).
+Any throw at all was caught by a **bare `catch {}` that captured nothing**
+(`AIService.js:28-30`) and fell through to Ollama. A 401 (bad key), a 404 (bad
+model id), a timeout and a DNS failure were therefore indistinguishable — to the
+code and to the user. There was no record of the attempt anywhere.
+
+#### How the Ollama check decided reachability
+
+`GET {ollamaBaseUrl}/api/tags` via Electron's `net` module, where
+`ollamaBaseUrl` is `process.env.DMCS_OLLAMA_URL || 'http://localhost:11434'`
+(`AIService.js:11`). Any rejection meant `no-ai` (`AIService.js:33-38`), again
+with the reason discarded. It did not check whether `llama3` or
+`nomic-embed-text` were actually pulled — only that the endpoint answered.
+
+#### Step 4 could not be completed: NOT VERIFIED
+
+The task asks for `GET /v1/models` with the saved key, to record the HTTP status
+and whether `claude-sonnet-5` appears. **This could not be run**, because the
+saved key cannot be decrypted — that is the root cause itself. No API call was
+made with it, and therefore:
+
+- whether the key is valid or expired is **unknown**;
+- whether `claude-sonnet-5` exists on the account is **unverified**.
+
+`scripts/probe-anthropic.cjs` performs exactly this check and prints the model
+list, the newest Sonnet id, and a verdict; it is ready to run the moment a
+readable key exists. The "Fetch available models" button (task 8) does the same
+from inside Settings. Until then the fallback constant is a documented default,
+not an API-confirmed one, and that is stated in the UI.
+
+#### Root causes, in order of what to fix
+
+1. **A decryption failure is reported as "no key".** `loadKey()` swallows it and
+   `hasKey()` disagrees with it. *(the reported bug)*
+2. **The reason for every detection outcome is discarded.** A bare `catch {}`
+   makes bad key, bad model id and offline identical.
+3. **Detection never re-runs.** Startup only; Ollama coming up later cannot help.
+4. **The renderer is never told the mode changed.** `ai:saveKey` re-initialises
+   the service but nothing updates the TopBar or the gated components.
+5. **"Test Connection" tests the mode, not the provider.** It calls `ai:complete`
+   (`Settings.jsx:105`), which fails with "No AI service available" regardless of
+   why — it can never diagnose anything.
+6. **The model id is hard-locked** to `claude-sonnet-5` and never checked against
+   the API.
+7. **Electron's error prefix leaks.** Not `registerHandler`'s fault — it is
+   wrapped correctly, and `src/utils/ipcError.js` strips the prefix properly.
+   `Settings.handleTest` (`Settings.jsx:108`) and `handleTestTunnel`
+   (`Settings.jsx:231`) simply use raw `err.message` instead of the helper.
