@@ -1388,3 +1388,234 @@ gave the `resumed` flag its first reader.
 4. **`isDying` treats any player at 0 HP as dying.** A player killed outright by massive damage
    (overkill ≥ max HP) should skip death saves entirely. `applyHPDelta` already reports `overkill`,
    but nothing consumes it yet.
+
+---
+
+## Phase 6 — AI that writes to the world
+
+**Date:** 2026-09-13
+**Branch:** `phase-6-ai-writes` — **branched from `phase-5-combat`, not from `main`** (see below)
+**Verdict changes:** **Q3 MISSING → SOLVED.** AI output is saveable, the model is
+shown the DM's actual lore, and session recaps exist. Q2 also improves: campaign
+lore is now retrievable, which is what makes "does this contradict anything?"
+answerable.
+
+### Why this branched off Phase 5 rather than main
+
+Standing rule 1 says branch from main. Main cannot host this phase:
+
+- `main` still has `react-konva@~19.0.10`, which throws on import — **the
+  renderer does not render at all there.** Not a single UI acceptance line could
+  have been run.
+- `main` has no `DMCS_USER_DATA` guard in `electron/main.js` and no
+  `dev:scratch` script, so any launch would open the developer's real campaign
+  at `%APPDATA%/dmcs` — which the Phase 5 brief forbids.
+
+Both are fixed on `phase-5-combat` and nowhere else. Phase 6 therefore branches
+from it, and the branch contains Phase 5's 12 commits underneath its own 20.
+**Merge Phase 5 first, or merge this branch and get both.**
+
+### What shipped
+
+**1-2. Suggestions that save** — `20079a6`, `e167b7e`
+
+`src/utils/worldSuggestions.js` (new, 70 tests) holds the JSON contract, the
+parser, per-kind field coercion, the payload shapes the four existing create
+handlers expect, and the name→id resolution that turns a suggestion's `links`
+into `connections` rows. `src/components/ai/SuggestionCards.jsx` renders each
+suggestion as an editable card with **Save** and **Save all**.
+
+The awkward cases, each of which a DM would otherwise meet as a raw SqliteError:
+
+- `locations.type` has a CHECK constraint, and a model asked for a thieves' guild
+  answers `"guildhall"`. Synonyms are mapped; anything unrecognised becomes
+  `landmark`, and `normaliseLocationType` can never return a value outside the
+  constraint.
+- An unresolvable link is **reported**, not dropped silently.
+- A→B and B→A collapse to one row.
+- One malformed entry drops itself rather than failing the batch.
+
+No second parser: the repair rules stay in `compendiumExtractor.js`, now exported
+as `extractJsonObject` / `extractJsonValue` and shared with the PDF importers.
+`extractJsonValue` adds top-level array support, because asked for
+`{ suggestions: [...] }` local models frequently answer with just the array.
+That refactor touched code the importers had relied on since Phase 3 with **no
+test covering it**, so `compendiumExtractor` now has its own suite (25 tests).
+
+**3. Chat persists** — `e167b7e`. `aiStore` gains zustand's `persist`, per
+campaign. `isStreaming` is deliberately not persisted: restoring it would leave
+the composer disabled with no way back. `sanitiseHistory` (12 tests) strips
+stream cursors and error bubbles, and drops messages left as nothing but a
+cursor by a stream cut off mid-flight.
+
+**4. Save from chat** — `e167b7e`. "Save as…" on any assistant message opens the
+same cards, running the structured extraction over that message's text.
+
+**5. Encounter advice you can apply** — `3f7ab9b`. `src/utils/encounterAdvice.js`
+(new, 52 tests). `applyAdvice` is pure, which is what makes the edge cases
+testable: a count of 0 would silently do nothing and −3 would invert the
+operation (floored at 1); removing more than the roster holds drops the entry
+rather than going negative; a "replace" naming no replacement is refused rather
+than guessed at. Saving goes through `db:encounters:updateMonsters` rather than
+the `db:encounters:update` the brief named — that one rewrites every column, so
+a stale name or status held in the component would overwrite what the DM typed
+elsewhere. Same table, same effect, no clobber.
+
+**6. Context budget** — `e167b7e`. `src/utils/aiContext.js` (new, 39 tests)
+replaces the `buildSystemPrompt` that lived in `AIAssistant.jsx` and
+interpolated every character and every faction with no cap. Sections fill in
+priority order under a character budget (default 6,000, configurable in
+Settings), so an oversized world loses the long tail of NPC names, never the
+party or the current session. The prompt states how many it omitted.
+
+**7. Campaign lore indexed and retrieved** — `f8ef6a1`.
+`electron/services/CampaignLoreIndex.js` creates one sentinel `pdf_sources` row
+per campaign and one `pdf_chunk` per entity, so `embedSource`, `search` and
+`deleteSource` work unchanged. `EmbeddingService.deleteChunks(ids)` is new —
+without it an edited entity left its old vector behind and a renamed NPC kept
+retrieving under the old name forever. Each message pulls the top 3 relevant
+entries into context, scoped to that source. The contradiction check on a card
+retrieves the same way.
+
+**8. Session recaps** — `08740bb`. `sessions.recap` already existed (migration
+011), so no migration. The player variant filters the **input**: a model told
+"do not mention the traitor" will mention the traitor, so unrevealed secrets
+never reach the request.
+
+**9. no-ai everywhere** — `ebbcec5`. See "Bugs found" below.
+
+**10. Docs** — this entry, plus a README section, the recap subsection, three
+module-table rows and the new test scripts.
+
+### Acceptance
+
+`npm run verify:ai` — every line clicked in a launched Electron window against a
+scratch database, with a screenshot each, **calling Ollama for real**
+(`llama3:latest` + `nomic-embed-text`). **14 PASS · 0 FAIL · 0 NOT VERIFIED.**
+
+| Check | Result | Detail | Screenshot |
+|---|---|---|---|
+| World Builder offers a free-text request box | **PASS** | input present | `a01-suggestion-panel.png` |
+| Request "a rival thieves' guild in Waterdeep" returns saveable cards | **PASS** | 4 editable cards | `a02-suggestion-cards.png` |
+| Save all writes a faction, an NPC, a lore entry and ≥ 2 connections | **PASS** | 1 faction, 2 NPCs (was 1), 3 lore (was 2), 5 connections | `a03-saved-records.png` |
+| The saved records and their links appear in the Mind Map | **PASS** | 5 nodes, 3 edges | `a04-mindmap.png` |
+| The AI page shows the context budget and stays inside it | **PASS** | 788 / 6000 chars | `a05-context-budget.png` |
+| Indexing the campaign writes one chunk per entity | **PASS** | 8 chunks, 0 left to embed | `a06-lore-indexed.png` |
+| Chat history survives an app restart | **PASS** | probe message on screen after relaunch | `a07-chat-persisted.png` |
+| Sessions offers both recap variants | **PASS** | DM and player buttons present | `a08-session-detail.png` |
+| A DM recap references the revealed lore | **PASS** | 1,291 chars written to `sessions.recap` | `a09-recap-dm.png` |
+| The player recap is generated separately and carries its caveat | **PASS** | 1,087 chars, distinct from the DM recap, caveat shown | `a10-recap-players.png` |
+| no-ai: the AI Assistant composer is disabled | **PASS** | textarea and Ask both disabled | `a11-no-ai-assistant.png` |
+| no-ai: the World Builder panel says so instead of offering a button | **PASS** | "AI not configured" shown | `a12-no-ai-world-panel.png` |
+| no-ai: no raw service error is rendered anywhere | **PASS** | clean | `a12-no-ai-world-panel.png` |
+| No unexpected renderer console errors | **PASS** | clean | — |
+
+The acceptance line *"with 60 factions seeded, the system prompt stays under the
+budget"* is asserted in `aiContext.test.js`, as the brief specifies — plus a
+sweep across sizes 0-250 and budgets 600/1500/6000, and a 500-NPC /
+200-faction / 300-location / 400-lore world.
+
+`a02-suggestion-cards.png` is the one to look at: llama3 proposed **The
+Blackened Blades** with its leader, and the NPC card carries a link pill
+`rivals → Durnan` — the seeded NPC that already existed. Cross-linking new
+records to the existing world works.
+
+**Harnesses, Node 22.11.0:**
+
+```
+npm test              850 passed | 0 expected fail | 0 todo
+test:lore             44/44   (real database, stubbed embedder)
+test:migrations       76/76
+test:ipc              0 problems, 184 channels
+test:rag              42/42
+test:server           62/62
+verify:combat         16 PASS / 0 FAIL   (Phase 5, still green)
+verify:ai             14 PASS / 0 FAIL   (against real Ollama)
+build:renderer        clean
+```
+
+### Bugs found
+
+**Three the UI driver caught, none findable by unit test:**
+
+1. **The AI page crashed on every render.** My own no-ai sweep declared
+   `const noAi` *below* `handleSend`, which names it in its dependency array —
+   evaluated during render. Every visit threw "Cannot access noAi before
+   initialization" and React unmounted the tree. That single fault is why the
+   budget pill, the Sessions buttons and the disabled composer all appeared
+   broken at once.
+2. **A generated recap was saved and then vanished.** `Sessions.load()` set
+   `loading` true on every background refresh, swapping the pane for a skeleton —
+   which unmounted `SessionDetail` and discarded its state, then remounted from a
+   `detail` prop that had not been refetched. The recap was in the database the
+   whole time. **This predates Phase 6**: any half-typed title or notes edit was
+   lost the same way after every autosave.
+3. **The suggestion prompt was too soft.** Asked for "typically a faction, the
+   NPC who runs it, the place it operates from, and a lore entry", llama3
+   reliably returned the first three and omitted the lore entry — the one
+   carrying the DM's actual fiction. Now a numbered checklist the response MUST
+   satisfy.
+
+**Two the no-ai sweep caught, both long-standing:**
+
+4. **`AIInsightsPanel` had the exact bug the capability review documented for
+   `AISuggestionPanel`** — comparing the `getMode()` object to the string
+   `'no-ai'`, always false. A DM with no AI got "No AI service available…"
+   rendered as a mind-map insight.
+5. **`AICharacterAssistant` was broken twice over**: it stored the mode object
+   whole, *and* tested for `'claude'` / `'ollama'`, which `ai:getMode` has never
+   returned. Fixing only the object would have left it still reading as
+   unavailable. Its gating was correct all along — it simply always took the
+   offline branch, so the character sheet's AI actions have **never once been
+   offered to anyone**.
+
+**One found writing the tests:** my own player-recap filter tested a lore entry's
+`is_secret` flag against the reveals list the entry had just come out of, so the
+check could never fail. The rule is now non-circular.
+
+### Data safety
+
+The lore sync deletes stale `pdf_chunks` rows, scoped to the sentinel source and
+guarded by `assertOwnSource`. These are regenerated output, not authored
+content — the campaign's own tables remain the record and a re-sync rebuilds
+them — so this is not the copy-then-repoint case standing rule 10 covers.
+Nothing a DM typed is deleted. `verify-lore-index.mjs` seeds a real PDF source
+with chunks, syncs twice, and asserts its rows, text and embedded flags all
+survive.
+
+### Deferred / known issues
+
+- **Lore is indexed on demand, not on every world save.** The brief asks for
+  re-embedding an entity on save, debounced. Embedding costs an Ollama call per
+  changed entity, so a DM typing in an NPC's notes should not trigger it per
+  keystroke. It runs from the AI page and after the AI itself writes records —
+  the two moments the index is about to be read. Hooking the other eight world
+  save sites is the complete version and is not done.
+- **`sessions.notes` cannot be structurally filtered** for the player recap. The
+  prompt and the UI both say so; it is a mitigation, not a guarantee.
+- **Death-save style contradiction checking is advisory only.** An unparseable
+  answer is treated as "clear" on purpose — a broken advisory must not block a
+  DM writing to their own world.
+- **`CampaignLoreIndex` duplicates `buildLoreChunks` from `loreCorpus.js`**,
+  because `electron/` is CommonJS and `src/` is ESM and the build does not bridge
+  them. Both are covered — `loreCorpus.test.js` for the shape,
+  `verify-lore-index.mjs` for the main-process copy — but they can drift.
+- **llama3 quality is the weak link, not the plumbing.** The parser survives what
+  it returns, but an 8B model writes thinner lore than Claude would. Nothing in
+  the app depends on model quality; the cards are editable before saving.
+
+### Open questions
+
+1. **Should a saved suggestion be marked as AI-generated?** Nothing distinguishes
+   an AI-written faction from a hand-written one after the save. A provenance
+   column would let a DM audit or bulk-revert, at the cost of a migration.
+2. **Should "Save all" be undoable?** It can write six records and five
+   connections in one click. There is no transaction and no undo; a mistake is
+   cleaned up by hand.
+3. **Should the lore index include plot threads and sessions?** Currently lore,
+   NPCs, locations and factions. Session notes are the largest body of prose a
+   campaign has, and indexing them would make "what happened with the duke?"
+   answerable — but they are also where unfiltered secrets live.
+4. **Is the 6,000-character default right?** It is ~1,500 tokens, comfortable for
+   Claude and about a fifth of llama3's context. A local-model default of 3,000
+   and an online default of 12,000 might serve both better than one number.

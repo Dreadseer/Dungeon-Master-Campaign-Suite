@@ -29,14 +29,15 @@ DMCS solves the "twelve browser tabs and a stack of PDFs" problem. Everything a 
 9. [Database Schema](#database-schema)
 10. [Modules](#modules)
 11. [AI Layer](#ai-layer)
-12. [Sessions, plot threads and reveals](#sessions-plot-threads-and-reveals)
-13. [Combat that survives](#combat-that-survives)
-14. [Player Views](#player-views)
-15. [Testing](#testing)
-16. [Building the Windows Installer](#building-the-windows-installer)
-17. [Troubleshooting](#troubleshooting)
-18. [Open Questions](#open-questions)
-19. [License](#license)
+12. [AI that writes to the world](#ai-that-writes-to-the-world)
+13. [Sessions, plot threads and reveals](#sessions-plot-threads-and-reveals)
+14. [Combat that survives](#combat-that-survives)
+15. [Player Views](#player-views)
+16. [Testing](#testing)
+17. [Building the Windows Installer](#building-the-windows-installer)
+18. [Troubleshooting](#troubleshooting)
+19. [Open Questions](#open-questions)
+20. [License](#license)
 
 ---
 
@@ -391,8 +392,8 @@ migrated and some not, and any idempotence check then skips the rest forever.
 | Module (page) | Summary |
 |---|---|
 | Campaign Manager | Create / load / rename / delete campaigns; the active campaign is held in `campaignStore` (persisted to `localStorage`). The notes box edits the **current session's** notes, not the campaign description (Phase 4). |
-| World Builder | Factions, Locations, NPCs, Lore, **Sessions**, **Plot Threads**, and named Connections; optional AI suggestion panel. The separate "Lore & Connections" page was removed in Phase 1 — it duplicated `/world/lore` and `/world/connections`. |
-| Sessions | One row per session played, with long-form notes that autosave on blur. Shows the plot threads opened or closed in each session and what the party learned in it. |
+| World Builder | Factions, Locations, NPCs, Lore, **Sessions**, **Plot Threads**, and named Connections. The AI suggestion panel now **saves** what it proposes, with the links between records (Phase 6). The separate "Lore & Connections" page was removed in Phase 1 — it duplicated `/world/lore` and `/world/connections`. |
+| Sessions | One row per session played, with long-form notes that autosave on blur. Shows the plot threads opened or closed in each session and what the party learned in it, and generates **AI recaps** in DM and player variants. |
 | Plot Threads | A board of what is unresolved, grouped open / active / resolved / abandoned. Closing a thread stamps it with the session in progress. |
 | Mind Map | React Flow graph of all world entities with Dagre auto-layout and PNG export. |
 | Map Engine | Upload battle maps, paint fog of war, place tokens; opens a pop-out combat-map window. Changing a map's grid size re-indexes the fog mask, so saving a new size on a painted map asks for confirmation and then clears the fog. |
@@ -400,7 +401,7 @@ migrated and some not, and any idempotence check then skips the rest forever.
 | Character Sheets | Full 5e sheets (stats, inventory, spell slots, death saves) with a level-up wizard and AI assistant. |
 | Encounter Builder | Build encounters from SRD monsters; XP/difficulty calculator; initiative tracker. **Combat is saved as it happens** (Phase 5) — see below. |
 | Combat Calculator | Standalone XP/CR calculator. |
-| AI Assistant | Streaming chat with campaign context injected; "Rules Q&A" routes through the RAG pipeline. |
+| AI Assistant | Streaming chat with **budgeted** campaign context and retrieval over your own lore; "Save as…" turns any reply into saved records; history persists per campaign. "Rules Q&A" routes through the RAG pipeline. |
 | AI Sources | Upload PDFs, monitor indexing, trigger embedding. |
 | Settings | Anthropic key (safeStorage), Ollama status, RAG settings, **Rules Q&A index**, ngrok token, AI usage stats (including failed calls). |
 
@@ -460,6 +461,118 @@ going to the model. Embeddings require Ollama; retrieval does not.
 
 ---
 
+## AI that writes to the world
+
+Before Phase 6 the AI could only talk. It generated suggestions and displayed
+them; nothing it said was ever saved. A DM who liked an idea re-typed it by hand
+into three separate forms. It was also working half-blind: the World Builder's
+prompt sent the campaign name, three integer counts and the names of the first
+three NPCs — it knew a world had "12 locations" and not what any of them were.
+
+### Suggestions become records
+
+The World Builder's **AI World Suggestions** panel takes a free-text request
+("a rival thieves' guild in Waterdeep") as well as the generic "suggest 3
+things". The model answers in strict JSON, and each suggestion renders as a card
+with every field editable inline, a **Save**, and a **Save all** that also writes
+the `connections` between them.
+
+The same cards appear from the AI Assistant's **Save as…** action on any
+assistant message, running the same structured extraction over that message's
+text — so an idea in chat is one click from being a saved faction.
+
+What the pure layer (`src/utils/worldSuggestions.js`) guards against, each of
+which the DM would otherwise meet as a raw `SqliteError` mid-save:
+
+| Problem | Behaviour |
+|---|---|
+| `locations.type` has a CHECK constraint, and a model asked for a guild answers `"guildhall"` | Synonyms are mapped; anything unrecognised becomes `landmark`. It can never return a value outside the constraint. |
+| A link points at something that was never saved | Reported in the toast — "2 links could not be matched" — never dropped silently. |
+| A→B and B→A both proposed | Collapsed into one row. Connections are undirected in practice and the Mind Map draws both as one edge. |
+| Two suggestions share a name | The duplicate is dropped; a name that already exists in the campaign is flagged before saving, not blocked. |
+| One entry is malformed | It drops itself. Four good suggestions and one with no name gives the DM four cards, not an error. |
+
+The JSON repair rules are **not** duplicated: `extractJsonObject` /
+`extractJsonValue` in `compendiumExtractor.js` are the one parser, shared with
+the PDF importers. `extractJsonValue` also accepts a top-level array, because
+asked for `{ suggestions: [...] }` a local model frequently answers with just
+the array.
+
+### The AI knows your world
+
+`src/utils/aiContext.js` replaces the old `buildSystemPrompt`, which
+interpolated *every* character and *every* faction with no cap — 60 factions
+meant 60 names in every message, silently — and included no lore, no locations
+and no descriptions.
+
+Sections are now filled in **priority order** under a character budget
+(default 6,000, set in Settings → RAG Settings):
+
+1. campaign and setting 2. the party 3. the current session
+4. open plot threads 5. locations with one-line descriptions
+6. factions 7. NPCs 8. lore titles
+
+So when a world is too large to describe, it is the long tail of NPC names that
+is dropped, never the party or the session being run. The prompt says how many
+it left out — a model told about 17 of 60 factions with no hint of the rest will
+assert those 17 are all of them. The AI page shows the usage and which sections
+made it in.
+
+### Retrieval over your own lore
+
+The capability review's sharpest point was that DMCS already had a working
+retrieval pipeline and had never aimed it at the DM's own world. So campaign
+lore is indexed as an ordinary source rather than through a second system: one
+sentinel `pdf_sources` row per campaign (`Campaign lore — <name>`, with no
+`file_path`) and one `pdf_chunk` per lore entry, NPC, location and faction.
+`embedSource`, `search` and `deleteSource` work unchanged — including the
+keyword fallback, so retrieval still returns something useful without Ollama.
+
+Two properties worth knowing:
+
+- **A re-sync never touches an imported PDF.** The sentinel is identified by its
+  filename prefix *and* a null `file_path`, and `assertOwnSource` is checked
+  before any write.
+- **Editing one entity re-embeds one entity.** Chunks are matched by text, so
+  unchanged ones keep their row and their vector.
+
+Index it from the AI page (🧠 budget pill → **Index now**). Each message then
+pulls the top 3 relevant campaign entries into context, scoped to that source so
+a question about your campaign does not come back with passages from the
+Player's Handbook. The **Check for contradictions** button on a suggestion card
+retrieves the same way and asks the model to flag conflicts before you save.
+
+### Encounter advice you can apply
+
+The AI Difficulty Advisor returned prose; a DM read "drop one goblin and add an
+archer" and then did it by hand. It now returns operations —
+`{ action: 'add'|'remove'|'replace', monster_index, count }` — with an **Apply**
+button each, and the prompt hands the model the SRD index of every roster entry,
+because a suggestion naming "the big orc" cannot be applied to anything.
+`checkAdvice` reports *why* a suggestion cannot be applied, so the button is
+disabled with a reason rather than failing on click.
+
+### Chat that survives a restart
+
+`aiStore` uses zustand's `persist`, the same middleware `campaignStore` has used
+since Phase 1. History is kept **per campaign** — one shared log would show a DM
+notes from a different world the moment they switched. `isStreaming` is
+deliberately not persisted: restoring it would leave the composer disabled with
+no way back.
+
+### Without AI
+
+Every AI surface hides behind a clear "AI not configured" panel in `no-ai` mode,
+and the app remains fully usable — the Phase 6 sweep found two guards that had
+never worked (`ai:getMode` resolves to an **object**, and comparing it to a
+string is always false) and two importers with no guard at all.
+
+`DMCS_OLLAMA_URL` overrides the Ollama endpoint, for a DM running it on another
+port or machine — and so the UI driver can point at a dead port to exercise
+`no-ai` on a machine where Ollama is installed.
+
+---
+
 ## Sessions, plot threads and reveals
 
 Added in Phase 4. Before it, a campaign had no memory: `campaigns.description`
@@ -514,6 +627,32 @@ session titled "Imported notes". The original column is left exactly as it was �
 nothing is deleted, and `description` goes back to being a description of the
 campaign, which is what the column was named for. The import is idempotent: a
 campaign that already has a session is skipped.
+
+---
+
+### AI session recaps
+
+**Generate recap** writes `sessions.recap` from the session's notes, the plot
+threads that opened or closed in it, and what the party was shown. **Recap for
+players** is the same for an audience that must not learn anything yet.
+
+The player variant works by **filtering the input**, never by instructing the
+model to withhold. A model told "do not mention the traitor" has the fact in
+context and one line of instruction against it, and it will mention the traitor.
+Unrevealed secret lore, NPC `secrets` and plot descriptions are removed before
+the request is built, so there is nothing there to leak.
+
+A reveal row *is* the record of having been shown something, so anything revealed
+— this session or an earlier one — is fair game for players. Secret lore with no
+reveal row anywhere is withheld from them, and shown to the DM under "still
+hidden from the party".
+
+> **One limitation, stated rather than hidden.** `sessions.notes` is free text.
+> A DM who writes "Sera is secretly the traitor" there has put a secret where no
+> structural filter can reach. The player prompt says the notes are private and
+> asks for only what the party witnessed, and the UI repeats that above the
+> generated text — but it is a mitigation, not a guarantee. Read a player recap
+> before sharing it.
 
 ---
 
@@ -639,6 +778,8 @@ npm run test:server       # starts a real player server and checks auth, scoping
 npm run test:rag          # indexes the SRD and runs real queries, including in no-ai mode
 npm run test:sessions     # migration 011, the notes import, and the sessions/plots/reveals SQL
 npm run verify:combat     # Phase 5 acceptance, driven through the real app (see below)
+npm run test:lore         # the campaign lore index, against a real database
+npm run verify:ai         # Phase 6 acceptance — calls a real model, needs Ollama
 ```
 
 ### Driving the real app
@@ -661,6 +802,12 @@ the combatant count and a player's HP across the restart.
 
 `scripts/ui-driver.mjs` exports the same helpers if you want to script a
 scenario of your own.
+
+`npm run verify:ai` is the one harness that needs a model. It calls Ollama for
+real rather than stubbing it, because an 8B local model returning strict JSON is
+exactly what the prompt discipline and the repair parser exist to survive. With
+no model reachable it records the AI-dependent lines as NOT VERIFIED with the
+reason rather than skipping them quietly.
 
 None of the five `node` scripts need a working native `better-sqlite3` build:
 they use Node's built-in `node:sqlite`, plain source parsing, or a stub database.
