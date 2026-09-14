@@ -195,6 +195,8 @@ export default function WorldBuilder() {
         factions={factions}
         locations={locations}
         npcs={npcs}
+        lore={lore}
+        onSaved={refresh}
       />
 
       <NPCModal isOpen={npcModalOpen} npc={null} onClose={() => setNpcModalOpen(false)} onSaved={refresh} />

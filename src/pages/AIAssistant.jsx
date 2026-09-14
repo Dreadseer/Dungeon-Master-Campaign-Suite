@@ -3,30 +3,20 @@ import useCampaignStore from '../stores/campaignStore'
 import useAiStore       from '../stores/aiStore'
 import AIToolbox     from '../components/ai/AIToolbox'
 import AnswerRenderer from '../components/ai/AnswerRenderer'
+import SuggestionCards from '../components/ai/SuggestionCards'
+import { buildCampaignContext, clampBudget, DEFAULT_CONTEXT_BUDGET } from '../utils/aiContext'
+import { notifyError } from '../stores/toastStore'
 
 const MAX_HISTORY = 20   // max messages sent to AI per request
 const CURSOR      = '▋'  // blinking cursor appended during streaming
 
-// ── Build system prompt with live campaign context ────────────────────────────
-function buildSystemPrompt(activeCampaign, characters, npcs, factions) {
-  return [
-    'You are an AI assistant for a Dungeon Master running a D&D 5e campaign.',
-    'Be helpful, creative, and specific. Keep responses concise and immediately usable at the game table.',
-    '',
-    activeCampaign
-      ? `Campaign: "${activeCampaign.name}"${activeCampaign.world_setting ? ` set in ${activeCampaign.world_setting}` : ''}`
-      : '',
-    characters.length
-      ? `Player Characters: ${characters.map(c => `${c.character_name} (${c.race ?? '?'} ${c.class ?? '?'} Lv.${c.level ?? 1})`).join(', ')}`
-      : '',
-    npcs.length
-      ? `Notable NPCs: ${npcs.slice(0, 5).map(n => n.name).join(', ')}${npcs.length > 5 ? ` and ${npcs.length - 5} more` : ''}`
-      : '',
-    factions.length
-      ? `Active factions: ${factions.map(f => f.name).join(', ')}`
-      : '',
-  ].filter(Boolean).join('\n')
-}
+// The system prompt moved to src/utils/aiContext.js in Phase 6.
+//
+// The version that lived here interpolated EVERY character and EVERY faction
+// with no cap — a campaign with 60 factions put 60 names in every message — and
+// showed the model no lore, no locations and no descriptions at all. It knew a
+// world had "12 locations" and not what any of them were. aiContext applies a
+// character budget section by section and is unit-tested against it.
 
 // ── Mode indicator label + colour ─────────────────────────────────────────────
 function getModeDisplay(mode) {
@@ -40,10 +30,21 @@ function getModeDisplay(mode) {
 export default function AIAssistant() {
   const activeCampaign = useCampaignStore(s => s.activeCampaign)
 
-  // Campaign context for system prompt
+  // Campaign context for the system prompt. Locations, lore, the current
+  // session and open plot threads are new in Phase 6 — the prompt previously
+  // had none of them.
   const [characters, setCharacters] = useState([])
   const [npcs,       setNpcs]       = useState([])
   const [factions,   setFactions]   = useState([])
+  const [locations,  setLocations]  = useState([])
+  const [lore,       setLore]       = useState([])
+  const [session,    setSession]    = useState(null)
+  const [plots,      setPlots]      = useState([])
+  const [budget,     setBudget]     = useState(DEFAULT_CONTEXT_BUDGET)
+  const [showUsage,  setShowUsage]  = useState(false)
+
+  // "Save as…" — structured extraction over one assistant message (task 4)
+  const [extractFrom, setExtractFrom] = useState(null)
 
   // Chat state — stored in aiStore so it survives page navigation
   const history        = useAiStore(s => s.history)
@@ -55,6 +56,7 @@ export default function AIAssistant() {
   const ragMode        = useAiStore(s => s.ragMode)
   const setRagMode     = useAiStore(s => s.setRagMode)
   const clearHistory   = useAiStore(s => s.clearHistory)
+  const setStoreCampaign = useAiStore(s => s.setCampaign)
 
   const [aiMode,      setAiMode]      = useState(null)
   const [hasEmbedded, setHasEmbedded] = useState(false)
@@ -62,18 +64,41 @@ export default function AIAssistant() {
   const chatEndRef  = useRef(null)
   const textareaRef = useRef(null)
 
+  // Chat history is stored per campaign, so switching campaigns swaps the log
+  // rather than showing a DM notes from a different world.
+  useEffect(() => {
+    setStoreCampaign(activeCampaign?.id ?? null)
+  }, [activeCampaign?.id, setStoreCampaign])
+
   // ── Load campaign context ──────────────────────────────────────────────────
   useEffect(() => {
     if (!activeCampaign?.id) return
-    Promise.all([
-      window.electronAPI.db.characters.getAll(activeCampaign.id),
-      window.electronAPI.db.npcs.getAll(activeCampaign.id),
-      window.electronAPI.db.factions.getAll(activeCampaign.id),
-    ]).then(([chars, n, f]) => {
-      setCharacters(chars)
-      setNpcs(n)
-      setFactions(f)
-    }).catch(() => {})
+    const api = window.electronAPI.db
+    // allSettled: one failing table must not blank the whole context. A campaign
+    // with no sessions yet is the normal case, not an error.
+    Promise.allSettled([
+      api.characters.getAll(activeCampaign.id),
+      api.npcs.getAll(activeCampaign.id),
+      api.factions.getAll(activeCampaign.id),
+      api.locations.getAll(activeCampaign.id),
+      api.lore.getAll(activeCampaign.id),
+      api.sessions.getCurrent(activeCampaign.id),
+      api.plots.getAll(activeCampaign.id),
+    ]).then(([chars, n, f, l, lo, sess, pl]) => {
+      const val = (r, fallback) => (r.status === 'fulfilled' && r.value != null ? r.value : fallback)
+      setCharacters(val(chars, []))
+      setNpcs(val(n, []))
+      setFactions(val(f, []))
+      setLocations(val(l, []))
+      setLore(val(lo, []))
+      setSession(val(sess, null))
+      setPlots(val(pl, []))
+    })
+
+    // The context budget lives with the other RAG settings.
+    window.electronAPI.rag.getSettings()
+      .then(cfg => setBudget(clampBudget(cfg?.contextBudget)))
+      .catch(() => setBudget(DEFAULT_CONTEXT_BUDGET))
 
     // Check for embedded sources
     window.electronAPI.db.pdf.getAll(activeCampaign.id)
@@ -179,11 +204,15 @@ export default function AIAssistant() {
     // Build messages to send — include full conversation history (last MAX_HISTORY)
     setHistory(prev => {
       const messages = cleanHistory(prev).slice(-MAX_HISTORY)
-      const systemPrompt = buildSystemPrompt(activeCampaign, characters, npcs, factions)
+      const { prompt: systemPrompt } = buildCampaignContext(
+        { campaign: activeCampaign, characters, npcs, factions, locations, lore, session, plots },
+        { budget },
+      )
       window.electronAPI.ai.streamStart(systemPrompt, messages, requestId)
       return prev
     })
-  }, [input, isStreaming, ragMode, hasEmbedded, activeCampaign, characters, npcs, factions])
+  }, [input, isStreaming, ragMode, hasEmbedded, activeCampaign,
+      characters, npcs, factions, locations, lore, session, plots, budget])
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -203,6 +232,13 @@ export default function AIAssistant() {
   }, [])
 
   const modeDisplay = getModeDisplay(aiMode)
+  const noAi = getModeDisplay(aiMode).label.includes('No AI')
+
+  // Recomputed for the readout only; handleSend builds its own at send time.
+  const contextUsage = buildCampaignContext(
+    { campaign: activeCampaign, characters, npcs, factions, locations, lore, session, plots },
+    { budget },
+  ).usage
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -225,7 +261,12 @@ export default function AIAssistant() {
           )}
 
           {history.map((msg, i) => (
-            <ChatMessage key={i} message={msg} />
+            <ChatMessage
+              key={i}
+              message={msg}
+              canSave={!noAi && !isStreaming && msg.role === 'assistant' && !msg.isError}
+              onSaveAs={() => setExtractFrom(msg.content)}
+            />
           ))}
           <div ref={chatEndRef} />
         </div>
@@ -241,11 +282,50 @@ export default function AIAssistant() {
             {ragMode && hasEmbedded && (
               <span style={s.ragPill}>📚 Rules Q&amp;A</span>
             )}
+
+            {/* Context budget. The old prompt had no budget and no warning when
+                it grew; this makes the cost visible before it becomes a bill. */}
+            {activeCampaign && (
+              <button
+                style={{
+                  ...s.budgetPill,
+                  ...(contextUsage.percent >= 90 ? s.budgetPillFull : {}),
+                }}
+                onClick={() => setShowUsage(v => !v)}
+                title="What the AI is told about your campaign"
+              >
+                🧠 {contextUsage.total} / {contextUsage.budget} chars
+              </button>
+            )}
+
             <div style={s.spacer} />
             <button style={s.clearBtn} onClick={handleClear} disabled={isStreaming || history.length === 0}>
               Clear Conversation
             </button>
           </div>
+
+          {showUsage && (
+            <div style={s.usagePanel}>
+              <p style={s.usageTitle}>
+                Campaign context — {contextUsage.percent}% of the {contextUsage.budget}-character budget
+              </p>
+              <div style={s.usageGrid}>
+                {contextUsage.sections.map(sec => (
+                  <span
+                    key={sec.name}
+                    style={{ ...s.usageChip, ...(sec.included ? {} : s.usageChipOut) }}
+                  >
+                    {sec.name} {sec.included ? `${sec.chars}` : '—'}
+                  </span>
+                ))}
+              </div>
+              <p style={s.usageNote}>
+                Sections are filled in priority order, so when a world is too large to
+                describe it is the long tail of NPC names that is dropped, never the party
+                or the session you are running. Change the budget in Settings.
+              </p>
+            </div>
+          )}
 
           <div style={s.inputRow}>
             <textarea
@@ -271,6 +351,32 @@ export default function AIAssistant() {
         </div>
       </div>
 
+      {/* Structured extraction over one assistant message — the same card UI
+          the World Builder panel uses, so an idea in chat is one click from
+          being a saved faction rather than something to re-type by hand. */}
+      {extractFrom && (
+        <SuggestionCards
+          mode="modal"
+          campaign={activeCampaign}
+          sourceText={extractFrom}
+          world={{ npcs, locations, factions, lore }}
+          onClose={() => setExtractFrom(null)}
+          onSaved={() => {
+            // Re-read the world so the next prompt knows what was just written.
+            const api = window.electronAPI.db
+            Promise.allSettled([
+              api.npcs.getAll(activeCampaign.id),
+              api.locations.getAll(activeCampaign.id),
+              api.factions.getAll(activeCampaign.id),
+              api.lore.getAll(activeCampaign.id),
+            ]).then(([n, l, f, lo]) => {
+              const val = (r) => (r.status === 'fulfilled' && r.value != null ? r.value : [])
+              setNpcs(val(n)); setLocations(val(l)); setFactions(val(f)); setLore(val(lo))
+            }).catch(err => notifyError(err, 'Reload world'))
+          }}
+        />
+      )}
+
       {/* ── Right panel: Toolbox (40%) ─── */}
       <div style={s.toolboxPanel}>
         <AIToolbox
@@ -287,7 +393,7 @@ export default function AIAssistant() {
 }
 
 // ── Individual chat message ───────────────────────────────────────────────────
-function ChatMessage({ message }) {
+function ChatMessage({ message, canSave = false, onSaveAs }) {
   const isUser = message.role === 'user'
 
   return (
@@ -312,6 +418,12 @@ function ChatMessage({ message }) {
           <div style={s.noSourceNote}>
             ⚠ No relevant passages found — answered from general AI knowledge.
           </div>
+        )}
+
+        {canSave && (
+          <button style={s.saveAsBtn} onClick={onSaveAs} title="Turn this into saved records">
+            💾 Save as…
+          </button>
         )}
       </div>
     </div>
@@ -438,6 +550,33 @@ const s = {
     fontSize:   11,
     fontWeight: 600,
   },
+  // Context budget readout
+  budgetPill: {
+    padding: '1px 8px', background: '#141008', border: '1px solid #3a2a10',
+    borderRadius: 10, color: '#a89060', fontSize: 11, cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  budgetPillFull: { borderColor: '#8a6a2a', color: '#c9a84c', background: '#2a2010' },
+  usagePanel: {
+    background: '#100d08', border: '1px solid #2a2010', borderRadius: 4,
+    padding: '8px 10px', marginBottom: 8,
+  },
+  usageTitle: { color: '#c9a84c', fontSize: 12, margin: '0 0 6px' },
+  usageGrid:  { display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 6 },
+  usageChip:  {
+    fontSize: 10, background: '#1a1408', border: '1px solid #3a2a10',
+    borderRadius: 8, padding: '1px 7px', color: '#a89060',
+  },
+  usageChipOut: { color: '#4a4238', borderColor: '#241c10', textDecoration: 'line-through' },
+  usageNote:  { color: '#5a5040', fontSize: 10.5, margin: 0, lineHeight: 1.5 },
+
+  // "Save as…" on an assistant message
+  saveAsBtn: {
+    marginTop: 8, padding: '3px 10px', background: 'none',
+    border: '1px solid #3a2a10', borderRadius: 4, color: '#a89060',
+    fontSize: 11, cursor: 'pointer',
+  },
+
   ragPill: {
     padding:      '1px 8px',
     background:   '#0d1a30',
