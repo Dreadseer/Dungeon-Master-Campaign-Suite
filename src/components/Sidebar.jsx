@@ -18,6 +18,7 @@ const navSections = [
       { to: '/world/connections', label: 'Connections',   sub: true },
       { to: '/world/sessions',   label: 'Sessions',      sub: true },
       { to: '/world/plots',      label: 'Plot Threads',  sub: true },
+      { to: '/world/tables',     label: 'Random Tables', sub: true },
       { to: '/mindmap',          label: 'Mind Map' },
     ],
   },

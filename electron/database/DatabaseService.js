@@ -44,6 +44,11 @@ class DatabaseService {
       { id: 11, name: 'sessions_plots_reveals', sql: MIGRATION_011, after: importCampaignNotes },
       // Purely additive — one CREATE TABLE and one index, no recreate.
       { id: 12, name: 'combat_state', sql: MIGRATION_012 },
+      // Phase 7. The brief and the capability review both call this "migration
+      // 012" and "migration 010" respectively, but both numbers were taken
+      // before Phase 7 was written — 012 is combat_state above. Migrations are
+      // append-only, so this is 013.
+      { id: 13, name: 'encounter_tables', sql: MIGRATION_013 },
     ]
 
     for (const m of migrations) {
@@ -733,6 +738,36 @@ const MIGRATION_012 = `
 
   -- "Is a fight in progress in this campaign?" runs on every app launch.
   CREATE INDEX IF NOT EXISTS idx_combat_campaign ON combat_state(campaign_id, phase);
+`
+
+// Migration 013 — random encounter tables (Phase 7 task 4)
+//
+// DDL from the capability review's Q8e. Purely additive: one CREATE TABLE and
+// one index, nothing recreated, so no foreign-key toggle is needed.
+//
+// `location_id` is ON DELETE SET NULL rather than CASCADE on purpose: deleting
+// a location should not silently take a table of encounters with it. The table
+// survives, unattached, and the DM can point it somewhere else.
+//
+// `entries` is JSON — [{ roll_min, roll_max, label, encounter_id? }] — because
+// a table's rows are only ever read and written as a whole, and rolling is pure
+// client logic in src/utils/tableUtils.js. A child table would buy nothing and
+// cost a join on every read.
+const MIGRATION_013 = `
+  CREATE TABLE IF NOT EXISTS encounter_tables (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+    die         TEXT DEFAULT 'd20',
+    entries     TEXT NOT NULL DEFAULT '[]',
+    created_at  DATETIME DEFAULT (datetime('now'))
+  );
+
+  -- "Which tables belong to this location?" runs whenever the Encounter
+  -- Builder opens a location-bound encounter.
+  CREATE INDEX IF NOT EXISTS idx_encounter_tables_location
+    ON encounter_tables(campaign_id, location_id);
 `
 
 // ── SRD Subclass Seed Data — 27 subclasses (2–3 per class × 12 classes) ────────

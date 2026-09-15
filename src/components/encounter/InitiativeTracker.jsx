@@ -7,6 +7,7 @@ import {
 } from '../../utils/combatUtils'
 import { serialiseCombat, deserialiseCombat, combatPayloadChanged } from '../../utils/combatPersistence'
 import { summariseForMap } from '../../utils/tokenCombatLink'
+import { applyCombatantHp } from '../../utils/monsterInstances.js'
 import { applyDeathSave, isDying, emptyDeathSaves } from '../../utils/dnd5e'
 import { notifyError } from '../../stores/toastStore'
 import { createToken }    from '../../utils/tokenUtils'
@@ -514,6 +515,21 @@ export default function InitiativeTracker({ encounter, characters, campaignId, o
       await window.electronAPI.db.combat.clear(encounter.id)
     } catch (err) {
       notifyError(err, 'Clear saved combat')
+    }
+
+    // Monster HP back into the encounter row (Phase 7 task 3).
+    //
+    // combat_state carried this while the fight was running, and that row has
+    // just been cleared — so without this the wounds vanish the moment combat
+    // ends and the encounter reopens with every monster at full health.
+    try {
+      const { monsters, changed } = applyCombatantHp(encounter.monsters, combatants)
+      if (changed) {
+        await window.electronAPI.db.encounters.updateMonsters(
+          encounter.id, monsters, encounter.xp_total ?? 0)
+      }
+    } catch (err) {
+      notifyError(err, 'Save monster HP')
     }
 
     // Write final HP for every player combatant back to characters DB

@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 
 const SRC = readFileSync('electron/database/DatabaseService.js', 'utf8')
-const LAST = 12
+const LAST = 13
 
 let failures = 0
 let checks = 0
@@ -73,8 +73,14 @@ const newDb = () => {
   return db
 }
 
+// Skips what has already run, exactly as DatabaseService does, so a database
+// can be migrated PART way, populated, and then brought the rest of the way —
+// which is the only way to test a migration against rows from the old schema.
 const migrateTo = (db, last) => {
-  for (let id = 1; id <= last; id++) applyMigration(db, id)
+  const ran = new Set(db.prepare('SELECT id FROM _migrations').all().map(r => r.id))
+  for (let id = 1; id <= last; id++) {
+    if (!ran.has(id)) applyMigration(db, id)
+  }
   return db
 }
 
@@ -138,12 +144,12 @@ const snapshot = (db) => ({
 })
 
 // ── Scenario A: fresh database ───────────────────────────────────────────────
-console.log('\n=== A. Fresh database: migrations 001-012 ===\n')
+console.log('\n=== A. Fresh database: migrations 001-013 ===\n')
 {
   const db = migrateTo(newDb(), LAST)
 
-  check('all 12 migrations recorded',
-    db.prepare('SELECT COUNT(*) c FROM _migrations').get().c === 12)
+  check('all 13 migrations recorded',
+    db.prepare('SELECT COUNT(*) c FROM _migrations').get().c === 13)
 
   const expected = [
     ['locations', 'parent_location_id', 'locations', 'SET NULL'],
@@ -385,11 +391,83 @@ console.log('\n=== C. Acceptance: deletes that used to fail silently ===\n')
 }
 
 // ── Idempotence ──────────────────────────────────────────────────────────────
+// ── Migration 013: encounter_tables (Phase 7) ───────────────────────────────
+//
+// Rule 4 requires both paths: a fresh database, and one already holding rows
+// from the previous schema. The second is the one that matters — 013 must be
+// additive enough to land on a campaign that has been in use since Phase 1.
+console.log('\n=== E. Migration 013: encounter_tables ===\n')
+{
+  // ── Fresh ────────────────────────────────────────────────────────────────
+  const fresh = migrateTo(newDb(), 13)
+  const cols = fresh.prepare('PRAGMA table_info(encounter_tables)').all()
+  const byName = Object.fromEntries(cols.map(c => [c.name, c]))
+
+  check('fresh: encounter_tables exists', cols.length > 0)
+  check('fresh: has the columns the review specified',
+    ['id', 'campaign_id', 'name', 'location_id', 'die', 'entries'].every(c => byName[c]),
+    cols.map(c => c.name).join(', '))
+  check('fresh: die defaults to d20', /d20/.test(byName.die?.dflt_value ?? ''))
+  check('fresh: entries is NOT NULL with a [] default',
+    byName.entries?.notnull === 1 && /\[\]/.test(byName.entries?.dflt_value ?? ''))
+
+  const fks = fresh.prepare('PRAGMA foreign_key_list(encounter_tables)').all()
+  const campaignFk = fks.find(f => f.table === 'campaigns')
+  const locationFk = fks.find(f => f.table === 'locations')
+  check('fresh: campaign_id CASCADEs — a deleted campaign takes its tables',
+    campaignFk?.on_delete === 'CASCADE', campaignFk?.on_delete)
+  check('fresh: location_id SET NULLs — deleting a location must NOT delete the table',
+    locationFk?.on_delete === 'SET NULL', locationFk?.on_delete)
+
+  const idx = fresh.prepare(`SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='encounter_tables'`).all()
+  check('fresh: the location lookup index exists',
+    idx.some(i => i.name === 'idx_encounter_tables_location'))
+
+  // ── Populated: a campaign that has existed since Phase 1 ─────────────────
+  const aged = migrateTo(newDb(), 8)
+  populate(aged)
+  const beforeRows = snapshot(aged)
+  migrateTo(aged, 13)
+
+  check('populated: 013 applies to a database with rows from the old schema',
+    aged.prepare('SELECT COUNT(*) c FROM _migrations').get().c === 13)
+
+  const afterRows = snapshot(aged)
+  // Compared by VALUE: snapshot returns arrays of rows, and === on those is a
+  // reference check that can never be true.
+  const changedTables = Object.keys(beforeRows)
+    .filter(t => JSON.stringify(afterRows[t]) !== JSON.stringify(beforeRows[t]))
+  check('populated: no existing row was touched', changedTables.length === 0,
+    changedTables.length ? `changed: ${changedTables.join(', ')}` : '')
+
+  check('populated: encounter_tables is empty, not seeded with anything',
+    aged.prepare('SELECT COUNT(*) c FROM encounter_tables').get().c === 0)
+
+  // The two behaviours the DDL choices exist for.
+  aged.exec(`INSERT INTO encounter_tables (campaign_id, name, location_id, die, entries)
+             VALUES (1, 'Swamp wanderings', 1, 'd20', '[{\"roll_min\":1,\"roll_max\":20,\"label\":\"Nothing\"}]')`)
+  check('populated: a table can be written and read back',
+    aged.prepare('SELECT COUNT(*) c FROM encounter_tables').get().c === 1)
+
+  aged.exec('PRAGMA foreign_keys = ON')
+  aged.exec('DELETE FROM locations WHERE id = 1')
+  const orphan = aged.prepare('SELECT location_id FROM encounter_tables WHERE name = ?').get('Swamp wanderings')
+  check('populated: deleting the location leaves the table, unattached',
+    orphan !== undefined && orphan.location_id === null,
+    orphan === undefined ? 'the table was deleted with the location' : `location_id = ${orphan.location_id}`)
+
+  aged.exec('DELETE FROM campaigns WHERE id = 1')
+  check('populated: deleting the campaign DOES take its tables',
+    aged.prepare('SELECT COUNT(*) c FROM encounter_tables').get().c === 0)
+
+  fresh.close(); aged.close()
+}
+
 console.log('\n=== D. Re-running the migration set is a no-op ===\n')
 {
   const db = migrateTo(newDb(), LAST)
   const ran = new Set(db.prepare('SELECT id FROM _migrations').all().map(r => r.id))
-  check('all 12 ids recorded, so a second launch skips every one', ran.size === 12)
+  check('all 13 ids recorded, so a second launch skips every one', ran.size === LAST)
   db.close()
 }
 

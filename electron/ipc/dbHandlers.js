@@ -203,6 +203,43 @@ function registerDbHandlers(db) {
          OR (entity_b_type = ? AND entity_b_id = ?)`,
       [entityType, entityId, entityType, entityId]))
 
+  // ── Encounter tables (Phase 7 task 4) ────────────────────────────────────
+  //
+  // Rolling is NOT here: it is pure client logic in src/utils/tableUtils.js, so
+  // it is testable without a database and a roll costs no IPC round trip.
+
+  registerHandler('db:encounterTables:getAll', (_, campaignId) =>
+    db.all(`
+      SELECT t.*, l.name AS location_name
+      FROM encounter_tables t
+      LEFT JOIN locations l ON l.id = t.location_id
+      WHERE t.campaign_id = ?
+      ORDER BY t.name ASC`,
+      [campaignId]))
+
+  registerHandler('db:encounterTables:getByLocation', (_, locationId) =>
+    db.all(
+      'SELECT * FROM encounter_tables WHERE location_id = ? ORDER BY name ASC',
+      [locationId]))
+
+  registerHandler('db:encounterTables:create', (_, data) =>
+    db.run(`
+      INSERT INTO encounter_tables (campaign_id, name, location_id, die, entries, created_at)
+      VALUES (?,?,?,?,?,datetime('now'))`,
+      [data.campaign_id, data.name, data.location_id ?? null,
+       data.die ?? 'd20', JSON.stringify(data.entries ?? [])]))
+
+  registerHandler('db:encounterTables:update', (_, id, data) =>
+    db.run(`
+      UPDATE encounter_tables
+      SET name = ?, location_id = ?, die = ?, entries = ?
+      WHERE id = ?`,
+      [data.name, data.location_id ?? null, data.die ?? 'd20',
+       JSON.stringify(data.entries ?? []), id]))
+
+  registerHandler('db:encounterTables:delete', (_, id) =>
+    db.run('DELETE FROM encounter_tables WHERE id = ?', [id]))
+
   // ── Batched world save (Phase 6.1 task 16) ───────────────────────────────
   //
   // "Save all" on the AI suggestion cards used to run one create per card and

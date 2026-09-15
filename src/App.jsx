@@ -28,6 +28,7 @@ import Lore        from './pages/world/Lore'
 import Connections from './pages/world/Connections'
 import Sessions    from './pages/world/Sessions'
 import PlotThreads from './pages/world/PlotThreads'
+import RandomTables from './pages/world/RandomTables'
 
 function Guarded({ children }) {
   return <CampaignGuard>{children}</CampaignGuard>
@@ -74,6 +75,7 @@ function AppContent() {
             <Route path="/world/connections"  element={<Guarded><Connections /></Guarded>} />
             <Route path="/world/sessions"     element={<Guarded><Sessions /></Guarded>} />
             <Route path="/world/plots"        element={<Guarded><PlotThreads /></Guarded>} />
+            <Route path="/world/tables"       element={<Guarded><RandomTables /></Guarded>} />
 
             <Route path="/mindmap"    element={<Guarded><MindMap /></Guarded>} />
             <Route path="/maps"       element={<Guarded><MapEngine /></Guarded>} />
