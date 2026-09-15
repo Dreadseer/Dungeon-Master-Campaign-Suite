@@ -5,6 +5,8 @@ import MonsterRoster       from '../components/encounter/MonsterRoster'
 import MonsterSearchPanel  from '../components/encounter/MonsterSearchPanel'
 import XPCalculator        from '../components/encounter/XPCalculator'
 import InitiativeTracker   from '../components/encounter/InitiativeTracker'
+import LocationFigures     from '../components/encounter/LocationFigures'
+import EncounterGenerator  from '../components/encounter/EncounterGenerator'
 import { partyThresholds, difficultyRating, adjustedXP } from '../utils/encounterUtils'
 import { notifyError, notifySuccess } from '../stores/toastStore'
 
@@ -28,6 +30,7 @@ export default function EncounterBuilder() {
   const [searchQuery, setSearchQuery] = useState('')
   const [loadError, setLoadError]     = useState('')
   const [showCreate, setShowCreate]   = useState(false)
+  const [showGenerator, setShowGenerator] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(null)   // encounter id
   // encounter_id -> round, for every fight left unfinished in this campaign
   const [savedCombats, setSavedCombats] = useState({})
@@ -58,6 +61,17 @@ export default function EncounterBuilder() {
   }, [activeCampaign])
 
   useEffect(() => { loadEncounters() }, [loadEncounters])
+
+  // Open an encounter named in the hash — how a rolled table entry gets here
+  // (#/encounters?open=12). Consumed once, so a later back-navigation does not
+  // reopen it.
+  useEffect(() => {
+    const match = /[?&]open=(\d+)/.exec(window.location.hash)
+    if (!match || encounters.length === 0) return
+    const target = encounters.find(e => e.id === Number(match[1]))
+    window.location.hash = '#/encounters'
+    if (target) openEncounter(target)
+  }, [encounters]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Which encounters have a fight still in progress. Loaded alongside the list
   // so a DM who closed the app mid-combat can see where they left off without
@@ -314,6 +328,16 @@ export default function EncounterBuilder() {
                   onChange={handleRosterChange}
                 />
               </div>
+
+              {/* Who is standing at this location, one click from the roster
+                  (Phase 7 task 1). No AI — this is a join the app could always
+                  have done and never did. */}
+              <LocationFigures
+                locationId={activeEncounter.location_id}
+                campaignId={activeCampaign.id}
+                monsters={monsters}
+                onAdd={handleAddMonster}
+              />
               <XPCalculator
                 encounter={activeEncounter}
                 monsters={monsters}
@@ -474,8 +498,21 @@ export default function EncounterBuilder() {
       {/* Page header */}
       <div style={s.pageHeader}>
         <h1 style={s.pageTitle}>Encounter Builder</h1>
+        <button style={s.genBtn} onClick={() => setShowGenerator(v => !v)}>
+          {showGenerator ? '▾ Generate' : '✨ Generate'}
+        </button>
         <button style={s.newBtn} onClick={() => setShowCreate(true)}>+ New Encounter</button>
       </div>
+
+      {showGenerator && (
+        <EncounterGenerator
+          campaignId={activeCampaign.id}
+          characters={campaignChars}
+          locations={locations}
+          onCreated={loadEncounters}
+          onClose={() => setShowGenerator(false)}
+        />
+      )}
 
       {loadError && <p style={s.errorMsg}>⚠ {loadError}</p>}
 
@@ -621,6 +658,17 @@ export default function EncounterBuilder() {
                 </select>
               </label>
 
+              {/* Who is already standing there (Phase 7 task 1). Read-only in
+                  the create modal — there is no roster to add to until the
+                  encounter exists — but it tells the DM what they will find. */}
+              {form.location_id && (
+                <LocationFigures
+                  locationId={Number(form.location_id)}
+                  campaignId={activeCampaign.id}
+                  monsters={[]}
+                />
+              )}
+
               <label style={s.label}>
                 Notes
                 <textarea
@@ -657,6 +705,11 @@ const s = {
   },
   pageHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   pageTitle:  { color: '#c9a84c', fontSize: '1.6rem', margin: 0 },
+  genBtn: {
+    background: '#2a2010', color: '#c9a84c', border: '1px solid #8a6a2a',
+    borderRadius: 4, padding: '0.5rem 1rem', cursor: 'pointer',
+    fontSize: '0.85rem', marginLeft: 'auto', marginRight: '0.5rem',
+  },
   newBtn: {
     padding: '8px 16px', background: '#2d5a27', color: '#7fc272',
     border: '1px solid #3d7a37', borderRadius: 6, cursor: 'pointer', fontSize: 13,

@@ -1,4 +1,5 @@
 import { calculateAC } from './acUtils'
+import { normaliseMonsters } from './monsterInstances.js'
 
 // Combatant shape. Persisted since Phase 5 — see combat_state (migration 012)
 // and src/utils/combatPersistence.js, which versions this shape so a save made
@@ -22,7 +23,10 @@ export const rollInitiative = (mod = 0) =>
  *   before.
  */
 export const buildCombatants = (encounter, characters, options = {}) => {
-  const monsters   = JSON.parse(encounter.monsters ?? '[]')
+  // normaliseMonsters rather than JSON.parse: it performs the lazy Phase 7
+  // migration, so every entry arrives with one `instances` slot per copy even
+  // if the row was written before Phase 7 existed.
+  const monsters   = normaliseMonsters(encounter.monsters)
   const combatants = []
   const acLookup   = typeof options.acLookup === 'function' ? options.acLookup : null
 
@@ -36,15 +40,17 @@ export const buildCombatants = (encounter, characters, options = {}) => {
       ac = acLookup(entry.source_index)
     }
 
-    for (let i = 0; i < entry.count; i++) {
+    for (let i = 0; i < entry.instances.length; i++) {
       combatants.push({
         id:             crypto.randomUUID(),
-        name:           entry.count > 1 ? `${entry.name} ${i + 1}` : entry.name,
+        name:           entry.instances.length > 1 ? `${entry.name} ${i + 1}` : entry.name,
         type:           'monster',
         initiative:     0,
         initiative_mod: 0,
         hp_max:         entry.hp_max,
-        hp_current:     entry.hp_current ?? entry.hp_max,
+        // Per COPY, not per type. This used to be `entry.hp_current ??
+        // entry.hp_max`, so three goblins shared one hit point total.
+        hp_current:     entry.instances[i].hp_current,
         temp_hp:        0,
         ac:             ac ?? 10,
         conditions:     [],
@@ -57,6 +63,11 @@ export const buildCombatants = (encounter, characters, options = {}) => {
         is_active:      false,
         is_player:      false,
         entity_id:      null,
+        // What applyCombatantHp maps by on the way back. Position cannot be
+        // used: the tracker sorts by initiative and moves the defeated to the
+        // end, so the third row is rarely the third goblin.
+        entry_id:       entry.id,
+        instance_index: i,
         source_entry:   entry,
       })
     }

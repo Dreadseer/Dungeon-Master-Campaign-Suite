@@ -62,6 +62,39 @@ describe('rollInitiative', () => {
   })
 })
 
+describe('buildCombatants — per-instance HP (Phase 7 task 3)', () => {
+  it('gives each copy its OWN hit points', () => {
+    // This used to be `entry.hp_current ?? entry.hp_max` for every copy, so
+    // three goblins shared one total and damaging one damaged all of them.
+    const entry = { ...monsterEntry('Goblin', 3), hp_max: 7, instances: [
+      { hp_current: 7 }, { hp_current: 3 }, { hp_current: 0 },
+    ] }
+    const combatants = buildCombatants(encounterWith([entry]), [])
+    expect(combatants.map(c => c.hp_current)).toEqual([7, 3, 0])
+  })
+
+  it('migrates a pre-Phase-7 entry, seeding every copy from its single value', () => {
+    const legacy = { ...monsterEntry('Goblin', 3), hp_max: 7, hp_current: 4 }
+    delete legacy.instances
+    const combatants = buildCombatants(encounterWith([legacy]), [])
+    expect(combatants.map(c => c.hp_current)).toEqual([4, 4, 4])
+  })
+
+  it('tags each combatant with the entry and copy it came from', () => {
+    // applyCombatantHp maps by these on the way back. Position cannot be used:
+    // the tracker sorts by initiative and moves the defeated to the end.
+    const entry = { ...monsterEntry('Goblin', 2), id: 'entry-1' }
+    const combatants = buildCombatants(encounterWith([entry]), [])
+    expect(combatants.map(c => c.entry_id)).toEqual(['entry-1', 'entry-1'])
+    expect(combatants.map(c => c.instance_index)).toEqual([0, 1])
+  })
+
+  it('survives a corrupt monsters blob rather than blanking the tracker', () => {
+    expect(() => buildCombatants({ monsters: '{not json' }, [])).not.toThrow()
+    expect(buildCombatants({ monsters: '{not json' }, [])).toEqual([])
+  })
+})
+
 describe('buildCombatants — monster count expansion', () => {
   it('numbers the copies when count > 1', () => {
     const combatants = buildCombatants(encounterWith([monsterEntry('Goblin', 3)]), [])
