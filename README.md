@@ -30,6 +30,7 @@ DMCS solves the "twelve browser tabs and a stack of PDFs" problem. Everything a 
 10. [Modules](#modules)
 11. [AI Layer](#ai-layer)
 12. [AI that writes to the world](#ai-that-writes-to-the-world)
+13. [Building encounters](#building-encounters)
 13. [Sessions, plot threads and reveals](#sessions-plot-threads-and-reveals)
 14. [Combat that survives](#combat-that-survives)
 15. [Player Views](#player-views)
@@ -393,13 +394,14 @@ migrated and some not, and any idempotence check then skips the rest forever.
 |---|---|
 | Campaign Manager | Create / load / rename / delete campaigns; the active campaign is held in `campaignStore` (persisted to `localStorage`). The notes box edits the **current session's** notes, not the campaign description (Phase 4). |
 | World Builder | Factions, Locations, NPCs, Lore, **Sessions**, **Plot Threads**, and named Connections. The AI suggestion panel now **saves** what it proposes, with the links between records (Phase 6). The separate "Lore & Connections" page was removed in Phase 1 — it duplicated `/world/lore` and `/world/connections`. |
+| Random Tables | Per-location encounter tables on any die, entries linking to real encounters, with a Roll that opens them. Optional AI populate from a location description. |
 | Sessions | One row per session played, with long-form notes that autosave on blur. Shows the plot threads opened or closed in each session and what the party learned in it, and generates **AI recaps** in DM and player variants. |
 | Plot Threads | A board of what is unresolved, grouped open / active / resolved / abandoned. Closing a thread stamps it with the session in progress. |
 | Mind Map | React Flow graph of all world entities with Dagre auto-layout and PNG export. |
 | Map Engine | Upload battle maps, paint fog of war, place tokens; opens a pop-out combat-map window. Changing a map's grid size re-indexes the fog mask, so saving a new size on a painted map asks for confirmation and then clears the fog. |
 | Compendium | Browse SRD monsters/spells/equipment + homebrew, **and** the [Source Book Importer](DMCS_Source_Book_Importer.md) (📥 Single / 📦 Bulk) that turns indexed PDF passages into structured entries via AI. |
 | Character Sheets | Full 5e sheets (stats, inventory, spell slots, death saves) with a level-up wizard and AI assistant. |
-| Encounter Builder | Build encounters from SRD monsters; XP/difficulty calculator; initiative tracker. **Combat is saved as it happens** (Phase 5) — see below. |
+| Encounter Builder | Build encounters from SRD monsters and homebrew, **generate them from a difficulty and a theme**, and assemble them from **who is standing at the location**; XP/difficulty calculator; initiative tracker with **per-copy monster HP**. **Combat is saved as it happens** (Phase 5) — see below. |
 | Combat Calculator | Standalone XP/CR calculator. |
 | AI Assistant | Streaming chat with **budgeted** campaign context and retrieval over your own lore; "Save as…" turns any reply into saved records; history persists per campaign. "Rules Q&A" routes through the RAG pipeline. |
 | AI Sources | Upload PDFs, monitor indexing, trigger embedding. |
@@ -729,6 +731,73 @@ hidden from the party".
 
 ---
 
+## Building encounters
+
+### The encounter knows where it is
+
+An encounter linked to a location shows **Notable figures here** — the NPCs
+filed at that location, plus any connected to it from elsewhere, labelled with
+the relationship. One click puts one in the roster.
+
+Where a stat block exists with the same name it is used, homebrew first, but the
+**name you gave the NPC is kept**: "Captain Xendros" does not become "Bandit
+Captain" in the tracker. Where none exists the NPC joins with placeholder hit
+points and AC, marked as such, and contributes **zero XP** — no CR means no
+number anyone chose, and the difficulty maths should not be credited one. Edit
+the HP and AC in the roster like any other entry.
+
+Anyone already in the roster is not offered again. The panel also lists the
+location's random tables with a Roll button.
+
+No AI is involved — this is a join the app could always have done.
+
+### Generating an encounter
+
+**Encounter Builder → ✨ Generate.** Pick a difficulty, optionally a location and
+a theme, and the XP budget is computed from your party.
+
+The model never invents a monster. Candidates are pre-filtered by CR band from
+the SRD *and* your own homebrew, the model is handed that list and asked to
+**select** from it, and anything it names that was not on the list is dropped
+and reported. The theme ranks candidates rather than filtering them — a hard
+filter on "swamp" returns nothing at all from the SRD.
+
+The result is checked against the budget locally before anything is saved. A
+miss of more than one difficulty tier is retried once with the miss quoted back
+to the model, and whichever attempt landed closer is kept. A second miss is
+still offered to you, labelled: a Deadly encounter you asked to be Hard is often
+still the one you want.
+
+Because the selection is constrained rather than invented, this works on a small
+local model — it is tested against `llama3` through Ollama.
+
+### Random tables
+
+**World → Random Tables.** Build a table per region or dungeon, on any die from
+d4 to d100. Entries cover a range of results and either link to an encounter you
+have already built or stand as free text. **Roll** resolves one, and a linked
+entry offers to open its encounter.
+
+The editor tells you what is still wrong with a table as you build it — results
+nothing covers, results covered twice, entries outside the die — and **Spread
+evenly** lays out ranges that cover it exactly. None of that blocks saving: a
+half-built table is a normal thing to come back to.
+
+With AI configured, **Populate from location** writes the entries from the
+location's description. It writes the labels only; the app assigns the ranges,
+because assigning ranges that cover a die is precisely what a model asked to
+invent them gets wrong.
+
+### Monster hit points are per monster
+
+Each entry in an encounter carries one hit point total **per copy**. Three
+goblins are three separate goblins: damage one in the tracker and the other two
+are untouched, and the wounds are written back to the encounter when combat
+ends. Older encounters are migrated the first time they are read — every copy
+starts from whatever HP the entry had, so a wounded group stays wounded.
+
+---
+
 ## Combat that survives
 
 Before Phase 5 the initiative tracker rebuilt itself from the encounter on every
@@ -854,6 +923,7 @@ npm run verify:combat     # Phase 5 acceptance, driven through the real app (see
 npm run test:lore         # the campaign lore index, against a real database
 npm run verify:ai         # Phase 6 acceptance — calls a real model, needs Ollama
 npm run verify:aimode     # Phase 6.1 acceptance — detection, provider switch, batch save
+npm run verify:encounters # Phase 7 acceptance — location assembly, generation, tables
 ```
 
 `npx electron scripts/probe-anthropic.cjs` answers "is my saved key actually

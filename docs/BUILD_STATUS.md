@@ -1900,3 +1900,180 @@ Everything below was run **on main after the merge**:
 merge: launched through the Playwright driver, `#root` has children, body text
 is present, `window.Konva` is an object, and the console is clean.
 `main-renderer-renders.png`.
+
+---
+
+## Phase 7 — Encounter creation
+
+**Date:** 2026-09-15
+**Branch:** `phase-7-encounter-creation`, from `main` (`e553a71`, `v1.1.0-alpha.2`)
+**Verdict change:** **Q8 PARTIAL → SOLVED.** Encounters can be assembled from the
+world, generated against a budget, and rolled for — not just scored.
+
+### Migration numbering — a deviation, stated up front
+
+The brief says "Migration 012 — `encounter_tables`" and the capability review
+says "Migration 010". **Both numbers were taken before Phase 7 was written**:
+010 is `shared_pdf_sources` (Phase 3) and 012 is `combat_state` (Phase 5).
+Migrations are append-only under rule 4, so `encounter_tables` shipped as
+**013**. Nothing else about the DDL changed.
+
+### What shipped
+
+**Task 1 — location-aware assembly, no AI.** `src/utils/locationAssembly.js`
+(34 tests) and `LocationFigures.jsx`. `npcs.location_id` has existed since
+Phase 1 and the Encounter Builder had never read it.
+
+The problem worth solving is that an NPC row has no stat block — only a name, a
+race and prose. `matchStatBlock` looks for one by name, homebrew before SRD. With
+a match the entry takes real HP, AC and XP but **keeps the DM's name**. Without
+one it gets placeholder HP/AC flagged `needs_stats` and contributes **zero XP**:
+no CR means no number anybody chose, and the difficulty maths should not be
+credited one. `connections` brings in NPCs linked to the location but filed
+elsewhere, labelled with the relationship; anyone already in the roster is
+excluded. The panel also lists the location's tables with a Roll button.
+
+**Task 2 — the generator.** `src/utils/encounterGeneration.js` (49 tests) and
+`EncounterGenerator.jsx`, following Q8e exactly: pre-filter real monsters by CR
+band, hand the model that list, have it **select** rather than invent.
+`resolveSelection` makes that a guarantee rather than a request — anything not
+in the candidate list is dropped and named on screen, including a real monster
+that was filtered out as over budget. The theme **ranks** candidates rather than
+filtering them, because a hard filter on "swamp" returns nothing from the SRD.
+
+`validateAgainstBudget` measures in **tiers**, not raw XP: a Hard that lands
+slightly Deadly is a fine encounter while one that lands Trivial is not, and the
+XP distance between those differs enormously at level 1 and level 20. One test
+asserts its verdict equals what `XPCalculator` will show, so generation cannot
+promise a rating the calculator contradicts. A miss of more than one tier is
+retried once with the miss quoted back; whichever attempt landed closer is kept,
+so a retry cannot make things worse.
+
+**Task 3 — per-instance monster HP.** `src/utils/monsterInstances.js` (37 tests).
+`buildCombatants` gave every copy `entry.hp_current ?? entry.hp_max`, so three
+goblins shared one hit point total and a DM who bloodied two of four ogres got
+four untouched ogres back. Each entry now carries `instances: [{ hp_current }]`,
+one per copy, migrated **lazily on read** — an encounter row is a JSON blob a DM
+may never open again, and a SQL migration would rewrite every one of them to fix
+a problem those rows may not have.
+
+Three cases the migration has to get right, all of which happen: a pre-Phase-7
+entry seeds every copy from the HP the DM had set (resetting to full would
+silently heal them); raising the count adds copies at full; lowering it drops
+from the **end**, so survivors keep their HP rather than being renumbered.
+Write-back maps by entry id and instance index, never by position — the tracker
+sorts by initiative and pushes the defeated to the end.
+
+**Task 4 — random tables.** Migration 013, five handlers across all four IPC
+layers, `src/utils/tableUtils.js` (55 tests) and `RandomTables.jsx`. Rolling is
+pure client logic: no IPC round trip, and the property that matters — every face
+of the die maps to exactly one entry — is asserted directly rather than sampled.
+The editor reports gaps (as ranges, not fourteen loose numbers), overlaps,
+out-of-range entries and unlabelled ones, without blocking a save. The optional
+AI populate writes labels only; **the app assigns the ranges**, because assigning
+ranges that cover a die is exactly what a model asked to invent them gets wrong.
+Hidden entirely in `no-ai`.
+
+Two DDL choices worth stating: `location_id` is `ON DELETE SET NULL` so deleting
+a location does not take a table of encounters with it, and `entries` is a JSON
+column rather than a child table because a table's rows are only ever read and
+written whole.
+
+### Acceptance
+
+`npm run verify:encounters` — every line clicked in a launched Electron window
+against a scratch database, screenshot each, calling a real model.
+**13 PASS · 0 FAIL.**
+
+| Check | Result | Detail | Screenshot |
+|---|---|---|---|
+| An encounter at a location offers the NPCs standing there | **PASS** | panel shown, 3 of 3 offered | `e01-notable-figures.png` |
+| Adding one writes an NPC-sourced entry to the roster | **PASS** | "Bandit Captain" source=npc hp=11 ac=12 entity_id=2 | `e02-npc-added.png` |
+| An NPC already in the roster is no longer offered | **PASS** | 2 still offered | `e02-npc-added.png` |
+| That entry becomes a combatant in the tracker | **PASS** | on the initiative list | `e02b-tracker-combatant.png` |
+| Per-instance monster HP survives a write and re-read | **PASS** | instances = [11, 4, 0] | `e03-per-instance-hp.png` |
+| The Random Tables page is reachable | **PASS** | rendered | `e04-tables-empty.png` |
+| A created table appears on the page | **PASS** | listed | — |
+| Ten rolls on a d20 table all map to an entry | **PASS** | 10 captured, 0 unmapped | `e05-table-rolled.png` |
+| Table entries can link to a real encounter | **PASS** | 2 of 4 linked | `e05-table-rolled.png` |
+| The generator panel opens with the party budget resolved | **PASS** | budget 3,000 XP for 4 × L5 | `e06-generator-panel.png` |
+| Generate a Hard encounter for 4 L5 PCs in a swamp | **PASS** | "Swamp Ambush" rated **Hard · 4,300 adj. XP** | `e07-generated-preview.png` |
+| Every generated monster exists in SRD or homebrew | **PASS** | 1× Swamp Troll, 3× Drowned Thrall, 1× Marsh Wisp | `e08-generated-saved.png` |
+| No unexpected renderer console errors | **PASS** | clean | — |
+
+**Harness results:**
+
+```
+npm test              1103 passing (28 files), 0 expected-fail, 0 todo
+test:migrations       89/89   (includes section E: migration 013, fresh + populated)
+test:ipc              0 problems, 199 channels, no duplicate preload keys
+test:lore             44/44
+test:sessions         51/51
+test:rag              42/42
+test:server           62/62
+build:renderer        clean
+```
+
+#### One thing NOT verified, and why
+
+**The generator's SRD candidate pool was not exercised.** A scratch profile has
+an empty `srd_cache`: `srd:seedAll` fetches from dnd5eapi.co and the driver
+dismisses the first-run modal with "Skip for now (offline)". The acceptance run
+therefore seeds **homebrew** monsters through the real `db:compendium:create` —
+a first-class candidate source the generator already supported, and one that
+satisfies the acceptance wording ("exists in SRD/homebrew").
+
+What this means: the CR band, the prompt, the invented-monster guarantee, the
+budget validation and the save path are all verified against real model output.
+The SRD half of `candidateMonsters` is covered by unit tests but not by a live
+run. Seeding `srd_cache` directly in the scratch profile would close it.
+
+### Bugs found
+
+**One real, caught by the acceptance driver: additions never reached the
+database.** `handleRosterChange` only updates React state — `MonsterRoster`
+persists its *own* edits — so anything added from outside it changed the screen
+and was lost on reopening. That affected the new location-figures panel **and,
+already before Phase 7, the monster search panel**. `handleAddMonster` now
+writes through `db:encounters:updateMonsters`.
+
+**Two in the migration harness, found by using it.** `migrateTo` replayed from 1
+unconditionally, so it could not bring a partly-migrated database forward —
+which is the only way to test against rows from an old schema. And the new "no
+existing row was touched" check compared snapshot **arrays** with `===`, a
+reference check that can never be true; without fixing it that assertion would
+have reported a false failure forever.
+
+**One in a test I wrote**, worth noting because it nearly hid a design point: the
+`validateAgainstBudget` fixtures built monsters through `candidateMonsters` with
+a huge budget, which raises the CR **floor** and filtered out the very goblins
+the cases needed. The band is doing its job; the test was asking the wrong thing.
+
+### Deferred / known issues
+
+- **SRD pool unverified live** (above).
+- **`entry.instances` is not yet shown in the roster UI.** The data round-trips
+  and the tracker uses it, but the Encounter Builder still shows one HP figure
+  per monster type. A DM can see per-copy HP in the tracker only.
+- **The generator ignores `location_id` when composing.** It is passed as a name
+  in the prompt, but the location's own NPCs are not offered as candidates —
+  assembly and generation remain separate paths.
+- **No AI "populate" for encounter entries**, only for table labels.
+- **Table rolls are not logged.** A roll is shown and replaced by the next one;
+  nothing records what was rolled during a session.
+
+### Open questions
+
+1. **Should a statless NPC be allowed into the difficulty maths at all?** It
+   currently contributes 0 XP, which is honest but means an encounter built
+   entirely from NPCs rates Trivial. An "estimate CR from level" helper would
+   trade honesty for usefulness.
+2. **Should `instances` collapse back to one value when a DM edits `count`
+   upward from the roster?** Today new copies arrive at full health, which is
+   right for adding reinforcements and wrong if the DM is correcting a typo.
+3. **Should generated encounters record which model produced them?** There is no
+   provenance, so a table of encounters mixes hand-built and generated with no
+   way to tell or to re-generate.
+4. **Should a table roll be able to exclude recent results?** Rolling the same
+   wandering encounter three sessions running is the usual complaint about d20
+   tables, and a "don't repeat within N rolls" option is cheap.
