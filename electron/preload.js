@@ -113,6 +113,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       delete:   (id)               => ipcRenderer.invoke('db:compendium:delete',  id),
       search:   (campaignId, q)    => ipcRenderer.invoke('db:compendium:search',  campaignId, q),
     },
+    encounterTables: {
+      getAll:        (campaignId) => ipcRenderer.invoke('db:encounterTables:getAll', campaignId),
+      getByLocation: (locationId) => ipcRenderer.invoke('db:encounterTables:getByLocation', locationId),
+      create:        (data)       => ipcRenderer.invoke('db:encounterTables:create', data),
+      update:        (id, data)   => ipcRenderer.invoke('db:encounterTables:update', id, data),
+      delete:        (id)         => ipcRenderer.invoke('db:encounterTables:delete', id),
+    },
     encounters: {
       getAll:         (campaignId)            => ipcRenderer.invoke('db:encounters:getAll',         campaignId),
       getById:        (id)                    => ipcRenderer.invoke('db:encounters:getById',        id),
