@@ -177,6 +177,7 @@ export default function PlotThreads() {
       {modalOpen && (
         <EntityModal
           title={editing ? 'Edit thread' : 'New plot thread'}
+          isOpen
           onClose={() => setModalOpen(false)}
         >
           <form onSubmit={handleSubmit}>

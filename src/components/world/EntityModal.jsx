@@ -1,4 +1,16 @@
-export default function EntityModal({ title, isOpen, onClose, children }) {
+// `isOpen` defaults to TRUE, so a caller that forgets it gets a visible modal
+// rather than silent nothing.
+//
+// Two conventions are in use and both are fine: pass `isOpen={state}` and let
+// this component decide, or gate externally with `{open && <EntityModal .../>}`
+// and pass a bare `isOpen`. The trap was the third case — gating externally and
+// omitting the prop, which read as perfectly sensible JSX and rendered null
+// forever. That is what made "+ New thread" on Plot Threads a dead button: the
+// click set the state, the component re-rendered, and nothing appeared.
+//
+// Defaulting to true only changes behaviour for callers that omit the prop
+// entirely; anyone passing it explicitly is unaffected.
+export default function EntityModal({ title, isOpen = true, onClose, children }) {
   if (!isOpen) return null
   return (
     <div style={s.overlay} onClick={onClose}>
