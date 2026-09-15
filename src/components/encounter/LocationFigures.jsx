@@ -80,7 +80,7 @@ export default function LocationFigures({ locationId, campaignId, monsters = [],
   }
 
   return (
-    <div style={s.panel}>
+    <div style={s.panel} data-location-figures>
       {figures.length > 0 && (
         <>
           <div style={s.head}>

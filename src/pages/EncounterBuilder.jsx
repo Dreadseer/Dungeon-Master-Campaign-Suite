@@ -210,12 +210,23 @@ export default function EncounterBuilder() {
     setActiveEncounter(prev => prev ? { ...prev, monsters: JSON.stringify(newMonsters) } : prev)
   }
 
-  const handleAddMonster = (entry) => {
-    setMonsters(prev => {
-      const next = [...prev, entry]
-      handleRosterChange(next)
-      return next
-    })
+  const handleAddMonster = async (entry) => {
+    const next = [...monsters, entry]
+    handleRosterChange(next)
+
+    // Persist here rather than relying on MonsterRoster's debounce.
+    //
+    // handleRosterChange only updates React state; the roster component saves
+    // its OWN edits, so anything added from outside it — the monster search
+    // panel, and now the location figures panel — changed the screen and never
+    // reached the database. Reopening the encounter lost it.
+    if (!activeEncounter?.id) return
+    try {
+      await window.electronAPI.db.encounters.updateMonsters(
+        activeEncounter.id, next, next.reduce((n, m) => n + (m.xp ?? 0) * (m.count ?? 1), 0))
+    } catch (err) {
+      notifyError(err, `Add ${entry.name}`)
+    }
   }
 
   // ── Combat lifecycle ─────────────────────────────────────────────────────

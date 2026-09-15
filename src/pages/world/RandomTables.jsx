@@ -248,11 +248,11 @@ export default function RandomTables() {
                 </div>
 
                 {rolled && (
-                  <div style={s.rollResult}>
-                    <span style={s.rollNumber}>{rolled.roll}</span>
+                  <div style={s.rollResult} data-roll-result={table.id}>
+                    <span style={s.rollNumber} data-roll-number>{rolled.roll}</span>
                     {rolled.entry ? (
                       <>
-                        <span style={s.rollLabel}>
+                        <span style={s.rollLabel} data-roll-label>
                           {rolled.entry.label || '(no label)'}
                         </span>
                         {rolled.entry.encounter_id != null && (
@@ -269,7 +269,7 @@ export default function RandomTables() {
                         )}
                       </>
                     ) : (
-                      <span style={s.rollMissing}>
+                      <span style={s.rollMissing} data-roll-unmapped>
                         nothing covers {rolled.roll} on this table
                       </span>
                     )}
