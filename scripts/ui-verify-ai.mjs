@@ -123,6 +123,12 @@ async function main() {
     const thinking = () => ui.page.evaluate(() =>
       [...document.querySelectorAll('button')].some(b => /Thinking/.test(b.textContent)))
 
+    // A COLD Ollama must load llama3 (4.7 GB) from disk before it answers, and
+    // this is the first model call of the run. Warm, this request takes 45-70s
+    // on this machine; cold, the load alone measured 44s on top. The elapsed
+    // time is reported either way, so a slow answer is never mistaken for a
+    // model that returned nothing.
+    const startedAt = Date.now()
     let cardCount = 0
     for (let i = 0; i < 150; i++) {
       await sleep(2000)
@@ -140,7 +146,9 @@ async function main() {
     const cardsShot = await ui.screenshot('a02-suggestion-cards')
     record('Request "a rival thieves\' guild in Waterdeep" returns saveable cards',
       cardCount > 0 ? 'PASS' : 'FAIL',
-      cardCount > 0 ? `${cardCount} editable card(s)` : 'no cards — the model returned nothing usable',
+      cardCount > 0
+        ? `${cardCount} editable card(s) in ${Math.round((Date.now() - startedAt) / 1000)}s`
+        : `no cards after ${Math.round((Date.now() - startedAt) / 1000)}s — the model returned nothing usable, or had not finished`,
       cardsShot)
 
     if (cardCount > 0) {

@@ -2077,3 +2077,38 @@ the cases needed. The band is doing its job; the test was asking the wrong thing
 4. **Should a table roll be able to exclude recent results?** Rolling the same
    wandering encounter three sessions running is the usual complaint about d20
    tables, and a "don't repeat within N rolls" option is cheap.
+
+### Merged to main — 2026-09-15
+
+`fix-plot-thread-modal` fast-forwarded (`6d0fa7e`), then
+`phase-7-encounter-creation` merged as a merge commit (`8ba4e19`) — both were
+cut from `e553a71` and share no files, so the second could not fast-forward
+once the first had landed.
+
+Re-run **on main after the merge**:
+
+| Harness | Result |
+|---|---|
+| `npm test` | **1103 passing**, 28 files |
+| `test:migrations` | 89/89 (includes migration 013, fresh + populated) |
+| `test:ipc` | 0 problems — 199 channels, no duplicate preload keys |
+| `test:lore` / `test:sessions` / `test:rag` / `test:server` | 44/44 · 51/51 · 42/42 · 62/62 |
+| `build:renderer` / `doctor` | clean · no problems |
+| `verify:combat` | **16 PASS / 0 FAIL** |
+| `verify:encounters` | **13 PASS / 0 FAIL** |
+| `verify:aimode` | **14 PASS / 0 FAIL / 1 NOT VERIFIED** (the 404 model path — still no usable key) |
+| `verify:ai` | **14 PASS / 0 FAIL** |
+
+#### One false alarm worth recording
+
+`verify:ai` failed its suggestion line twice in a row on main before passing.
+It was **not** a regression: the model and parser were verified to return four
+usable suggestions on every attempt, and the full flow was watched producing its
+four Save buttons in 65 seconds. The cause is **Ollama cold-start** — the
+suggestion request is the first model call of that run, and loading llama3
+(4.7 GB) from disk measured **44.6 s** on its own before generation even began.
+Warming Ollama first, the suite passes 14/14.
+
+The driver now reports the elapsed time on that line, so a slow answer can never
+again be misread as a model returning nothing. Run `verify:ai` and
+`verify:encounters` against a warm Ollama, or expect the first one to be slow.
