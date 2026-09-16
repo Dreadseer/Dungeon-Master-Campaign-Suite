@@ -49,6 +49,12 @@ class DatabaseService {
       // before Phase 7 was written — 012 is combat_state above. Migrations are
       // append-only, so this is 013.
       { id: 13, name: 'encounter_tables', sql: MIGRATION_013 },
+      // Phase 8. The brief calls this "migration 013", which Phase 7 had already
+      // used. Purely additive: four ADD COLUMNs, which SQLite can do in place.
+      // atomic: several statements, and ADD COLUMN is not idempotent — if a crash
+      // landed between two of them on the auto-commit path, the next launch
+      // would fail on "duplicate column name" forever.
+      { id: 14, name: 'maps_measure_generate', sql: MIGRATION_014, atomic: true },
     ]
 
     for (const m of migrations) {
@@ -67,8 +73,9 @@ class DatabaseService {
     // A migration with an `after` hook needs the DDL and the data step to be
     // atomic: a half-applied import would leave some campaigns with a session
     // and some without, and the idempotence check would then skip the rest
-    // forever. Migrations without a hook keep the original auto-commit path.
-    if (!m.after) {
+    // forever. Migrations without a hook keep the original auto-commit path,
+    // unless they are flagged `atomic` because a partial apply cannot be retried.
+    if (!m.after && !m.atomic) {
       this.db.exec(m.sql)
       this.db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(m.id, m.name)
       return
@@ -77,7 +84,7 @@ class DatabaseService {
     this.db.exec('BEGIN')
     try {
       this.db.exec(m.sql)
-      m.after(this)
+      m.after?.(this)
       this.db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(m.id, m.name)
       this.db.exec('COMMIT')
     } catch (err) {
@@ -768,6 +775,34 @@ const MIGRATION_013 = `
   -- Builder opens a location-bound encounter.
   CREATE INDEX IF NOT EXISTS idx_encounter_tables_location
     ON encounter_tables(campaign_id, location_id);
+`
+
+// ── Migration 014 — maps: scale, fog grid, generation, annotations (Phase 8) ──
+//
+// feet_per_cell     What one grid square is worth, for the measurement tool.
+//                   DEFAULT 5 — the PHB grid — so every existing map measures
+//                   correctly the moment this runs.
+// fog_cols          The column count the stored fog mask was painted against.
+//                   Until now a mask's grid could only be inferred from its
+//                   length, and 40x30 and 30x40 are the same length. Left NULL
+//                   here and filled by the renderer on first load: it is
+//                   ceil(image width / grid size), and only the renderer has the
+//                   image width without decoding the file.
+// generated_params  JSON. How an imageless or generated map was made:
+//                   { kind: 'blank', cols, rows } or { kind: 'dungeon', seed, ... }.
+//                   A dungeon can be re-rolled or tweaked from it; a blank map
+//                   takes its size from it.
+// annotations       JSON array of DM-only labels and shapes. DEFAULT '[]' so
+//                   existing rows parse without a null check. Never sent to a
+//                   player — electron/server/fogFilter.js strips it.
+//
+// No existing value is changed: ADD COLUMN only adds, and fills existing rows
+// with the column default.
+const MIGRATION_014 = `
+  ALTER TABLE maps ADD COLUMN feet_per_cell INTEGER DEFAULT 5;
+  ALTER TABLE maps ADD COLUMN fog_cols INTEGER;
+  ALTER TABLE maps ADD COLUMN generated_params TEXT;
+  ALTER TABLE maps ADD COLUMN annotations TEXT DEFAULT '[]';
 `
 
 // ── SRD Subclass Seed Data — 27 subclasses (2–3 per class × 12 classes) ────────

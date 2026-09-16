@@ -58,7 +58,9 @@ const CAMPAIGNS = [
 
 const MAPS = [
   { id: 1, campaign_id: 3, name: 'Saltmarsh Docks', grid_size: 50, image_path: imagePath,
-    fog_data: JSON.stringify(fogMask), tokens: JSON.stringify(TOKENS) },
+    fog_data: JSON.stringify(fogMask), tokens: JSON.stringify(TOKENS),
+    // Phase 8: a DM-only note that must never be served.
+    annotations: JSON.stringify([{ id: 'ann-1', kind: 'text', x: 10, y: 10, text: 'SECRET DOOR behind the barrels' }]) },
   // Map 7 belongs to campaign 4 — the exact case the brief calls out.
   { id: 7, campaign_id: 4, name: 'Other Campaign Map', grid_size: 50, image_path: imagePath,
     fog_data: JSON.stringify(fogMask), tokens: JSON.stringify(TOKENS) },
@@ -199,6 +201,8 @@ try {
     JSON.parse(body.fog_data).length === NUM_COLS * NUM_ROWS)
   check('  the rest of the map row is intact',
     body.id === 1 && body.name === 'Saltmarsh Docks' && body.grid_size === 50)
+  check('  the DM-only annotations column is NOT in the response (Phase 8)',
+    !('annotations' in body) && !JSON.stringify(body).includes('SECRET DOOR'))
 
   // ── C. The token in a query string ─────────────────────────────────────────
   console.log('\nC. Query-string token (for <img> and other header-less callers)\n')

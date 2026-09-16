@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 
 const SRC = readFileSync('electron/database/DatabaseService.js', 'utf8')
-const LAST = 13
+const LAST = 14
 
 let failures = 0
 let checks = 0
@@ -44,9 +44,23 @@ const sqlFor = (n) => {
 }
 
 // Mirrors DatabaseService.runGuardedMigration: FKs off, transaction,
-// foreign_key_check before commit, FKs back on.
+// foreign_key_check before commit, FKs back on. Migrations flagged `atomic`
+// (014) run in a plain transaction, as runSimpleMigration does for them.
+const ATOMIC = new Set([14])
 const applyMigration = (db, id) => {
   const guarded = id === 9 || id === 10
+  if (ATOMIC.has(id)) {
+    db.exec('BEGIN')
+    try {
+      db.exec(sqlFor(id))
+      db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(id, 'm' + id)
+      db.exec('COMMIT')
+    } catch (err) {
+      db.exec('ROLLBACK')
+      throw err
+    }
+    return
+  }
   if (guarded) db.exec('PRAGMA foreign_keys = OFF')
   try {
     if (guarded) db.exec('BEGIN')
@@ -144,12 +158,12 @@ const snapshot = (db) => ({
 })
 
 // ── Scenario A: fresh database ───────────────────────────────────────────────
-console.log('\n=== A. Fresh database: migrations 001-013 ===\n')
+console.log(`\n=== A. Fresh database: migrations 001-${String(LAST).padStart(3, '0')} ===\n`)
 {
   const db = migrateTo(newDb(), LAST)
 
-  check('all 13 migrations recorded',
-    db.prepare('SELECT COUNT(*) c FROM _migrations').get().c === 13)
+  check(`all ${LAST} migrations recorded`,
+    db.prepare('SELECT COUNT(*) c FROM _migrations').get().c === LAST)
 
   const expected = [
     ['locations', 'parent_location_id', 'locations', 'SET NULL'],
@@ -463,11 +477,94 @@ console.log('\n=== E. Migration 013: encounter_tables ===\n')
   fresh.close(); aged.close()
 }
 
+// ── Migration 014: maps measure / generate / annotate (Phase 8) ─────────────
+console.log('\n=== F. Migration 014: maps columns ===\n')
+{
+  const NEW_COLS = ['feet_per_cell', 'fog_cols', 'generated_params', 'annotations']
+
+  // ── Fresh ────────────────────────────────────────────────────────────────
+  const fresh = migrateTo(newDb(), 14)
+  const info = Object.fromEntries(fresh.prepare('PRAGMA table_info(maps)').all().map(c => [c.name, c]))
+  check('fresh: maps has all four new columns', NEW_COLS.every(c => info[c]), Object.keys(info).join(', '))
+  check('fresh: feet_per_cell is INTEGER DEFAULT 5',
+    info.feet_per_cell?.type === 'INTEGER' && info.feet_per_cell?.dflt_value === '5', info.feet_per_cell?.dflt_value)
+  check('fresh: fog_cols is INTEGER with no default — unknown until the renderer measures',
+    info.fog_cols?.type === 'INTEGER' && info.fog_cols?.dflt_value === null)
+  check("fresh: annotations defaults to '[]'", info.annotations?.dflt_value === "'[]'", info.annotations?.dflt_value)
+
+  fresh.exec("INSERT INTO campaigns (id, name) VALUES (1, 'c')")
+  fresh.exec("INSERT INTO maps (campaign_id, name, grid_size, fog_data, tokens) VALUES (1, 'New', 50, '[]', '[]')")
+  const created = fresh.prepare("SELECT * FROM maps WHERE name='New'").get()
+  check('fresh: a map created without the new columns gets the defaults',
+    created.feet_per_cell === 5 && created.fog_cols === null && created.generated_params === null && created.annotations === '[]',
+    JSON.stringify({ f: created.feet_per_cell, c: created.fog_cols, g: created.generated_params, a: created.annotations }))
+
+  // ── Populated: a map painted and tokened under the pre-Phase-8 schema ────
+  const aged = migrateTo(newDb(), 8)
+  populate(aged)
+  migrateTo(aged, 13)
+  const paintedFog = JSON.stringify(Array.from({ length: 60 * 60 }, (_, i) => i % 7 === 0))
+  aged.prepare(`INSERT INTO maps (id, campaign_id, name, location_id, image_path, grid_size, fog_data, tokens)
+                VALUES (2, 1, 'Painted Crypt', 3, NULL, 50, ?, ?)`)
+    .run(paintedFog, JSON.stringify([{ id: 't1', label: 'Ghoul', type: 'monster', col: 4, row: 4 }]))
+  const before = snapshot(aged)
+  migrateTo(aged, 14)
+
+  check('populated: 014 applies on top of 013 with rows present',
+    aged.prepare('SELECT COUNT(*) c FROM _migrations').get().c === 14)
+
+  const after = snapshot(aged)
+  const strip = rows => rows.map(r => Object.fromEntries(Object.entries(r).filter(([k]) => !NEW_COLS.includes(k))))
+  check('populated: every existing map value is unchanged',
+    after.maps.length === 2 && JSON.stringify(strip(after.maps)) === JSON.stringify(strip(before.maps)))
+  const otherTables = Object.keys(before).filter(t => t !== 'maps')
+    .filter(t => JSON.stringify(after[t]) !== JSON.stringify(before[t]))
+  check('populated: no other table was touched', otherTables.length === 0, otherTables.join(', '))
+  check('populated: the painted fog survived byte for byte',
+    aged.prepare('SELECT fog_data FROM maps WHERE id=2').get().fog_data === paintedFog)
+
+  const legacy = aged.prepare('SELECT feet_per_cell, fog_cols, generated_params, annotations FROM maps ORDER BY id').all()
+  check('populated: existing maps measure at 5 ft per square', legacy.every(m => m.feet_per_cell === 5))
+  check('populated: fog_cols is left NULL for the renderer to backfill', legacy.every(m => m.fog_cols === null))
+  check("populated: existing maps have no generated_params and '[]' annotations",
+    legacy.every(m => m.generated_params === null && m.annotations === '[]'))
+
+  aged.prepare('UPDATE maps SET fog_cols=?, feet_per_cell=?, generated_params=?, annotations=? WHERE id=2')
+    .run(60, 10, JSON.stringify({ kind: 'blank', cols: 60, rows: 60 }), JSON.stringify([{ id: 'a', kind: 'text', x: 1, y: 1, text: 'Trap' }]))
+  const written = aged.prepare('SELECT * FROM maps WHERE id=2').get()
+  check('populated: the new columns can be written and read back',
+    written.fog_cols === 60 && written.feet_per_cell === 10 && JSON.parse(written.annotations)[0].text === 'Trap')
+
+  // ── Atomicity: the reason 014 is flagged atomic ──────────────────────────
+  // ADD COLUMN is not idempotent. Prove a failure part-way through rolls back
+  // every column already added, so a retry on the next launch starts from 013.
+  const partial = migrateTo(newDb(), 13)
+  let threw = false
+  partial.exec('BEGIN')
+  try {
+    partial.exec('ALTER TABLE maps ADD COLUMN feet_per_cell INTEGER DEFAULT 5;')
+    partial.exec('ALTER TABLE maps ADD COLUMN fog_cols INTEGER;')
+    partial.exec('ALTER TABLE maps ADD COLUMN fog_cols INTEGER;')   // duplicate: throws
+    partial.exec('COMMIT')
+  } catch {
+    threw = true
+    partial.exec('ROLLBACK')
+  }
+  const partialCols = partial.prepare('PRAGMA table_info(maps)').all().map(c => c.name)
+  check('atomic: a failure mid-migration rolls back the columns already added',
+    threw && !partialCols.includes('feet_per_cell') && !partialCols.includes('fog_cols'), partialCols.join(', '))
+  migrateTo(partial, 14)
+  check('atomic: and 014 then applies cleanly on retry',
+    partial.prepare('SELECT COUNT(*) c FROM _migrations').get().c === 14)
+
+  fresh.close(); aged.close(); partial.close()
+}
+
 console.log('\n=== D. Re-running the migration set is a no-op ===\n')
 {
   const db = migrateTo(newDb(), LAST)
   const ran = new Set(db.prepare('SELECT id FROM _migrations').all().map(r => r.id))
-  check('all 13 ids recorded, so a second launch skips every one', ran.size === LAST)
+  check(`all ${LAST} ids recorded, so a second launch skips every one`, ran.size === LAST)
   db.close()
 }
 

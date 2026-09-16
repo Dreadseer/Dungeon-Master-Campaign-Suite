@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { describeGridChange } from '../../utils/mapGridUtils'
-import { notifyError, notifySuccess } from '../../stores/toastStore'
+import { planGridChange, fogForGridChange } from '../../utils/mapGridUtils'
+import { notifyError, notifySuccess, notifyInfo } from '../../stores/toastStore'
+import EntityModal from '../world/EntityModal'
 
 export default function MapToolbar({
   activeTool,
@@ -22,38 +23,67 @@ export default function MapToolbar({
   viewMode,
   onViewModeChange,
   onUpdateThumbnail,
+  // Grid change (Phase 8)
+  imageSize,           // the loaded image, so the plan knows the real cell count
+  getCurrentFog,       // () => the mask MapCanvas holds NOW, not the one saved at open
+  cancelPendingFogSave,// () => drop a debounced fog save that would land after ours
 }) {
   const [savingGrid,  setSavingGrid]  = useState(false)
   const [savingThumb, setSavingThumb] = useState(false)
+  const [gridPlan,    setGridPlan]    = useState(null)   // non-null while the clear/keep dialog is open
+
+  // The map as it is right now. `map.fog_data` is the mask as it was when the map
+  // was OPENED — painting saves straight to the database without updating it —
+  // so deciding from it would miss everything painted this session and clear
+  // that fog without asking.
+  function liveMap() {
+    const fog = getCurrentFog?.()
+    return Array.isArray(fog) ? { ...map, fog_data: fog } : map
+  }
 
   async function handleSaveGridSize() {
-    // The fog mask is indexed by grid size — index = row * ceil(width / grid) +
-    // col — so changing the grid silently invalidates every cell in it.
-    // MapCanvas already starts the mask over when the length no longer matches
-    // (MapCanvas.jsx:104), but it does so without a word, which means an evening
-    // of painted fog can vanish because the DM nudged the grid by 5px.
-    const change = describeGridChange(map.grid_size, gridSize, map.fog_data)
-    if (change.clearsFog && !window.confirm(change.message)) return
+    // An image map's cell count comes from the image. Until it has loaded, any
+    // plan would be sized against the 3000px fallback and resample into the
+    // wrong grid.
+    if (map.image_path && !(imageSize?.width > 0)) {
+      notifyInfo('The map image is still loading — try again in a moment.')
+      return
+    }
+    const plan = planGridChange(liveMap(), imageSize, gridSize)
+    if (!plan.changed) {
+      notifyInfo(`Grid is already ${gridSize}px.`)
+      return
+    }
+    if (plan.needsChoice) {
+      setGridPlan(plan)   // the dialog calls commitGridChange with the DM's choice
+      return
+    }
+    await commitGridChange(plan, null)
+  }
 
+  async function commitGridChange(plan, choice) {
+    setGridPlan(null)
     setSavingGrid(true)
     try {
-      await window.electronAPI.db.maps.update(map.id, {
-        name:        map.name,
-        location_id: map.location_id ?? null,
-        grid_size:   gridSize,
+      // A debounced fog save still in flight would write the OLD-grid mask back
+      // over this one half a second later.
+      cancelPendingFogSave?.()
+      const current = liveMap()
+      const { fogData, fogCols } = fogForGridChange(plan, current.fog_data, choice)
+      // Grid size, mask and fog_cols in one transaction: two separate writes could
+      // leave a new grid with an old mask, which the player server fails closed on.
+      await window.electronAPI.db.maps.saveGridChange(map.id, {
+        grid_size: gridSize,
+        fog_data:  fogData,
+        fog_cols:  fogCols,
       })
 
-      // Clear the stored mask in the same breath. Leaving the stale one behind
-      // would make the player server fail closed on the length mismatch and
-      // withhold every token, with nothing on screen explaining why.
-      if (change.changed) {
-        await window.electronAPI.db.maps.updateFog(map.id, [])
-      }
-
-      notifySuccess(change.clearsFog
-        ? `Grid set to ${gridSize}px. Fog cleared.`
-        : `Grid set to ${gridSize}px.`)
-      onSaveGridSize?.(gridSize, change.changed)
+      const kept = plan.needsChoice && choice === 'keep' && plan.keepable
+      notifySuccess(
+        !plan.needsChoice ? `Grid set to ${gridSize}px.`
+          : kept ? `Grid set to ${gridSize}px. Fog kept and rescaled to ${plan.to.numCols}×${plan.to.numRows}.`
+          : `Grid set to ${gridSize}px. Fog cleared.`)
+      onSaveGridSize?.(gridSize, { fogData, fogCols })
     } catch (err) {
       notifyError(err, 'Save grid size')
     } finally {
@@ -77,6 +107,33 @@ export default function MapToolbar({
 
   return (
     <div style={s.toolbar}>
+      {gridPlan && (
+        <EntityModal title="Grid changed — clear or keep fog?" isOpen onClose={() => setGridPlan(null)}>
+          <div data-grid-change-dialog>
+            <p style={s.dialogText}>{gridPlan.message}</p>
+            <p style={s.dialogText}>
+              <strong>Keep</strong> redraws the revealed area on the new grid, so what the party has
+              seen stays where it was on the map. Edges may shift by up to one cell.
+              {' '}<strong>Clear</strong> hides the whole map again.
+            </p>
+            {!gridPlan.keepable && (
+              <p style={s.dialogWarn}>
+                This map's saved fog no longer matches its own grid, so it cannot be rescaled — only cleared.
+              </p>
+            )}
+            <div style={s.dialogFooter}>
+              <button style={s.dialogPrimary} onClick={() => commitGridChange(gridPlan, 'keep')}
+                disabled={!gridPlan.keepable}>
+                Keep fog
+              </button>
+              <button style={s.dialogDanger} onClick={() => commitGridChange(gridPlan, 'clear')}>
+                Clear fog
+              </button>
+              <button style={s.dialogSecondary} onClick={() => setGridPlan(null)}>Cancel</button>
+            </div>
+          </div>
+        </EntityModal>
+      )}
       {/* ── DM / Player mode toggle ────────────────────── */}
       <div style={s.section}>
         <button
@@ -213,6 +270,12 @@ export default function MapToolbar({
 }
 
 const s = {
+  dialogText:      { color: '#e8e0d0', fontSize: '0.88rem', lineHeight: 1.5, margin: '0 0 0.8rem' },
+  dialogWarn:      { color: '#e0a050', fontSize: '0.82rem', margin: '0 0 0.8rem' },
+  dialogFooter:    { display: 'flex', gap: '0.6rem', justifyContent: 'flex-end', paddingTop: '0.75rem', borderTop: '1px solid #2a1c08' },
+  dialogPrimary:   { background: '#c9a84c', color: '#0d0a05', border: 'none', padding: '0.5rem 1.1rem', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem' },
+  dialogDanger:    { background: 'transparent', color: '#e05050', border: '1px solid #6a2020', padding: '0.5rem 1.1rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.85rem' },
+  dialogSecondary: { background: 'transparent', color: '#a89060', border: '1px solid #3a2a10', padding: '0.5rem 1.1rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.85rem' },
   toolbar: {
     display: 'flex',
     alignItems: 'center',

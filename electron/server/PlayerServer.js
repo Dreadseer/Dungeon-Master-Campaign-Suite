@@ -460,7 +460,7 @@ class PlayerServer {
   // different campaign than the room being broadcast to.
   _mapForBroadcast(mapId, campaignId) {
     try {
-      const map = this.db.get('SELECT id, campaign_id, grid_size, image_path FROM maps WHERE id=?', [mapId])
+      const map = this.db.get('SELECT id, campaign_id, grid_size, image_path, fog_cols, generated_params FROM maps WHERE id=?', [mapId])
       if (!map) return null
       if (Number(map.campaign_id) !== Number(campaignId)) return null
       return map

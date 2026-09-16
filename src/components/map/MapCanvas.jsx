@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Stage, Layer, Image as KonvaImage, Line, Rect, Text } from 'react-konva'
 import {
-  initFog, isCellRevealed, setBrushRevealed,
-  getMapDimensions, isCellInViewport,
+  initFog, isCellRevealed, setBrushRevealed, isCellInViewport,
 } from '../../utils/fogUtils'
+import { mapGridDimensions, needsFogColsBackfill, isFogStale, readFogMask } from '../../utils/mapGridUtils'
+import { notifyError } from '../../stores/toastStore'
 import MapToken    from './MapToken'
 import AddTokenModal  from './AddTokenModal'
 import TokenInspector from './TokenInspector'
@@ -37,6 +38,7 @@ export default function MapCanvas({
   registerThumbnailGen,   // callback to expose generateThumbnail up to MapEngine
   combatRoster = [],      // live combatants from the initiative tracker, if a fight is running
   combatSelectedId = null,// whose turn it is, so the map can follow the tracker
+  onImageSize,            // (size) => void — the loaded image size, for the toolbar's grid plan
 }) {
   const stageRef = useRef(null)
 
@@ -116,19 +118,39 @@ export default function MapCanvas({
     img.src = url
   }, [map.image_path])
 
+  useEffect(() => { onImageSize?.(imageSize) }, [imageSize, onImageSize])
+
+  // ── fog_cols backfill (Phase 8) ─────────────────────────────────────
+  // Every map from before migration 014 has fog_cols NULL. Record the column
+  // count the first time the map is opened with its real size known — for an
+  // image map that means after the image has loaded, or the 3000px fallback
+  // would be recorded instead. DM view only; the handler never overwrites a
+  // value that is already set.
+  const backfilledRef = useRef(null)
+  useEffect(() => {
+    if (mode !== 'dm' || !needsFogColsBackfill(map)) return
+    if (backfilledRef.current === map.id) return
+    if (map.image_path && (!backgroundImage || imageError)) return
+    backfilledRef.current = map.id
+    const { numCols } = mapGridDimensions(map, imageSize, map.grid_size)
+    window.electronAPI.db.maps.backfillFogCols(map.id, numCols)
+      .catch(err => notifyError(err, 'Record fog grid size'))
+  }, [mode, map, backgroundImage, imageError, imageSize])
+
   // ── Fog initialisation ─────────────────────────────────────────────
   // Re-run whenever image dimensions or grid size change (map resize/reimport)
   useEffect(() => {
     const effectiveGrid = gridSize || map.grid_size || 50
-    const { numCols, numRows } = getMapDimensions(imageSize, effectiveGrid)
-    const saved = map.fog_data ? JSON.parse(map.fog_data) : []
-    if (saved.length === numCols * numRows) {
+    const dims  = mapGridDimensions(map, imageSize, effectiveGrid)
+    const saved = readFogMask(map.fog_data)
+    if (saved.length > 0 && !isFogStale(map, dims)) {
       setFogData(saved)
     } else {
-      // Fresh map or dimensions changed — start fully hidden
-      setFogData(initFog(numCols, numRows, false))
+      // Fresh map, or a mask painted against another grid (wrong length, or
+      // the right length with the wrong fog_cols) — start fully hidden.
+      setFogData(initFog(dims.numCols, dims.numRows, false))
     }
-  }, [imageSize, map.grid_size, map.fog_data]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [imageSize, map.grid_size, map.fog_data, map.generated_params]) // eslint-disable-line react-hooks/exhaustive-deps
   // Note: intentionally exclude gridSize from deps — we only reinit on saved grid_size change,
   // not on every live toolbar nudge (that would wipe unsaved fog state).
 
@@ -143,13 +165,28 @@ export default function MapCanvas({
   }, [map.tokens])
 
   // ── Debounced fog save ─────────────────────────────────────────────
-  const debounceSaveFog = useCallback((next) => {
+  // Every fog save carries the column count it was painted against, so
+  // fog_cols always describes the mask actually stored.
+  const debounceSaveFog = useCallback((next, numCols) => {
     clearTimeout(saveFogRef.current)
     saveFogRef.current = setTimeout(() => {
-      window.electronAPI.db.maps.updateFog(map.id, next)
+      saveFogRef.current = null
+      window.electronAPI.db.maps.updateFog(map.id, next, numCols)
+        .catch(err => notifyError(err, 'Save fog'))
       onFogChange?.(next)
     }, 500)
   }, [map.id, onFogChange])
+
+  const cancelPendingFogSave = useCallback(() => {
+    clearTimeout(saveFogRef.current)
+    saveFogRef.current = null
+  }, [])
+
+  // The mask as it is on screen, for decisions that must not use the stale one
+  // saved on the map row (the grid-change plan).
+  const fogDataRef = useRef(fogData)
+  fogDataRef.current = fogData
+  const getFog = useCallback(() => fogDataRef.current, [])
 
   // ── Token save & mutators ──────────────────────────────────────────
   const saveTokens = useCallback((next) => {
@@ -187,28 +224,25 @@ export default function MapCanvas({
   }, [selectedToken, saveTokens])
 
   // ── Reveal All / Hide All (exposed to toolbar via registerFogControls) ──
-  const revealAll = useCallback(() => {
-    const effectiveGrid = gridSize || map.grid_size || 50
-    const { numCols, numRows } = getMapDimensions(imageSize, effectiveGrid)
-    const next = initFog(numCols, numRows, true)
+  const fillFog = useCallback((revealed) => {
+    // The SAVED grid size, not the live toolbar value: the stored mask has to
+    // match the grid stored with it.
+    const { numCols, numRows } = mapGridDimensions(map, imageSize, map.grid_size)
+    const next = initFog(numCols, numRows, revealed)
+    cancelPendingFogSave()
     setFogData(next)
-    window.electronAPI.db.maps.updateFog(map.id, next)
+    window.electronAPI.db.maps.updateFog(map.id, next, numCols)
+      .catch(err => notifyError(err, revealed ? 'Reveal all' : 'Hide all'))
     onFogChange?.(next)
-  }, [imageSize, gridSize, map.grid_size, map.id, onFogChange])
+  }, [map, imageSize, onFogChange, cancelPendingFogSave])
 
-  const hideAll = useCallback(() => {
-    const effectiveGrid = gridSize || map.grid_size || 50
-    const { numCols, numRows } = getMapDimensions(imageSize, effectiveGrid)
-    const next = initFog(numCols, numRows, false)
-    setFogData(next)
-    window.electronAPI.db.maps.updateFog(map.id, next)
-    onFogChange?.(next)
-  }, [imageSize, gridSize, map.grid_size, map.id, onFogChange])
+  const revealAll = useCallback(() => fillFog(true), [fillFog])
+  const hideAll = useCallback(() => fillFog(false), [fillFog])
 
   // Register controls with parent so toolbar buttons can call them
   useEffect(() => {
-    registerFogControls?.({ revealAll, hideAll })
-  }, [registerFogControls, revealAll, hideAll])
+    registerFogControls?.({ revealAll, hideAll, getFog, cancelPendingFogSave })
+  }, [registerFogControls, revealAll, hideAll, getFog, cancelPendingFogSave])
 
   // ── Thumbnail generation (exposed to toolbar via registerThumbnailGen) ──
   const generateThumbnail = useCallback(async () => {
@@ -239,13 +273,13 @@ export default function MapCanvas({
     const { x, y }           = pointerToStage(e)
     const col                 = Math.floor(x / effectiveGrid)
     const row                 = Math.floor(y / effectiveGrid)
-    const { numCols, numRows } = getMapDimensions(imageSize, effectiveGrid)
+    const { numCols, numRows } = mapGridDimensions(map, imageSize, effectiveGrid)
     const revealed             = activeTool === 'fog-reveal'
     const brushSize            = fogBrushSize ?? 1
     const next = setBrushRevealed(fogData, col, row, numCols, numRows, brushSize, revealed)
     setFogData(next)
-    debounceSaveFog(next)
-  }, [mode, activeTool, gridSize, map.grid_size, imageSize, fogBrushSize,
+    debounceSaveFog(next, numCols)
+  }, [mode, activeTool, gridSize, map, imageSize, fogBrushSize,
       fogData, pointerToStage, debounceSaveFog])
 
   // ── Double-click: open AddTokenModal on empty canvas ──────────────
@@ -266,8 +300,7 @@ export default function MapCanvas({
   const renderGrid = useCallback(() => {
     const lines    = []
     const cellSize = gridSize || map.grid_size || 50
-    const w        = imageSize.width  || 3000
-    const h        = imageSize.height || 3000
+    const { width: w, height: h } = mapGridDimensions(map, imageSize, cellSize)
     const color    = 'rgba(201, 168, 76, 0.35)'
 
     const visX0 = (-stagePos.x) / stageScale
@@ -291,13 +324,13 @@ export default function MapCanvas({
         stroke={color} strokeWidth={0.5} listening={false} />)
     }
     return lines
-  }, [gridSize, map.grid_size, imageSize, stagePos, stageScale, canvasSize])
+  }, [gridSize, map, imageSize, stagePos, stageScale, canvasSize])
 
   // ── Fog renderer ──────────────────────────────────────────────────
   const renderFog = useCallback(() => {
     if (!fogData.length) return null
     const effectiveGrid        = gridSize || map.grid_size || 50
-    const { numCols, numRows } = getMapDimensions(imageSize, effectiveGrid)
+    const { numCols, numRows } = mapGridDimensions(map, imageSize, effectiveGrid)
     const rects = []
 
     // TODO Phase 7 optimization: merge fog into a single clipping mask
@@ -325,7 +358,7 @@ export default function MapCanvas({
       }
     }
     return rects
-  }, [fogData, gridSize, map.grid_size, imageSize, stagePos, stageScale, canvasSize, mode])
+  }, [fogData, gridSize, map, imageSize, stagePos, stageScale, canvasSize, mode])
 
   // ── Zoom to cursor ────────────────────────────────────────────────
   const handleWheel = useCallback((e) => {
@@ -396,6 +429,7 @@ export default function MapCanvas({
     : 'default'
 
   const effectiveGrid = gridSize || map.grid_size || 50
+  const dims = mapGridDimensions(map, imageSize, effectiveGrid)
 
   return (
     <div style={{ position: 'relative', width: canvasSize.width, height: canvasSize.height }}>
@@ -420,9 +454,15 @@ export default function MapCanvas({
           {backgroundImage && (
             <KonvaImage image={backgroundImage} x={0} y={0} listening={false} />
           )}
+          {/* A blank map: a neutral field exactly cols x grid wide, so the
+              edge of the map is visible and tokens have somewhere to stand. */}
+          {!map.image_path && dims.source === 'blank' && (
+            <Rect x={0} y={0} width={dims.width} height={dims.height}
+              fill="#2b2620" stroke="#4a3a1a" strokeWidth={2} listening={false} />
+          )}
           {/* Placeholder when no image is loaded — helps DM distinguish
               "image hidden by fog" from "image not loaded" */}
-          {!backgroundImage && (
+          {!backgroundImage && dims.source !== 'blank' && (
             <Text
               x={20} y={20}
               text={imageError
@@ -454,8 +494,7 @@ export default function MapCanvas({
           {tokens
             .filter(token => {
               if (mode !== 'player') return true
-              const { numCols } = getMapDimensions(imageSize, effectiveGrid)
-              return isCellRevealed(fogData, token.col, token.row, numCols)
+              return isCellRevealed(fogData, token.col, token.row, dims.numCols)
             })
             .map(token => (
               <MapToken

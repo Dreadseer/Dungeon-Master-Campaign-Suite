@@ -10,6 +10,24 @@ const path = require('path')
 // and the cleanup happens here instead.
 const POLYMORPHIC_TYPES = ['npc', 'location', 'faction', 'lore']
 
+// A positive integer from IPC input, or the fallback. Numeric strings are
+// accepted (form inputs), but Number(null) and Number('') are 0 and must not
+// read as a real value.
+function positiveIntOr(value, fallback) {
+  const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value
+  return Number.isInteger(n) && n > 0 ? n : fallback
+}
+
+// A JSON column value from IPC input: objects/arrays are stringified, strings
+// are kept only if they parse, anything else is null.
+function jsonOrNull(value) {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'string') {
+    try { JSON.parse(value); return value } catch { return null }
+  }
+  return typeof value === 'object' ? JSON.stringify(value) : null
+}
+
 // Delete an entity and everything that points at it polymorphically, atomically.
 // Without this, deleting an NPC left its connection rows behind pointing at an
 // id that no longer exists; the Connections page then rendered them as
@@ -688,37 +706,86 @@ function registerDbHandlers(db) {
   registerHandler('db:maps:getById', (_, id) =>
     db.get('SELECT * FROM maps WHERE id = ?', [id]))
 
+  // Phase 8 columns (migration 014) are all optional here, so every existing
+  // caller keeps working: feet_per_cell falls to the column default of 5,
+  // fog_cols stays NULL for the renderer to backfill, generated_params stays
+  // NULL for an ordinary uploaded map. JSON fields accept an object or a string.
   registerHandler('db:maps:create', (_, data) =>
     db.run(`
       INSERT INTO maps
-        (campaign_id, name, location_id, image_path, grid_size, fog_data, tokens, created_at)
-      VALUES (?,?,?,?,?,?,?,datetime('now'))`,
+        (campaign_id, name, location_id, image_path, grid_size, fog_data, tokens,
+         feet_per_cell, fog_cols, generated_params, annotations, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`,
       [data.campaign_id, data.name, data.location_id ?? null,
        data.image_path ?? null, data.grid_size ?? 50,
-       JSON.stringify([]), JSON.stringify([])]))
+       JSON.stringify([]), JSON.stringify([]),
+       positiveIntOr(data.feet_per_cell, 5),
+       positiveIntOr(data.fog_cols, null),
+       jsonOrNull(data.generated_params),
+       jsonOrNull(data.annotations) ?? '[]']))
 
+  // feet_per_cell is COALESCEd: the toolbar's grid-size save sends only name,
+  // location and grid, and must not reset a 10 ft map to 5.
   registerHandler('db:maps:update', (_, id, data) =>
     db.run(`
-      UPDATE maps SET name=?, location_id=?, grid_size=? WHERE id=?`,
-      [data.name, data.location_id ?? null, data.grid_size ?? 50, id]))
+      UPDATE maps SET name=?, location_id=?, grid_size=?,
+        feet_per_cell=COALESCE(?, feet_per_cell)
+      WHERE id=?`,
+      [data.name, data.location_id ?? null, data.grid_size ?? 50,
+       positiveIntOr(data.feet_per_cell, null), id]))
 
   registerHandler('db:maps:updateImagePath', (_, id, imagePath) =>
     db.run('UPDATE maps SET image_path=? WHERE id=?', [imagePath, id]))
 
-  registerHandler('db:maps:updateFog', (_, id, fogData) =>
-    db.run('UPDATE maps SET fog_data=? WHERE id=?', [JSON.stringify(fogData), id]))
+  // fogCols is optional so existing two-argument callers are unaffected; when
+  // given, it is written with the mask it describes, never separately.
+  registerHandler('db:maps:updateFog', (_, id, fogData, fogCols) =>
+    db.run('UPDATE maps SET fog_data=?, fog_cols=COALESCE(?, fog_cols) WHERE id=?',
+      [JSON.stringify(fogData), positiveIntOr(fogCols, null), id]))
 
   registerHandler('db:maps:updateTokens', (_, id, tokens) =>
     db.run('UPDATE maps SET tokens=? WHERE id=?', [JSON.stringify(tokens), id]))
 
+  // Grid size, fog mask and fog_cols in one transaction. Written as two calls,
+  // a failure between them would leave a new grid with the old mask — the exact
+  // mismatch fog_cols exists to catch, and one the player server fails closed on.
+  registerHandler('db:maps:saveGridChange', (_, id, { grid_size, fog_data, fog_cols } = {}) =>
+    db.transaction(() => {
+      const size = positiveIntOr(grid_size, null)
+      if (size === null) throw new Error('Grid size must be a positive whole number')
+      if (!Array.isArray(fog_data)) throw new Error('Fog data must be an array')
+      return db.run('UPDATE maps SET grid_size=?, fog_data=?, fog_cols=? WHERE id=?',
+        [size, JSON.stringify(fog_data), positiveIntOr(fog_cols, null), id])
+    }))
+
+  // First-load backfill for maps that predate migration 014. Guarded on
+  // fog_cols IS NULL so it can never overwrite a value a real fog save wrote.
+  registerHandler('db:maps:backfillFogCols', (_, id, fogCols) => {
+    const cols = positiveIntOr(fogCols, null)
+    if (cols === null) return { changes: 0 }
+    return db.run('UPDATE maps SET fog_cols=? WHERE id=? AND fog_cols IS NULL', [cols, id])
+  })
+
+  registerHandler('db:maps:updateAnnotations', (_, id, annotations) => {
+    if (!Array.isArray(annotations)) throw new Error('Annotations must be an array')
+    return db.run('UPDATE maps SET annotations=? WHERE id=?', [JSON.stringify(annotations), id])
+  })
+
   // Deleting a map also removes its image and thumbnail from disk. Both are
   // best-effort: a missing or locked file must not block the database delete,
   // or the map becomes undeletable. Same pattern as pdf:delete.
+  //
+  // The image is only removed when no OTHER map still uses it. "Duplicate" makes
+  // a copy that shares the original's image_path, so deleting either one used to
+  // delete the picture out from under the other.
   registerHandler('db:maps:delete', (_, id) => {
     const map = db.get('SELECT image_path FROM maps WHERE id = ?', [id])
     const result = db.run('DELETE FROM maps WHERE id=?', [id])
+    const stillUsed = map?.image_path
+      ? db.get('SELECT COUNT(*) AS n FROM maps WHERE image_path = ?', [map.image_path]).n > 0
+      : false
 
-    if (map?.image_path) {
+    if (map?.image_path && !stillUsed) {
       try {
         if (fs.existsSync(map.image_path)) fs.unlinkSync(map.image_path)
       } catch (err) {

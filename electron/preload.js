@@ -87,8 +87,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       update:         (id, data)      => ipcRenderer.invoke('db:maps:update', id, data),
       updateImagePath:(id, imagePath) => ipcRenderer.invoke('db:maps:updateImagePath', id, imagePath),
       getByLocation:  (locationId)    => ipcRenderer.invoke('db:maps:getByLocation', locationId),
-      updateFog:      (id, fogData)   => ipcRenderer.invoke('db:maps:updateFog', id, fogData),
+      // fogCols (optional): the column count the mask was painted against.
+      updateFog:      (id, fogData, fogCols) => ipcRenderer.invoke('db:maps:updateFog', id, fogData, fogCols),
       updateTokens:   (id, tokens)    => ipcRenderer.invoke('db:maps:updateTokens', id, tokens),
+      // Phase 8 — grid size, mask and fog_cols in one transaction.
+      saveGridChange: (id, change)    => ipcRenderer.invoke('db:maps:saveGridChange', id, change),
+      backfillFogCols:(id, fogCols)   => ipcRenderer.invoke('db:maps:backfillFogCols', id, fogCols),
+      updateAnnotations: (id, annotations) => ipcRenderer.invoke('db:maps:updateAnnotations', id, annotations),
       delete:         (id)            => ipcRenderer.invoke('db:maps:delete', id),
     },
     world: {
@@ -188,6 +193,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       : null,
     saveExportedImage: (campaignName, dataUrl) =>
       ipcRenderer.invoke('file:saveExportedImage', campaignName, dataUrl),
+    // Phase 8 — a generated map image, written into userData/maps/ with no
+    // dialog. Returns the stored path for db:maps:create.
+    saveMapImage: (dataUrl) => ipcRenderer.invoke('file:saveMapImage', dataUrl),
   },
 
   srd: {

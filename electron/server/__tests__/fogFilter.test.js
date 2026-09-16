@@ -347,3 +347,147 @@ describe('filterBroadcastPayload — live updates must not leak what REST hides'
     expect(viaRest).toEqual(['a', 'b'])
   })
 })
+
+// ── Phase 8: blank maps, fog_cols, annotations ──────────────────────────────
+
+describe('Phase 8 — blank maps agree with the renderer', async () => {
+  const { mapGridDimensions } = await import('../../../src/utils/mapGridUtils.js')
+  const { blankDimensions, mapGrid } = fogFilter
+
+  const blank = (cols, rows, over = {}) => ({
+    id: 9, campaign_id: 3, grid_size: 50, image_path: null,
+    generated_params: JSON.stringify({ kind: 'blank', cols, rows }), ...over,
+  })
+
+  it('mapGrid matches mapGridDimensions for blank, legacy imageless and image maps', () => {
+    const measured = { width: 1234, height: 987 }
+    const cases = [
+      [blank(30, 20), null],
+      [blank(4, 150), null],
+      [blank(30, 20, { grid_size: 73 }), null],
+      [{ grid_size: 50, image_path: null }, null],                    // legacy: 3000x3000
+      [{ grid_size: 50, image_path: null, generated_params: '{bad' }, null],
+      [{ grid_size: 40, image_path: 'C:/m.png' }, measured],
+      // An image wins over blank params, on both sides.
+      [blank(30, 20, { image_path: 'C:/m.png' }), measured],
+    ]
+    for (const [row, size] of cases) {
+      const { numCols, numRows } = mapGridDimensions(row, size)
+      expect(mapGrid(row, size), JSON.stringify(row)).toEqual({ numCols, numRows })
+    }
+  })
+
+  it('blankDimensions refuses what the renderer refuses', () => {
+    for (const params of [{ kind: 'blank', cols: 3, rows: 10 }, { kind: 'blank', cols: 151, rows: 10 },
+      { kind: 'blank', cols: 10.5, rows: 10 }, { kind: 'dungeon', cols: 30, rows: 20 }]) {
+      expect(blankDimensions({ image_path: null, generated_params: JSON.stringify(params) })).toBeNull()
+    }
+  })
+
+  it('filters tokens on a blank map instead of withholding them all', () => {
+    // Before Phase 8 the server sized this as 60x60, saw a 600-cell mask, and
+    // failed closed: players saw no tokens at all on any blank map.
+    const mask = new Array(30 * 20).fill(false)
+    mask[2 * 30 + 3] = true
+    const row = blank(30, 20, {
+      fog_data: JSON.stringify(mask), fog_cols: 30,
+      tokens: JSON.stringify([token('seen', 3, 2), token('hidden', 10, 10)]),
+    })
+    const { map, reason, grid } = filterMapForPlayer(row, { measure: () => { throw new Error('must not measure') } })
+    expect(grid).toEqual({ numCols: 30, numRows: 20 })
+    expect(reason).toBe('filtered')
+    expect(JSON.parse(map.tokens).map(t => t.label)).toEqual(['seen'])
+  })
+
+  it('the broadcast path agrees on a blank map', () => {
+    const mask = new Array(30 * 20).fill(false)
+    mask[2 * 30 + 3] = true
+    const row = blank(30, 20, { fog_cols: 30 })
+    const result = filterBroadcastPayload(
+      { mapId: 9, fogData: mask, tokens: [token('seen', 3, 2), token('hidden', 10, 10)] }, row)
+    expect(result.payload.tokens.map(t => t.label)).toEqual(['seen'])
+  })
+})
+
+describe('Phase 8 — fog_cols cross-check', () => {
+  const measure = () => ({ width: 1000, height: 800 })   // 20 x 16 at 50px
+
+  it('withholds every token when fog_cols disagrees with the grid, even at the right length', () => {
+    // A 16x20 mask is 320 cells, the same as 20x16: the length check passes.
+    const row = {
+      id: 1, grid_size: 50, image_path: 'C:/maps/town.png', fog_cols: 16,
+      fog_data: JSON.stringify(maskWith([5, 5])),
+      tokens: JSON.stringify([token('seen', 5, 5)]),
+    }
+    const { map, reason } = filterMapForPlayer(row, { measure })
+    expect(JSON.parse(map.tokens)).toEqual([])
+    expect(reason).toBe('fog-cols-mismatch:16!=20')
+
+    const live = filterBroadcastPayload({ mapId: 1, fogData: maskWith([5, 5]), tokens: [token('seen', 5, 5)] }, row, { measure })
+    expect(live.payload.tokens).toEqual([])
+  })
+
+  it('a matching fog_cols filters normally', () => {
+    const row = {
+      id: 1, grid_size: 50, image_path: 'C:/maps/town.png', fog_cols: 20,
+      fog_data: JSON.stringify(maskWith([5, 5])),
+      tokens: JSON.stringify([token('seen', 5, 5), token('ambush', 15, 12)]),
+    }
+    expect(JSON.parse(filterMapForPlayer(row, { measure }).map.tokens).map(t => t.label)).toEqual(['seen'])
+  })
+
+  it('a NULL fog_cols (every pre-Phase-8 map) falls back to the length check', () => {
+    const row = {
+      id: 1, grid_size: 50, image_path: 'C:/maps/town.png', fog_cols: null,
+      fog_data: JSON.stringify(maskWith([5, 5])),
+      tokens: JSON.stringify([token('seen', 5, 5)]),
+    }
+    expect(JSON.parse(filterMapForPlayer(row, { measure }).map.tokens)).toHaveLength(1)
+  })
+
+  it('an unpainted map is not a mismatch, whatever fog_cols says', () => {
+    const row = { id: 1, grid_size: 50, image_path: 'C:/maps/town.png', fog_cols: 99, fog_data: '[]', tokens: JSON.stringify([token('a', 1, 1)]) }
+    expect(filterMapForPlayer(row, { measure }).reason).toBe('no-fog')
+  })
+})
+
+describe('Phase 8 — annotations never reach a player', () => {
+  const measure = () => ({ width: 1000, height: 800 })
+  const secret = JSON.stringify([{ id: 'a', kind: 'text', x: 1, y: 1, text: 'Secret door' }])
+  const base = {
+    id: 1, campaign_id: 3, grid_size: 50, image_path: 'C:/maps/town.png', annotations: secret,
+    fog_data: JSON.stringify(maskWith([5, 5])), tokens: JSON.stringify([token('seen', 5, 5)]),
+  }
+
+  it('on every filterMapForPlayer path — filtered, no fog, unmeasurable, mismatched', () => {
+    const paths = [
+      filterMapForPlayer(base, { measure }),
+      filterMapForPlayer({ ...base, fog_data: '[]' }, { measure }),
+      filterMapForPlayer(base, { measure: () => null }),
+      filterMapForPlayer({ ...base, grid_size: 25 }, { measure }),
+      filterMapForPlayer({ ...base, fog_cols: 7 }, { measure }),
+      filterMapForPlayer({ ...base, tokens: '[]' }, { measure }),
+    ]
+    for (const { map } of paths) {
+      expect(map).not.toHaveProperty('annotations')
+      expect(JSON.stringify(map)).not.toContain('Secret door')
+    }
+  })
+
+  it('does not mutate the row it was given', () => {
+    const row = { ...base }
+    filterMapForPlayer(row, { measure })
+    expect(row.annotations).toBe(secret)
+  })
+
+  it('is stripped from a broadcast payload that carries it', () => {
+    for (const p of [
+      { mapId: 1, fogData: maskWith([5, 5]), tokens: [token('seen', 5, 5)], annotations: secret },
+      { mapId: 1, fogData: [], tokens: [], annotations: secret },
+    ]) {
+      expect(filterBroadcastPayload(p, base, { measure }).payload).not.toHaveProperty('annotations')
+    }
+    expect(filterBroadcastPayload({ mapId: 1, tokens: [token('x', 1, 1)], annotations: secret }, null).payload)
+      .not.toHaveProperty('annotations')
+  })
+})

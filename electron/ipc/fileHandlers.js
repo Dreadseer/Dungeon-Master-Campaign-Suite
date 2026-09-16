@@ -25,6 +25,32 @@ registerHandler('file:copyMapImage', async (_, sourcePath) => {
   return destPath
 })
 
+// Save a generated map image into userData/maps/, the same place an uploaded
+// one is copied to, so db:maps:delete cleans it up the same way.
+//
+// Not file:saveExportedImage: that one opens a "Export Mind Map" save dialog and
+// writes wherever the DM points it. A generated map is app data, not an export —
+// and a map whose image lives in a user-chosen folder would have that file
+// deleted from under them when the map is deleted.
+registerHandler('file:saveMapImage', async (_, dataUrl) => {
+  const prefix = 'data:image/png;base64,'
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith(prefix)) {
+    throw new Error('Generated map image must be a PNG data URL')
+  }
+  const buffer = Buffer.from(dataUrl.slice(prefix.length), 'base64')
+  // A PNG starts with an 8-byte signature. A zero-byte or corrupt export would
+  // save a map that can never load, so refuse it here rather than there.
+  const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  if (buffer.length < 8 || !buffer.subarray(0, 8).equals(PNG_SIGNATURE)) {
+    throw new Error('Generated map image is not a valid PNG')
+  }
+  const mapsDir = path.join(app.getPath('userData'), 'maps')
+  if (!fs.existsSync(mapsDir)) fs.mkdirSync(mapsDir, { recursive: true })
+  const destPath = path.join(mapsDir, `map_${Date.now()}_${require('crypto').randomUUID().slice(0, 8)}_generated.png`)
+  fs.writeFileSync(destPath, buffer)
+  return destPath
+})
+
 // Read image from disk and return as base64 data URL for canvas rendering
 registerHandler('file:readImageAsBase64', (_, filePath) => {
   if (!filePath || !fs.existsSync(filePath)) return null

@@ -41,6 +41,7 @@ export default function MapEngine() {
   const [stagePos,     setStagePos]     = useState({ x: 0, y: 0 })
   const [activeTool,   setActiveTool]   = useState('pan')
   const [currentGridSize, setCurrentGridSize] = useState(50)    // live toolbar value
+  const [mapImageSize, setMapImageSize] = useState({ width: 0, height: 0 })   // reported by MapCanvas
   const [canvasSize,   setCanvasSize]   = useState({
     width:  window.innerWidth  - SIDEBAR_W,
     height: window.innerHeight - TOPBAR_H - MAPTOOLBAR_H,
@@ -53,7 +54,7 @@ export default function MapEngine() {
   // that goes to the pop-out only. Read the saved fight instead, so token HP is
   // live here as well as on the players' screen.
   const [combatRoster, setCombatRoster] = useState([])
-  const fogControlsRef = useRef(null)   // holds { revealAll, hideAll } from MapCanvas
+  const fogControlsRef = useRef(null)   // holds { revealAll, hideAll, getFog, cancelPendingFogSave } from MapCanvas
 
   const registerFogControls = useCallback((controls) => {
     fogControlsRef.current = controls
@@ -85,7 +86,10 @@ export default function MapEngine() {
       type: 'map:update',
       payload: {
         mapId:   activeMap.id,
-        fogData: JSON.parse(activeMap.fog_data ?? '[]'),
+        // The mask on screen, not activeMap.fog_data: that is the mask as it was
+        // when the map was OPENED, so moving a token used to re-send players the
+        // old fog and hide everything revealed since.
+        fogData: fogControlsRef.current?.getFog?.() ?? JSON.parse(activeMap.fog_data ?? '[]'),
         tokens:  tokens,
       },
     })
@@ -138,6 +142,7 @@ export default function MapEngine() {
     setStagePos({ x: 0, y: 0 })
     setActiveTool('pan')
     setCurrentGridSize(map.grid_size || 50)
+    setMapImageSize({ width: 0, height: 0 })
     setFogBrushSize(1)
     setViewMode('dm')
     fogControlsRef.current    = null
@@ -263,18 +268,23 @@ export default function MapEngine() {
           onBack={() => { setActiveMap(null); load() }}
           stageScale={stageScale}
           onResetView={() => { setStageScale(1.0); setStagePos({ x: 0, y: 0 }) }}
-          onSaveGridSize={(gs, fogCleared) => {
-            // fog_data must be updated in the same setState as grid_size:
-            // MapCanvas re-initialises its mask from [map.fog_data, map.grid_size],
-            // so leaving the old mask in state would have it compare the stale
-            // array against the new dimensions on the very next render.
+          onSaveGridSize={(gs, { fogData, fogCols }) => {
+            // fog_data and fog_cols must be updated in the same setState as
+            // grid_size: MapCanvas re-initialises its mask from
+            // [map.fog_data, map.grid_size], so leaving the old mask in state
+            // would have it compare the stale array against the new dimensions
+            // on the very next render.
             setActiveMap(prev => ({
               ...prev,
               grid_size: gs,
-              ...(fogCleared ? { fog_data: '[]' } : {}),
+              fog_data:  JSON.stringify(fogData),
+              fog_cols:  fogCols,
             }))
             setCurrentGridSize(gs)
           }}
+          imageSize={mapImageSize}
+          getCurrentFog={() => fogControlsRef.current?.getFog?.()}
+          cancelPendingFogSave={() => fogControlsRef.current?.cancelPendingFogSave?.()}
           map={activeMap}
           fogBrushSize={fogBrushSize}
           onFogBrushSizeChange={setFogBrushSize}
@@ -302,6 +312,7 @@ export default function MapEngine() {
           setCanvasSize={setCanvasSize}
           registerFogControls={registerFogControls}
           registerThumbnailGen={registerThumbnailGen}
+          onImageSize={setMapImageSize}
         />
       </div>
     )

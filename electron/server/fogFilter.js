@@ -41,6 +41,61 @@ function gridDimensions(imageSize, gridSize) {
   return { numCols: Math.ceil(w / size), numRows: Math.ceil(h / size) }
 }
 
+// Mirrors BLANK_LIMITS and blankDimensions in src/utils/mapGridUtils.js.
+const BLANK_MIN = 4
+const BLANK_MAX = 150
+
+/**
+ * A blank map's size in cells, or null. Phase 8: a map with no image can carry
+ * generated_params = { kind: 'blank', cols, rows }, and the renderer sizes its
+ * fog mask from those, NOT from the 3000x3000 fallback. Without this the server
+ * would compute a 60x60 grid for a 30x20 map, see a mask-length mismatch, and
+ * withhold every token on every blank map.
+ */
+function blankDimensions(map) {
+  if (!map || map.image_path) return null
+  let params = map.generated_params
+  if (typeof params === 'string') {
+    try { params = JSON.parse(params) } catch { return null }
+  }
+  if (!params || typeof params !== 'object' || params.kind !== 'blank') return null
+  const ok = n => Number.isInteger(n) && n >= BLANK_MIN && n <= BLANK_MAX
+  return ok(params.cols) && ok(params.rows) ? { cols: params.cols, rows: params.rows } : null
+}
+
+/**
+ * The grid a map row's fog mask indexes into, mirroring mapGridDimensions in
+ * src/utils/mapGridUtils.js: the image when there is one, a blank map's own cell
+ * count, otherwise the 3000x3000 fallback legacy imageless maps were painted on.
+ */
+function mapGrid(map, imageSize) {
+  const blank = blankDimensions(map)
+  if (!imageSize && blank) return { numCols: blank.cols, numRows: blank.rows }
+  return gridDimensions(imageSize, map && map.grid_size)
+}
+
+/**
+ * True when the row records the column count its mask was painted against and
+ * that count is not this grid's. Catches what a length check cannot: 40x30 and
+ * 30x40 masks are the same length.
+ */
+function fogColsMismatch(map, grid, fogData) {
+  if (!map || !Number.isInteger(map.fog_cols)) return false
+  if (!Array.isArray(fogData) || fogData.length === 0) return false
+  return map.fog_cols !== grid.numCols
+}
+
+/**
+ * A copy of a map row with the DM-only columns removed. `annotations` holds the
+ * DM's margin notes ("secret door", "trap here") and never leaves the process,
+ * whatever else the row is used for.
+ */
+function withoutDmOnlyColumns(map) {
+  if (!map || typeof map !== 'object' || !Object.hasOwn(map, 'annotations')) return map
+  const { annotations, ...rest } = map   // eslint-disable-line no-unused-vars
+  return rest
+}
+
 /**
  * Parse a JSON column that should hold an array, without throwing.
  * Returns [] for null, malformed JSON, or a non-array value.
@@ -79,8 +134,8 @@ function filterTokensByFog(tokens, fogData, grid) {
     return { tokens: [], reason: 'unknown-grid' }
   }
 
-  // The mask length is the one cross-check available without Phase 8's fog_cols
-  // column: it must equal numCols * numRows. A mismatch means the mask was
+  // The mask length must equal numCols * numRows. (Phase 8's fog_cols is checked
+  // by the callers, before this, where the map row is available.) A mismatch means the mask was
   // painted against a different grid size — the smear this phase's UI guard
   // exists to prevent — and every index into it would be meaningless.
   const expected = grid.numCols * grid.numRows
@@ -115,10 +170,12 @@ function filterMapForPlayer(map, deps = {}) {
   const measure = deps.measure ?? imageSizeFromFile
   if (!map) return { map, reason: 'no-map' }
 
+  const safe = withoutDmOnlyColumns(map)
   const tokens = parseJsonArray(map.tokens)
   const fogData = parseJsonArray(map.fog_data)
 
-  // A map with no image still has a mask, sized against the 3000x3000 fallback.
+  // A map with no image still has a mask: sized from its blank dimensions, or
+  // against the 3000x3000 fallback for a legacy imageless map.
   const imageSize = map.image_path ? measure(map.image_path) : null
 
   // Measurement failed on a map that HAS an image path: the file is missing,
@@ -126,17 +183,27 @@ function filterMapForPlayer(map, deps = {}) {
   // falling back to 3000x3000, which would silently index into the wrong grid.
   if (map.image_path && !imageSize) {
     return {
-      map: { ...map, tokens: JSON.stringify([]) },
+      map: { ...safe, tokens: JSON.stringify([]) },
       reason: 'unmeasurable-image',
       hidden: tokens.length,
     }
   }
 
-  const grid = gridDimensions(imageSize, map.grid_size)
+  const grid = mapGrid(map, imageSize)
+
+  if (fogColsMismatch(map, grid, fogData)) {
+    return {
+      map: { ...safe, tokens: JSON.stringify([]) },
+      reason: 'fog-cols-mismatch:' + map.fog_cols + '!=' + grid.numCols,
+      hidden: tokens.length,
+      grid,
+    }
+  }
+
   const result = filterTokensByFog(tokens, fogData, grid)
 
   return {
-    map: { ...map, tokens: JSON.stringify(result.tokens) },
+    map: { ...safe, tokens: JSON.stringify(result.tokens) },
     reason: result.reason,
     hidden: tokens.length - result.tokens.length,
     grid,
@@ -157,25 +224,38 @@ function filterBroadcastPayload(payload, map, deps = {}) {
   const measure = deps.measure ?? imageSizeFromFile
   if (!payload || typeof payload !== 'object') return { payload, reason: 'no-payload' }
 
+  // Nothing broadcasts annotations today. Strip them anyway, so that stays true
+  // if a future payload carries a whole map row.
+  const safe = withoutDmOnlyColumns(payload)
+
   const tokens = parseJsonArray(payload.tokens)
-  if (tokens.length === 0) return { payload, reason: 'no-tokens', hidden: 0 }
+  if (tokens.length === 0) return { payload: safe, reason: 'no-tokens', hidden: 0 }
 
   // No row for this id: the DM is pushing an update for a map the server cannot
   // verify. Withhold every token.
   if (!map) {
-    return { payload: { ...payload, tokens: [] }, reason: 'unknown-map', hidden: tokens.length }
+    return { payload: { ...safe, tokens: [] }, reason: 'unknown-map', hidden: tokens.length }
   }
 
   const imageSize = map.image_path ? measure(map.image_path) : null
   if (map.image_path && !imageSize) {
-    return { payload: { ...payload, tokens: [] }, reason: 'unmeasurable-image', hidden: tokens.length }
+    return { payload: { ...safe, tokens: [] }, reason: 'unmeasurable-image', hidden: tokens.length }
   }
 
-  const grid = gridDimensions(imageSize, map.grid_size)
-  const result = filterTokensByFog(tokens, parseJsonArray(payload.fogData), grid)
+  const grid = mapGrid(map, imageSize)
+  const fogData = parseJsonArray(payload.fogData)
+  if (fogColsMismatch(map, grid, fogData)) {
+    return {
+      payload: { ...safe, tokens: [] },
+      reason: 'fog-cols-mismatch:' + map.fog_cols + '!=' + grid.numCols,
+      hidden: tokens.length,
+      grid,
+    }
+  }
+  const result = filterTokensByFog(tokens, fogData, grid)
 
   return {
-    payload: { ...payload, tokens: result.tokens },
+    payload: { ...safe, tokens: result.tokens },
     reason: result.reason,
     hidden: tokens.length - result.tokens.length,
     grid,
@@ -187,6 +267,10 @@ module.exports = {
   getCellIndex,
   isCellRevealed,
   gridDimensions,
+  blankDimensions,
+  mapGrid,
+  fogColsMismatch,
+  withoutDmOnlyColumns,
   parseJsonArray,
   filterTokensByFog,
   filterMapForPlayer,
