@@ -2373,3 +2373,297 @@ never replace a map.
    a ruler, and use the same distance maths.
 5. **Should generated maps be tied to encounters automatically?** A generated
    dungeon plus Phase 7's encounter generator is most of an improvised session.
+
+---
+
+## Phase 9 — Release readiness
+
+**Date:** 2026-09-17
+**Branch:** `phase-9-release`, from `main` (`28932f9`, `v1.1.0-alpha.4`)
+**Verdict changes:** none by design — this phase is about what a stranger can
+install, read and judge. But it found and fixed **four real defects**, one of them
+in the capability review's single strongest differentiator.
+
+### Three deviations from the brief, stated up front
+
+1. **The soak test is `scripts/soak-migrations.mjs`, not `verify-migrations.js`.**
+   The brief's filename is one character from the existing
+   `scripts/verify-migrations.mjs`, which has been wired to `test:migrations`
+   since Phase 0. Two scripts with near-identical names, doing different jobs,
+   is a trap for whoever reads this next. `npm run verify:migrations` is wired as
+   the brief asked; it runs the soak.
+2. **Migration 015 was added, which the brief did not ask for.** The soak test
+   found that a campaign which had ever used AI could not be deleted at all. A
+   release-readiness phase that leaves that in place is not release readiness.
+3. **The installer was built but NOT executed, and no clean Windows user profile
+   was created.** See *Task 3* below for exactly what was verified instead and
+   what is left for a human.
+
+### What shipped
+
+**Task 1 — licence and attribution** (`f77203c`). MIT `LICENSE` and
+`"license": "MIT"`; the repo had neither, so a stranger evaluating it had no idea
+what they were permitted to do. An **About panel** in Settings carries the version,
+the MIT line, the SRD 5.1 attribution CC-BY-4.0 requires *verbatim*, credit to
+dnd5eapi.co, the unaffiliated-with-Wizards disclaimer, and the part a DM cares
+about: no account, no subscription, no telemetry, the full path to the single
+SQLite file that is their campaign, and a button that opens the folder. Two new
+channels (`app:dataPath`, `shell:openDataFolder` — which opens only `userData`,
+not any path the renderer names). Version bumped to **1.1.0**.
+
+**Task 2 — the migration soak test** (`e2c5ddf`). `npm run verify:migrations`
+builds the 008 schema, seeds **~1,600 realistic rows** across every table that
+exists at that point (enumerated from the schema, so a table nobody seeded fails
+the run rather than being skipped), applies 009-015 while comparing row counts
+per table **after each migration**, then seeds the tables those migrations add and
+checks **all 28 foreign keys** in the final schema: every one dereferences to a
+real parent, `foreign_key_check` is clean, and each key's declared `ON DELETE` is
+exercised for real — delete a parent that has children, look at what happened to
+those exact child rows, roll back. Painted fog, a character's stats and an
+encounter's monsters are compared byte for byte across the whole run.
+**62 checks.**
+
+The migration runner now lives in `scripts/lib/migration-sql.mjs`, shared with
+`test:migrations`, and reads the migration list and the guarded/atomic flags out
+of `DatabaseService.js` rather than hard-coding them — so a harness cannot apply
+migrations differently from the app, and neither can silently stop covering the
+newest one.
+
+**Task 3 — packaged-app verification.** `npm run build:win` produces
+`dist/app/DMCS-Setup-1.1.0.exe` (117 MB, **unsigned**) and
+`dist/app/win-unpacked/` (180 MB). New `npm run verify:packaged` launches **the
+packaged executable** — the same binaries the installer ships — against a scratch
+`DMCS_USER_DATA`, and walks the brief's checklist. Results below.
+
+**Task 4 — screenshots** (`6325e8d`). `scripts/screenshot-driver.mjs` rewritten:
+the Phase 3 version drove the Vite dev server; this one uses the same launcher as
+the acceptance drivers against the built renderer, seeds a campaign worth
+photographing, and writes **six** images to `docs/screenshots/` — the brief's five
+plus Settings → About, so the licence and the SRD attribution can be seen rather
+than taken on trust. `npm run screenshots` regenerates them; `DMCS_SHOTS_KEEP=1`
+reuses the profile to skip the SRD download and embedding pass.
+
+Every image was read back and re-shot until it was true, which took four rounds.
+
+**Task 5 — README.** Version 1.1.0; the screenshot placeholder replaced with the
+five real images; migration 015 in the schema table; **what the SRD index does and
+does not cover**; why contiguous stitching applies to books and not the SRD; how
+to switch Rules Q&A on; a table of what each of the eight harnesses actually
+checks; a **Third-party content and attribution** section (which `LICENSE` points
+at); an MIT licence section; and an Open Questions section rewritten from scratch —
+every resolved item gone, the unreachable `RAGQueryPanel`, the rough edges and the
+honest unverifieds named.
+
+**Task 6 — `docs/POSITIONING.md`.** The review's post-roadmap statement, cut down
+to what Phases 1-8 shipped, with **Best for / Not for**, where DMCS is genuinely
+ahead and behind, and an explicit **What this does not claim** list.
+
+### Bugs found — four real ones
+
+**1. A campaign that had ever used AI could not be deleted.** `ai_usage_log.campaign_id`
+was declared in migration 005 with no `ON DELETE` clause (so `NO ACTION`);
+migration 009 rebuilt the world tables with correct delete behaviour and did not
+touch it. `db:campaigns:delete` is a bare `DELETE`, so it aborted with
+`FOREIGN KEY constraint failed` for any campaign with a single logged AI call —
+the last reference to `campaigns` that did not cascade. **Migration 015** rebuilds
+the table with `ON DELETE CASCADE` via the create/copy/drop/rename procedure,
+carrying every column and row including ids, timestamps and rows whose
+`campaign_id` is NULL. `test:migrations` section G asserts the delete was
+**refused before** the migration, so the fix is proved to fix something.
+
+**2. Rules Q&A could not be switched on.** The mode was gated on
+`db:pdf:getAll(campaignId)`, which filters by campaign — and the SRD index is a
+**shared** `pdf_sources` row with `campaign_id NULL` by design (migration 010). So
+a DM who had indexed the SRD and owned no PDFs of their own saw the toggle
+permanently disabled: Phase 3's headline feature worked at the service layer, with
+nothing in the UI able to reach it. `AIAssistant` now also consults
+`srd:getIndexStatus`.
+
+**3. Retrieval returned the entries *around* the answer.** Asked "what is a
+goblin's armour class", the index found the goblin and `_expandContiguous` then
+replaced the results with its neighbours in chunk order — Giant Vulture, Giant
+Wasp, Giant Weasel — after which `RAGService` sliced the first `topK` and cut the
+goblin out. The model then truthfully said no goblin was in the source material.
+**Every query behaved this way**: "restrained condition" returned Fly, Fog Cloud
+and Forbiddance. The evidence was the shape of the results — always
+*alphabetically consecutive* entries, i.e. insertion order.
+
+Diagnosed layer by layer before touching anything: a standalone probe showed
+vectra ranking the goblin first at **0.742**, matching cosine similarity computed
+by hand, so neither the library nor the embeddings were at fault. Stitching
+neighbours is right for a PDF, where a passage runs across chunks; in the SRD index
+each chunk is a whole entry and "contiguous" means "alphabetically adjacent".
+Expansion is now skipped for whole-entry sources and bounded to the anchor for
+real books.
+
+*Before:* "there is no goblin monster listed in the provided source material".
+*After:* "a goblin's Armor Class is 15 (armor) … 5 (1d6 + 2) slashing damage",
+with four `SRD 5.1 · Monsters` citations at 70-79%.
+
+**4. "Armor Class: [object Object]" was indexed for 13 armour entries.** Equipment
+armour class is an object (`{ base, dex_bonus, max_bonus }`) and `formatAC` handled
+only numbers and arrays. It now reads "14 + Dex modifier (max 2)" or "16 (no Dex
+bonus)", and no object can reach the text serialiser again (+6 tests).
+
+### Bugs in my own harnesses, worth recording
+
+Each of these made a check or a screenshot **lie**, which is the only kind of
+harness bug that matters:
+
+- The soak's FK probe counted NULLs table-wide, which reads a working `SET NULL`
+  on a self-referencing key as a failure: deleting a top-level region removes a
+  row whose own parent was NULL at the same moment its children become NULL, so
+  the count does not move. It now identifies the child rows by id and looks at
+  what happened to each.
+- The soak seeded `reveals` with random NPCs, which collides with
+  `UNIQUE(entity_type, entity_id)`.
+- **The campaign-manager screenshot was BLANK and I committed it**, because I
+  checked the other four images and assumed that one. Both drivers navigated to
+  `#/campaigns`, which is not a route. Then, once pointed at the index route, its
+  counts read 0 with four NPCs seeded — the dashboard loads them in an effect keyed
+  on the campaign id, and navigating to the route it is already on does not remount
+  it. Opening every image is now part of taking them.
+- The screenshot driver opened the map before the map list had re-read the row the
+  tokens were written to, so the map shot had **no tokens on it**.
+- It wrote the mid-fight state as a bare array, but `combatPersistence` stores
+  `{ schema_version, combatants }` and discards anything else — so the tracker
+  built a fresh round 1 while the caption claimed round 2.
+- Patching that state while the tracker was still mounted was undone by its
+  **save-on-unmount**, which is the Phase 5 feature working exactly as designed.
+- The packaged-app driver polled `srd:getCacheStats()` for a `.total` field. That
+  channel returns an *array* of `{ resource_type, count }`, so it waited seven
+  minutes for a field that does not exist while the seed worked underneath.
+- The rules-Q&A screenshot waited for the text "SRD 5.1" to appear, which
+  depended on the *model* naming the source in its prose. It did once — in an
+  answer saying it could not find anything. It now waits for the citation toggle.
+
+### Acceptance
+
+| Acceptance check (from the brief) | Result |
+|---|---|
+| **Installer runs on a clean machine; every item in task 3 passes or is documented as failing with a reason** | **PARTIAL — documented.** The installer was built (117 MB, unsigned) and the packaged executable it ships was verified against an empty profile: **19 PASS / 0 FAIL** (table below). The installer itself was not executed and no clean Windows user account was created — see *What was NOT verified* |
+| **`npm run verify:migrations` green** | **PASS — 62/62** |
+| **README has no placeholder text and no stale Open Questions** | **PASS** — the screenshot placeholder is replaced by six real images; Open Questions rewritten, every resolved item removed |
+
+**Harness results on the branch:**
+
+```
+npm test              1247 passing (31 files) — 1242 at the start of the phase
+verify:migrations     62/62   (the new soak: ~1,600 rows, 28 foreign keys)
+test:migrations       114/114 (adds section G for migration 015)
+test:ipc              0 problems — 205 channels (203 + app:dataPath, shell:openDataFolder)
+test:server           63/63
+test:rag              42/42
+test:lore             44/44
+test:sessions         51/51
+build:renderer        clean
+build:win             DMCS-Setup-1.1.0.exe (117 MB) + win-unpacked (180 MB)
+doctor                no problems
+screenshots           6 of 6 taken
+verify:packaged       19 PASS / 0 FAIL
+```
+
+#### Packaged application — the brief's checklist
+
+`npm run verify:packaged` — the packaged binary, launched against an empty `DMCS_USER_DATA`.
+
+| Check | Result | Detail | Screenshot |
+|---|---|---|---|
+| The packaged app exists | **PASS** | C:\dev\dmcs\dist\app\win-unpacked\DM Campaign Suite.exe (180 MB) | — |
+| The installer exists | **PASS** | DMCS-Setup-1.1.0.exe (117 MB), unsigned | — |
+| The packaged app launches on an empty profile | **PASS** | window title "DM Campaign Suite", userData .packaged-userdata | `p01-first-run.png` |
+| It creates and migrates its database from nothing | **PASS** | C:\dev\dmcs\scripts\.packaged-userdata\dmcs.db, 0 campaigns | — |
+| First-run SRD seed completes from the modal | **PASS** | 902 entries across 4 resource types in 40s (the modal says 2-5 minutes) | `p02-srd-seeded.png` |
+| The first-run modal releases the app when indexing finishes | **PASS** | a further 215s indexing and embedding behind the overlay (4.3 min of first-run wait in total) | — |
+| A campaign can be created and loaded | **PASS** | "Packaged Run" id=1 | `p03-campaign.png` |
+| A map image is copied into the app and renders on the canvas | **PASS** | stored at map_1789677236903.png, 1 stage(s) — the native file picker itself was not driven | `p04-map.png` |
+| The player window opens | **PASS** | 2 windows (was 1), one on #/player | `p05-player-window.png` |
+| The pop-out combat map window opens | **PASS** | on /maps?autoMap=1 | `p06-popout-map.png` |
+| Combat starts and is saved as it happens | **PASS** | round 1, phase active | `p07-combat.png` |
+| The fight survives a relaunch of the packaged app | **PASS** | round 1, 4 combatants, banner shown | `p08-resumed.png` |
+| A rules question is answered with SRD citations | **PASS** | 902 chunks indexed · 3 citations · "According to the source material, a goblin's armor class is 15 (armor).…" | `p09-rag.png` |
+| The player server starts and reports a LAN URL | **PASS** | port 3101, http://192.168.24.112:3101 (this machine: 192.168.24.112) | — |
+| A player can join over the LAN and receives a token | **PASS** | token dc8b756c… for campaign 1 via http://192.168.24.112:3101 | — |
+| That token reads the campaign, and no token is refused | **PASS** | with token 200, without 401, map "Packaged Map" | — |
+| The served map row carries no DM-only annotations | **PASS** | keys: id, campaign_id, name, location_id, image_path, grid_size, fog_data, tokens, created_at, feet_per_cell, fog_cols, generated_params | — |
+| The player web app is served over the LAN | **PASS** | {"status":200,"type":"text/html; charset=utf-8"} | — |
+| No unexpected main-process errors | **PASS** | clean | — |
+
+#### Two things the packaged run measured, worth writing down
+
+- **The first-run wait is about four minutes, not the "2-5 minutes" the modal
+  promises for the download.** The SRD download itself took **40 seconds**; the
+  modal then stayed up for a further **215 seconds** while the app built the rules
+  index and embedded all 902 entries through Ollama, with the button reading
+  "Loading..." and nothing else clickable. That is the number a new user
+  experiences. (An earlier attempt took over eight minutes and had fetched only
+  783 of 902 entries, which suggests dnd5eapi.co throttles repeated full seeds —
+  worth knowing before anyone reruns this back to back.)
+- **An unknown hash renders an empty shell.** The Campaign Manager is the router's
+  index route; there is no `/campaigns` path and no catch-all, so `#/campaigns` —
+  or any stale bookmark — shows the sidebar and nothing else, with no message. Not
+  fixed here: it needs a routing decision (redirect unknown routes to the index,
+  or add a real not-found page).
+
+#### What was NOT verified, and why
+
+- **The installer was not run, and no clean Windows user profile was created.**
+  Creating a second Windows user account needs administrative, interactive setup I
+  cannot perform, and installing into the developer's own profile would be neither
+  clean nor a change to their machine I should make unasked. What *was* verified is
+  the packaged executable the installer ships, launched against an empty
+  `DMCS_USER_DATA` — so the first-run path (no database, migrations from nothing,
+  SRD seed) is genuinely exercised. **Left for a human:** run
+  `dist\app\DMCS-Setup-1.1.0.exe`, ideally on a second machine or a fresh Windows
+  account, and confirm it installs, launches and seeds.
+- **The installer is unsigned.** There is no code-signing certificate, so Windows
+  SmartScreen will warn a stranger on first run. Nothing in this phase can fix
+  that; it needs a certificate.
+- **The native file picker.** `file:openImageDialog` opens an OS dialog Playwright
+  cannot drive. The map-upload check goes through `file:copyMapImage` — exactly
+  what the picker hands off to — so the copy, the stored path and the render are
+  verified; the dialog itself is not.
+- **A real browser over an ngrok tunnel.** A LAN join is verified end to end
+  (join → token → authorised read → refusal without a token → the player bundle
+  served). No ngrok token is configured, so the tunnel path is unverified.
+- **macOS / Linux packaging.** Only the Windows target has ever been built.
+
+### Deferred / known issues
+
+- **`src/components/ai/RAGQueryPanel.jsx` is imported by nothing** — 500 lines
+  holding the nicer rules-Q&A surface, including the **no-model "Relevant
+  passages"** path that Phase 3's BUILD_STATUS describes. The live chat has no such
+  branch, so the `no-ai` rules-Q&A experience exists in code and cannot be reached
+  in the UI. Not deleted: that would remove the only implementation of a documented
+  path. Mount it or fold its passages view into the chat.
+- **The SRD index has no rules-chapter prose** (the API does not publish it), so
+  procedural questions are answered from the DM's own PDFs or not at all. Now
+  stated in the README rather than implied away.
+- **Toasts sit over the top-right controls**, including the Rules Q&A toggle, for a
+  few seconds after an action — a real click can land on a notification.
+- Phase 8's carried-over items: tokens keep their cell indices when the grid
+  changes; the map toolbar scrolls horizontally with a tool's options open.
+- **No React component has a unit test.** Unchanged since Phase 0.
+
+### Deliberately not planned — noted, per the brief's appendix
+
+These came up while writing `POSITIONING.md`, and are recorded as conceded rather
+than deferred: **audio transcription** (hostile to local-first), **VTT export**
+(serves DMs who chose another VTT), **AI image generation for maps** (breaks the
+`no-ai` guarantee and the locked stack), **3D map generation** (a different
+product). Each is named in POSITIONING's *Not for* and *What this does not claim*
+sections so a reader does not have to guess.
+
+### Open questions
+
+1. **Mount `RAGQueryPanel`, or fold it into the chat?** The chat cannot answer
+   without a model; the panel can. One of the two should happen before anyone
+   advertises `no-ai` rules Q&A.
+2. **Should the SRD index include the rules chapters?** They are not in the API.
+   The options are shipping the CC-BY SRD text with the app (a licensing question
+   more than a technical one) or telling DMs to index the SRD PDF themselves.
+3. **Code signing.** Without a certificate, every stranger's first run shows a
+   SmartScreen warning. This is a purchase, not a patch.
+4. **Does anything else read a shared (`campaign_id IS NULL`) source and filter it
+   out by campaign?** The Rules Q&A gate did. `allowedSourceIds` gets it right, and
+   `db:pdf:getAll` is the one that does not — worth an audit rather than a guess.
