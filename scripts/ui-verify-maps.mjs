@@ -190,6 +190,169 @@ async function main() {
   await ui.page.locator('button', { hasText: '🎲 DM' }).click()
   await sleep(300)
 
+  // ══ L4: the dungeon generator — seed 42 twice ═════════════════════════════
+  async function generate(name, seed) {
+    await ui.page.locator('[data-open-generator]').click()
+    await ui.page.locator('[data-map-generator]').waitFor({ timeout: 5000 })
+    await ui.page.locator('[data-field="gen-seed"]').fill(String(seed))
+    await ui.page.locator('[data-field="gen-name"]').fill(name)
+    await sleep(400)
+    const summaryText = await ui.page.locator('[data-generator-summary]').textContent()
+    const shot = await ui.screenshot(`m07-generator-${name.replace(/\W+/g, '-').toLowerCase()}`)
+    const startedAt = Date.now()
+    await ui.page.locator('[data-generate]').click()
+    await ui.page.locator('[data-map-generator]').waitFor({ state: 'detached', timeout: 30000 })
+    await sleep(600)
+    const row = await ui.page.evaluate(async ({ cid, n }) =>
+      (await window.electronAPI.db.maps.getAll(cid)).find(m => m.name === n), { cid: campaignId, n: name })
+    return { row, summaryText, shot, ms: Date.now() - startedAt }
+  }
+
+  const pngInfo = (file) => {
+    const buf = fs.readFileSync(file)
+    return {
+      sha: createHash('sha256').update(buf).digest('hex'),
+      width: buf.readUInt32BE(16),
+      height: buf.readUInt32BE(20),
+      bytes: buf.length,
+    }
+  }
+
+  await ui.page.locator('button', { hasText: '← Maps' }).first().click()
+  await sleep(800)
+  const genA = await generate('Seed 42 A', 42)
+  const genB = await generate('Seed 42 B', 42)
+  const genC = await generate('Seed 43', 43)
+
+  const fileA = genA.row && fs.existsSync(genA.row.image_path) ? pngInfo(genA.row.image_path) : null
+  const fileB = genB.row && fs.existsSync(genB.row.image_path) ? pngInfo(genB.row.image_path) : null
+  const fileC = genC.row && fs.existsSync(genC.row.image_path) ? pngInfo(genC.row.image_path) : null
+
+  record('Generate seed 42 twice → identical images',
+    fileA && fileB && fileA.sha === fileB.sha && genA.row.image_path !== genB.row.image_path ? 'PASS' : 'FAIL',
+    fileA && fileB
+      ? `two separate files, sha256 ${fileA.sha.slice(0, 16)}… both, ${fileA.bytes} bytes, generated in ${genA.ms} ms`
+      : 'an image file is missing',
+    genA.shot)
+  record('…and a different seed gives a different image (the comparison can fail)',
+    fileA && fileC && fileA.sha !== fileC.sha ? 'PASS' : 'FAIL',
+    fileC ? `seed 43 sha256 ${fileC.sha.slice(0, 16)}…` : 'seed 43 image missing', genC.shot)
+
+  const paramsA = JSON.parse(genA.row?.generated_params ?? 'null')
+  record('The generated map is saved with its grid, fog_cols and parameters set to match',
+    fileA && fileA.width === 2000 && fileA.height === 1500 && genA.row.grid_size === 50 &&
+    genA.row.fog_cols === 40 && paramsA?.kind === 'dungeon' && paramsA.seed === 42 &&
+    genA.row.image_path.includes('maps') ? 'PASS' : 'FAIL',
+    `${fileA?.width}×${fileA?.height} px, grid ${genA.row?.grid_size}, fog_cols ${genA.row?.fog_cols}, params ${genA.row?.generated_params}`)
+
+  // Fog and tokens on the generated map. Aim at a real room, taken from the same
+  // generator the app used.
+  const { generateDungeon } = await import('../src/utils/dungeonGen.js')
+  const room = generateDungeon(paramsA).rooms[0]
+
+  await openMapByName(ui, 'Seed 42 A')
+  await ui.clickButton('Reveal')
+  await ui.page.locator('button', { hasText: '3×3' }).click()
+  const roomAt = await toScreen(ui, centre(room.cx, room.cy))
+  await ui.page.mouse.click(roomAt.x, roomAt.y)
+  await sleep(1100)
+  const genFog = await getMap(ui, genA.row.id)
+  const genMask = JSON.parse(genFog.fog_data)
+  const genPainted = genMask.filter(v => v === true).length
+  record('Fog paints correctly on the generated map',
+    genMask.length === 40 * 30 && genPainted === 9 && genMask[room.cy * 40 + room.cx] === true ? 'PASS' : 'FAIL',
+    `mask ${genMask.length} cells (want 1200), ${genPainted} revealed around room 1's centre (${room.cx},${room.cy})`)
+
+  // Token: double-click deliberately OFF the cell centre, then drag it and
+  // release off-centre again. Both must land on whole cells.
+  await ui.clickButton('Token')
+  const offCentre = await toScreen(ui, { x: room.cx * G + 7, y: room.cy * G + 43 })
+  await ui.page.mouse.dblclick(offCentre.x, offCentre.y)
+  await ui.page.locator('input[placeholder="Goblin, Aria, Chest…"]').fill('Goblin')
+  await ui.page.locator('button', { hasText: 'Place Token' }).click()
+  await sleep(900)
+  const placed = JSON.parse((await getMap(ui, genA.row.id)).tokens)[0]
+
+  const tokenScreen = await toScreen(ui, centre(room.cx, room.cy))
+  const dropAt = await toScreen(ui, { x: (room.cx + 2) * G + 44, y: (room.cy + 1) * G + 3 })
+  await ui.page.mouse.move(tokenScreen.x, tokenScreen.y)
+  await ui.page.mouse.down()
+  for (let i = 1; i <= 10; i++) {
+    await ui.page.mouse.move(tokenScreen.x + ((dropAt.x - tokenScreen.x) * i) / 10, tokenScreen.y + ((dropAt.y - tokenScreen.y) * i) / 10)
+  }
+  await ui.page.mouse.up()
+  await sleep(900)
+  const moved = JSON.parse((await getMap(ui, genA.row.id)).tokens)[0]
+  const shotTokens = await ui.screenshot('m08-generated-fog-and-token')
+  record('Tokens snap to the generated grid — placed and dragged from off-centre points',
+    placed && placed.col === room.cx && placed.row === room.cy &&
+    moved && moved.col === room.cx + 2 && moved.row === room.cy + 1 ? 'PASS' : 'FAIL',
+    `placed at (${placed?.col},${placed?.row}) want (${room.cx},${room.cy}); dragged to (${moved?.col},${moved?.row}) want (${room.cx + 2},${room.cy + 1})`,
+    shotTokens)
+
+  // ══ L5: grid change on a map with fog — clear, then keep ══════════════════
+  await ui.clickButton('Pan')
+  const gridPlus = ui.page.locator('button[title="Increase grid size"]')
+  const gridSave = ui.page.locator('button', { hasText: /^Save$/ })
+
+  await gridPlus.click()   // 50 → 55: 2000/55 → 37 cols, 1500/55 → 28 rows
+  await gridSave.click()
+  const dialogShown = await ui.page.locator('[data-grid-change-dialog]').isVisible({ timeout: 4000 }).catch(() => false)
+  const shotDialog = await ui.screenshot('m09-grid-change-dialog')
+  await ui.page.locator('[data-grid-change-dialog] button', { hasText: 'Clear fog' }).click()
+  await sleep(900)
+  const cleared55 = await getMap(ui, genA.row.id)
+  const clearedMask = JSON.parse(cleared55.fog_data)
+  record('Change grid size on a map with fog → the clear-or-keep dialog appears',
+    dialogShown ? 'PASS' : 'FAIL', dialogShown ? 'shown' : 'no dialog', shotDialog)
+  record('Choosing "Clear" clears the fog and records the new fog_cols',
+    cleared55.grid_size === 55 && cleared55.fog_cols === 37 && clearedMask.length === 37 * 28 &&
+    clearedMask.every(v => v === false) ? 'PASS' : 'FAIL',
+    `grid ${cleared55.grid_size}, fog_cols ${cleared55.fog_cols}, mask ${clearedMask.length} cells, ${clearedMask.filter(Boolean).length} revealed`)
+
+  // Paint at 55px, then change to 60px and keep.
+  await ui.clickButton('Reveal')
+  const paintPx = { x: room.cx * G + G / 2, y: room.cy * G + G / 2 }   // a pixel inside room 1
+  const paintAt = await toScreen(ui, paintPx)
+  await ui.page.mouse.click(paintAt.x, paintAt.y)
+  await sleep(1100)
+  const before60 = await getMap(ui, genA.row.id)
+  const painted55 = JSON.parse(before60.fog_data).filter(Boolean).length
+
+  await ui.clickButton('Pan')
+  await gridPlus.click()   // 55 → 60: 2000/60 → 34 cols, 1500/60 → 25 rows
+  await gridSave.click()
+  await ui.page.locator('[data-grid-change-dialog]').waitFor({ timeout: 4000 }).catch(() => {})
+  await ui.page.locator('[data-grid-change-dialog] button', { hasText: 'Keep fog' }).click()
+  await sleep(900)
+  const kept60 = await getMap(ui, genA.row.id)
+  const keptMask = JSON.parse(kept60.fog_data)
+  const keptCell = keptMask[Math.floor(paintPx.y / 60) * 34 + Math.floor(paintPx.x / 60)]
+  const shotKept = await ui.screenshot('m10-grid-change-kept')
+  record('Choosing "Keep" keeps the fog, rescaled, and fog_cols updates',
+    kept60.grid_size === 60 && kept60.fog_cols === 34 && keptMask.length === 34 * 25 &&
+    keptMask.filter(Boolean).length > 0 && keptCell === true ? 'PASS' : 'FAIL',
+    `grid ${kept60.grid_size}, fog_cols ${kept60.fog_cols} (was 37), mask ${keptMask.length} cells, ` +
+    `${keptMask.filter(Boolean).length} revealed (${painted55} before), the painted pixel is ${keptCell ? 'still revealed' : 'NOT revealed'}`,
+    shotKept)
+
+  // ══ L6: Re-roll and Tweak reuse the stored parameters ═════════════════════
+  await ui.page.locator('button', { hasText: '← Maps' }).first().click()
+  await sleep(900)
+  await ui.page.locator(`[data-tweak="${genB.row.id}"]`).click()
+  await ui.page.locator('[data-map-generator]').waitFor({ timeout: 5000 })
+  const tweakSeed = await ui.page.locator('[data-field="gen-seed"]').inputValue()
+  const tweakName = await ui.page.locator('[data-field="gen-name"]').inputValue()
+  await ui.page.locator('[data-map-generator] button', { hasText: 'Cancel' }).click()
+  await ui.page.locator(`[data-reroll="${genB.row.id}"]`).click()
+  await ui.page.locator('[data-map-generator]').waitFor({ timeout: 5000 })
+  const rerollSeed = await ui.page.locator('[data-field="gen-seed"]').inputValue()
+  const shotReroll = await ui.screenshot('m11-reroll')
+  await ui.page.locator('[data-map-generator] button', { hasText: 'Cancel' }).click()
+  record('Tweak reopens the generator with the stored seed; Re-roll with a new one',
+    tweakSeed === '42' && tweakName === 'Seed 42 B (tweaked)' && rerollSeed !== '42' && rerollSeed !== '' ? 'PASS' : 'FAIL',
+    `Tweak seed ${tweakSeed} name "${tweakName}"; Re-roll seed ${rerollSeed}`, shotReroll)
+
   // ══ Console ════════════════════════════════════════════════════════════════
   const errors = ui.consoleErrors.filter(e => !/net::ERR_|Failed to load resource/.test(e))
   record('No unexpected renderer console errors', errors.length === 0 ? 'PASS' : 'FAIL',

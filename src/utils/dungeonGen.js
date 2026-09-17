@@ -15,7 +15,8 @@
 // consumed in a fixed order, so the same parameters give the same cells, the
 // same image, byte for byte — which is what makes `maps.generated_params` worth
 // storing: a generated map can be re-rolled, tweaked, or rebuilt from its seed.
-// Never call Math.random() in this file.
+// Nothing on the generation or painting path may call Math.random(); the one
+// use in this file is randomSeed(), which only picks the NEXT seed for Re-roll.
 //
 // Pure: cells in, cells out. Painting takes any object with the CanvasRendering
 // Context2D methods it uses, so tests can hand it a recorder.
@@ -405,4 +406,34 @@ export function paintDungeon(ctx, dungeon, gridSize, themeKey) {
     if (passageVertical) ctx.fillRect(x + g * 0.1, y + g * 0.35, g * 0.8, g * 0.3)
     else ctx.fillRect(x + g * 0.35, y + g * 0.1, g * 0.3, g * 0.8)
   }
+}
+
+// ── Stored parameters (maps.generated_params) ───────────────────────────────
+
+// Bump only if a change to the algorithm means old seeds no longer rebuild the
+// same map; readers can then say so rather than silently producing another one.
+export const GENERATOR_VERSION = 1
+export const GENERATED_GRID_SIZE = 50
+
+/** What a generated map stores, so it can be re-rolled or tweaked later. */
+export function buildDungeonParams(params, gridSize = GENERATED_GRID_SIZE) {
+  return { kind: 'dungeon', version: GENERATOR_VERSION, ...normaliseParams(params), gridSize }
+}
+
+/**
+ * The generator parameters stored on a map, normalised — or null when the map
+ * was not generated (an upload, a blank grid, or unreadable JSON).
+ */
+export function dungeonParamsFromStored(value) {
+  let stored = value
+  if (typeof value === 'string') {
+    try { stored = JSON.parse(value) } catch { return null }
+  }
+  if (!stored || typeof stored !== 'object' || stored.kind !== 'dungeon') return null
+  return normaliseParams(stored)
+}
+
+/** A fresh seed for "Re-roll". Not deterministic, and not meant to be. */
+export function randomSeed() {
+  return Math.floor(Math.random() * 1_000_000)
 }

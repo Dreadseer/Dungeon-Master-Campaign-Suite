@@ -389,3 +389,35 @@ describe('paintDungeon', () => {
     expect(bars).toHaveLength(d.doors.length)
   })
 })
+
+describe('stored parameters', async () => {
+  const { buildDungeonParams, dungeonParamsFromStored, randomSeed, GENERATOR_VERSION } = await import('../dungeonGen.js')
+
+  it('builds what a generated map stores', () => {
+    expect(buildDungeonParams({ seed: 42, size: 'small', theme: 'crypt' })).toEqual({
+      kind: 'dungeon', version: GENERATOR_VERSION, ...SIZE_PRESETS.small,
+      density: 'medium', corridorWidth: 1, seed: 42, theme: 'crypt', gridSize: 50,
+    })
+  })
+
+  it('round-trips through JSON to the same dungeon — which is what makes Tweak and rebuild work', () => {
+    const stored = JSON.stringify(buildDungeonParams({ seed: 77, density: 'dense', corridorWidth: 2 }))
+    const back = dungeonParamsFromStored(stored)
+    expect(generateDungeon(back)).toEqual(generateDungeon({ seed: 77, density: 'dense', corridorWidth: 2 }))
+  })
+
+  it('is null for maps that were not generated', () => {
+    for (const v of [null, undefined, '', '{bad', '[]', '{"kind":"blank","cols":20,"rows":20}', JSON.stringify({ seed: 1 })]) {
+      expect(dungeonParamsFromStored(v)).toBeNull()
+    }
+  })
+
+  it('normalises stored values that were tampered with or came from an older build', () => {
+    expect(dungeonParamsFromStored({ kind: 'dungeon', cols: 9999, theme: 'neon', seed: 5 }))
+      .toMatchObject({ cols: LIMITS.maxCols, theme: DEFAULT_PARAMS.theme, seed: 5 })
+  })
+
+  it('randomSeed gives a usable seed', () => {
+    for (let i = 0; i < 20; i++) expect(normaliseSeed(randomSeed())).not.toBeNull()
+  })
+})

@@ -8,6 +8,8 @@ import EntityModal from '../components/world/EntityModal'
 import Skeleton from '../components/ui/Skeleton'
 import MapCanvas from '../components/map/MapCanvas'
 import MapToolbar from '../components/map/MapToolbar'
+import MapGeneratorModal from '../components/map/MapGeneratorModal'
+import { dungeonParamsFromStored, randomSeed } from '../utils/dungeonGen'
 import { notifyError, notifySuccess } from '../stores/toastStore'
 import { buildBlankParams, BLANK_LIMITS } from '../utils/mapGridUtils'
 
@@ -27,6 +29,7 @@ export default function MapEngine() {
   const [activeMap, setActiveMap] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingMap, setEditingMap] = useState(null)   // non-null: the modal edits this map
+  const [generator, setGenerator]   = useState(null)   // null closed; { initial } open
 
   // Form state
   const [form, setForm]           = useState({ name: '', location_id: null, grid_size: 50, feet_per_cell: 5, background: 'image', cols: 30, rows: 20 })
@@ -412,6 +415,10 @@ export default function MapEngine() {
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
           />
+          <button style={s.btnSecondary} onClick={() => setGenerator({ initial: null })} data-open-generator
+            title="Generate a dungeon map from a seed — offline, no AI">
+            ⚄ Generate Dungeon
+          </button>
           <button style={s.btnPrimary} onClick={openCreate}>+ New Map</button>
         </div>
       </div>
@@ -461,6 +468,27 @@ export default function MapEngine() {
                     <button style={s.btnPrimary} onClick={() => openMap(map)}>Open Map</button>
                     <button style={s.btnDuplicate} onClick={() => openEdit(map)} title="Edit name, location and scale">✎ Edit</button>
                     <button style={s.btnDuplicate} onClick={() => handleDuplicate(map)} title="Duplicate this map">⧉ Dupe</button>
+                    {dungeonParamsFromStored(map.generated_params) && (
+                      <>
+                        <button style={s.btnDuplicate} data-reroll={map.id}
+                          title="Same settings, new seed — saved as a new map"
+                          onClick={() => setGenerator({ initial: {
+                            params: { ...dungeonParamsFromStored(map.generated_params), seed: randomSeed() },
+                            location_id: map.location_id,
+                          } })}>
+                          🎲 Re-roll
+                        </button>
+                        <button style={s.btnDuplicate} data-tweak={map.id}
+                          title="Open the generator with this map's settings — saved as a new map"
+                          onClick={() => setGenerator({ initial: {
+                            params: dungeonParamsFromStored(map.generated_params),
+                            name: `${map.name} (tweaked)`,
+                            location_id: map.location_id,
+                          } })}>
+                          ⚙ Tweak
+                        </button>
+                      </>
+                    )}
                     <DeleteBtn onConfirm={() => handleDelete(map)} name={map.name} />
                   </div>
                 </div>
@@ -469,6 +497,15 @@ export default function MapEngine() {
           })}
         </div>
       )}
+
+      <MapGeneratorModal
+        isOpen={!!generator}
+        initial={generator?.initial ?? null}
+        onClose={() => setGenerator(null)}
+        campaignId={activeCampaign?.id}
+        locations={locations}
+        onSaved={() => load()}
+      />
 
       {/* Create Map modal */}
       <EntityModal title={editingMap ? `Edit ${editingMap.name}` : 'New Map'} isOpen={modalOpen} onClose={closeModal}>
@@ -625,7 +662,7 @@ const s = {
   cardMeta:    { display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.7rem' },
   metaItem:    { color: '#6b5a3a', fontSize: '0.75rem' },
   metaDate:    { color: '#4a3a1a', fontSize: '0.72rem', marginLeft: 'auto' },
-  cardActions: { display: 'flex', gap: '0.5rem', alignItems: 'center' },
+  cardActions: { display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' },
 
   // Modal
   label:       { display: 'block', color: '#a89060', fontSize: '0.82rem', marginBottom: '0.35rem' },
