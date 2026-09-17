@@ -33,7 +33,8 @@
     "verify:aimode": "node scripts/ui-verify-aimode.mjs",
     "verify:encounters": "node scripts/ui-verify-encounters.mjs",
     "verify:maps": "node scripts/ui-verify-maps.mjs",
-    "verify:migrations": "node --experimental-sqlite scripts/soak-migrations.mjs"
+    "verify:migrations": "node --experimental-sqlite scripts/soak-migrations.mjs",
+    "screenshots": "node scripts/screenshot-driver.mjs"
   },
   "build": {
     "appId": "com.dmcs.app",
