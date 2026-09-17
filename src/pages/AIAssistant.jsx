@@ -67,7 +67,14 @@ export default function AIAssistant() {
   const setStoreCampaign = useAiStore(s => s.setCampaign)
 
   const [aiMode,      setAiMode]      = useState(null)
-  const [hasEmbedded, setHasEmbedded] = useState(false)
+  // Two corpora can ground a rules answer: the DM's own indexed PDFs, and the
+  // SRD index (Phase 3). Only the first was ever checked here, and the SRD is a
+  // SHARED pdf_sources row with campaign_id NULL — which db:pdf:getAll filters
+  // out — so a DM who had indexed the SRD and owned no PDFs saw the Rules Q&A
+  // toggle permanently disabled. The feature worked; nothing could switch it on.
+  const [hasEmbedded, setHasEmbedded] = useState(false)   // this campaign's PDFs
+  const [hasSrdIndex, setHasSrdIndex] = useState(false)   // the shared SRD index
+  const hasCorpus = hasEmbedded || hasSrdIndex
 
   const chatEndRef  = useRef(null)
   const textareaRef = useRef(null)
@@ -123,6 +130,11 @@ export default function AIAssistant() {
     window.electronAPI.db.pdf.getAll(activeCampaign.id)
       .then(sources => setHasEmbedded(sources.some(s => s.status === 'embedded' || s.chunk_count > 0)))
       .catch(() => setHasEmbedded(false))
+
+    // ...and for the SRD index, which belongs to no campaign.
+    window.electronAPI.srd.getIndexStatus()
+      .then(status => setHasSrdIndex((status?.chunks ?? 0) > 0))
+      .catch(() => setHasSrdIndex(false))
   }, [activeCampaign?.id])
 
   // ── Check AI mode ──────────────────────────────────────────────────────────
@@ -166,7 +178,7 @@ export default function AIAssistant() {
     setHistory(prev => [...prev, userEntry])
 
     // ── RAG mode path (non-streaming) ────────────────────────────────────────
-    if (ragMode && hasEmbedded && activeCampaign?.id) {
+    if (ragMode && hasCorpus && activeCampaign?.id) {
       try {
         const result = await window.electronAPI.ai.ragQuery(userMessage, activeCampaign.id)
         setHistory(prev => [
@@ -266,7 +278,7 @@ export default function AIAssistant() {
       window.electronAPI.ai.streamStart(systemPrompt, messages, requestId)
       return prev
     })
-  }, [input, isStreaming, noAi, ragMode, hasEmbedded, activeCampaign,
+  }, [input, isStreaming, noAi, ragMode, hasCorpus, activeCampaign,
       characters, npcs, factions, locations, lore, session, plots, budget, loreSource])
 
   /**
@@ -363,7 +375,7 @@ export default function AIAssistant() {
             <span style={{ ...s.modeIndicator, color: modeDisplay.color }}>
               {modeDisplay.label}
             </span>
-            {ragMode && hasEmbedded && (
+            {ragMode && hasCorpus && (
               <span style={s.ragPill}>📚 Rules Q&amp;A</span>
             )}
 
@@ -435,7 +447,7 @@ export default function AIAssistant() {
               style={s.textarea}
               placeholder={noAi
                 ? 'AI not configured — add an API key in Settings, or install Ollama.'
-                : ragMode && hasEmbedded
+                : ragMode && hasCorpus
                   ? 'Ask a rules question… (searching your source books)'
                   : 'Ask your AI assistant…'}
               value={input}
@@ -492,7 +504,7 @@ export default function AIAssistant() {
           onInsertPrompt={handleInsertPrompt}
           ragMode={ragMode}
           onToggleRag={() => setRagMode(r => !r)}
-          hasEmbeddedSources={hasEmbedded}
+          hasEmbeddedSources={hasCorpus}
           activeCampaign={activeCampaign}
         />
       </div>

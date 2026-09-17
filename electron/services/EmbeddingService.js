@@ -1,5 +1,6 @@
 const { LocalIndex } = require('vectra')
 const path           = require('path')
+const { SRD_SOURCE_FILENAME } = require('./srdIndexText')
 
 class EmbeddingService {
   constructor(db, userDataPath) {
@@ -264,11 +265,40 @@ class EmbeddingService {
   // catch a trailing feature whose chunk didn't match the query, e.g. a
   // subclass's capstone). This keeps the whole entry contiguous without
   // dragging in the neighbouring one.
+  /**
+   * True for a source whose chunks are each a complete, self-contained entry —
+   * the SRD index, where one chunk is one monster or one spell.
+   *
+   * Stitching neighbours together only makes sense for a book, where a passage
+   * runs across chunks. In the SRD the neighbours are simply the next entries in
+   * alphabetical order, and stitching them in drowns the entry that was actually
+   * asked about. Cached per source id: this runs on every query.
+   */
+  _isWholeEntrySource(sourceId) {
+    if (!this._wholeEntrySources) this._wholeEntrySources = new Map()
+    if (this._wholeEntrySources.has(sourceId)) return this._wholeEntrySources.get(sourceId)
+    const row = this.db.get('SELECT filename FROM pdf_sources WHERE id = ?', [sourceId])
+    const whole = row?.filename === SRD_SOURCE_FILENAME
+    this._wholeEntrySources.set(sourceId, whole)
+    return whole
+  }
+
   _expandContiguous(hits) {
     if (!hits.length) return hits
 
     const anchor = hits.reduce((best, h) => (h.score > best.score ? h : best), hits[0])
     const srcId  = anchor.source_id
+
+    // THE BUG THIS GUARD FIXES. Asked "what is a goblin's armour class", the SRD
+    // index retrieved the goblin correctly — and then this function replaced the
+    // results with the chunks AROUND it in chunk order (Giant Vulture, Giant
+    // Wasp, Giant Weasel), because in the SRD index "contiguous" means
+    // "alphabetically adjacent", not "the rest of this passage". RAGService then
+    // sliced the first topK, cutting the goblin out entirely, and the model
+    // truthfully answered that no goblin was in the source material.
+    if (this._isWholeEntrySource(srcId)) {
+      return [...hits].sort((a, b) => b.score - a.score)
+    }
 
     // Map each same-source hit to its chunk_index (vector hits don't carry it).
     const sameSrc = hits.filter(h => h.source_id === srcId)
@@ -290,8 +320,12 @@ class EmbeddingService {
 
     const BACK_MARGIN = 2   // chunks before the first hit — catches the heading
     const FWD_MARGIN  = 4   // chunks after the last hit — catches a capstone feature
-    const lo = Math.min(...nearIdx) - BACK_MARGIN
-    const hi = Math.max(...nearIdx) + FWD_MARGIN
+    // Bounded BY THE ANCHOR, not by the span of every near hit: two hits twelve
+    // chunks apart used to produce an eighteen-chunk cluster in reading order,
+    // and the downstream topK slice then returned its beginning rather than the
+    // passage that matched.
+    const lo = Math.max(anchorIdx - BACK_MARGIN, Math.min(...nearIdx) - BACK_MARGIN)
+    const hi = Math.min(anchorIdx + FWD_MARGIN, Math.max(...nearIdx) + FWD_MARGIN)
 
     const rows = this.db.all(
       `SELECT id, source_id, chunk_index, page_number, text

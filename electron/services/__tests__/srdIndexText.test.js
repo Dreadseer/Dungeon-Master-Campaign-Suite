@@ -296,3 +296,46 @@ describe('section numbers', () => {
     expect(SRD_SOURCE_FILENAME).toBe('SRD 5.1')
   })
 })
+
+// ── Equipment armour class (Phase 9) ────────────────────────────────────────
+//
+// The API gives equipment armour as an object, not a number or an array. It used
+// to reach text() and serialise as "[object Object]" — in the live SRD index,
+// 13 chunks said "Armor Class: [object Object]".
+describe('equipment armour class', async () => {
+  const { buildIndexableText } = await import('../srdIndexText.js')
+  const armour = (armor_class) => buildIndexableText('equipment', {
+    name: 'Breastplate', equipment_category: { name: 'Armor' }, armor_category: 'Medium', armor_class,
+  })
+
+  it('describes a Dex-limited armour', () => {
+    expect(armour({ base: 14, dex_bonus: true, max_bonus: 2 }))
+      .toContain('Armor Class: 14 + Dex modifier (max 2)')
+  })
+
+  it('describes armour that allows the full Dex bonus', () => {
+    expect(armour({ base: 11, dex_bonus: true })).toContain('Armor Class: 11 + Dex modifier')
+  })
+
+  it('describes heavy armour, which allows none', () => {
+    expect(armour({ base: 16, dex_bonus: false })).toContain('Armor Class: 16 (no Dex bonus)')
+  })
+
+  it('never serialises an object into the indexed text', () => {
+    for (const ac of [
+      { base: 14, dex_bonus: true, max_bonus: 2 },
+      { base: 16, dex_bonus: false },
+      { base: 12 },
+      [{ value: 15, type: 'natural' }],
+      13,
+    ]) {
+      expect(armour(ac)).not.toContain('[object Object]')
+    }
+  })
+
+  it('leaves an unusable value out rather than guessing', () => {
+    for (const ac of [null, undefined, {}, { dex_bonus: true }]) {
+      expect(armour(ac)).not.toContain('Armor Class')
+    }
+  })
+})
