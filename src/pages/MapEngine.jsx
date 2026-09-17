@@ -9,6 +9,7 @@ import Skeleton from '../components/ui/Skeleton'
 import MapCanvas from '../components/map/MapCanvas'
 import MapToolbar from '../components/map/MapToolbar'
 import { notifyError, notifySuccess } from '../stores/toastStore'
+import { buildBlankParams, BLANK_LIMITS } from '../utils/mapGridUtils'
 
 const SIDEBAR_W    = 240
 const TOPBAR_H     = 56
@@ -28,7 +29,7 @@ export default function MapEngine() {
   const [editingMap, setEditingMap] = useState(null)   // non-null: the modal edits this map
 
   // Form state
-  const [form, setForm]           = useState({ name: '', location_id: null, grid_size: 50, feet_per_cell: 5 })
+  const [form, setForm]           = useState({ name: '', location_id: null, grid_size: 50, feet_per_cell: 5, background: 'image', cols: 30, rows: 20 })
   const [chosenImagePath, setChosenImagePath] = useState(null)
   const [imagePreview, setImagePreview]       = useState(null)
   const [saving, setSaving]       = useState(false)
@@ -50,6 +51,8 @@ export default function MapEngine() {
 
   // ── Fog of War state ───────────────────────────────────────────────
   const [fogBrushSize, setFogBrushSize] = useState(1)   // 1 | 3 | 5
+  const [annotationKind,  setAnnotationKind]  = useState('text')
+  const [annotationColor, setAnnotationColor] = useState('#f5c542')
 
   // The DM's map is in the main window, which never receives player:broadcast —
   // that goes to the pop-out only. Read the saved fight instead, so token HP is
@@ -181,7 +184,7 @@ export default function MapEngine() {
   // ── Modal helpers ──────────────────────────────────────────────────
   function openCreate() {
     setEditingMap(null)
-    setForm({ name: '', location_id: null, grid_size: 50, feet_per_cell: 5 })
+    setForm({ name: '', location_id: null, grid_size: 50, feet_per_cell: 5, background: 'image', cols: 30, rows: 20 })
     setChosenImagePath(null)
     setImagePreview(null)
     setError('')
@@ -231,21 +234,31 @@ export default function MapEngine() {
     const feet = feetFromForm()
     if (feet === null) { setError('Feet per square must be a whole number above 0.'); return }
     if (editingMap) return handleSaveEdit(feet)
+
+    // A blank map is sized in squares and has no image at all. Its size is
+    // stored in generated_params, and fog_cols is known up front.
+    const blank = form.background === 'blank' ? buildBlankParams(form.cols, form.rows) : null
+    if (form.background === 'blank' && !blank) {
+      setError(`Width and height must be whole numbers of squares, ${BLANK_LIMITS.min}–${BLANK_LIMITS.max}.`)
+      return
+    }
     setSaving(true)
 
     try {
       let storedImagePath = null
-      if (chosenImagePath) {
+      if (!blank && chosenImagePath) {
         storedImagePath = await window.electronAPI.file.copyMapImage(chosenImagePath)
       }
 
       await window.electronAPI.db.maps.create({
-        campaign_id:   activeCampaign.id,
-        name:          form.name.trim(),
-        location_id:   form.location_id || null,
-        grid_size:     Number(form.grid_size) || 50,
-        image_path:    storedImagePath,
-        feet_per_cell: feet,
+        campaign_id:      activeCampaign.id,
+        name:             form.name.trim(),
+        location_id:      form.location_id || null,
+        grid_size:        Number(form.grid_size) || 50,
+        image_path:       storedImagePath,
+        feet_per_cell:    feet,
+        generated_params: blank,
+        fog_cols:         blank ? blank.cols : null,
       })
       load()
       closeModal()
@@ -343,6 +356,10 @@ export default function MapEngine() {
             setCurrentGridSize(gs)
           }}
           imageSize={mapImageSize}
+          annotationKind={annotationKind}
+          onAnnotationKindChange={setAnnotationKind}
+          annotationColor={annotationColor}
+          onAnnotationColorChange={setAnnotationColor}
           getCurrentFog={() => fogControlsRef.current?.getFog?.()}
           cancelPendingFogSave={() => fogControlsRef.current?.cancelPendingFogSave?.()}
           map={activeMap}
@@ -373,6 +390,8 @@ export default function MapEngine() {
           registerFogControls={registerFogControls}
           registerThumbnailGen={registerThumbnailGen}
           onImageSize={setMapImageSize}
+          annotationKind={annotationKind}
+          annotationColor={annotationColor}
         />
       </div>
     )
@@ -419,7 +438,7 @@ export default function MapEngine() {
                     ? <img src={thumb} alt={map.name} style={s.thumb} />
                     : map.image_path
                       ? <ImageThumb imagePath={map.image_path} />
-                      : <div style={s.thumbPlaceholder}>🗺</div>
+                      : <div style={s.thumbPlaceholder}>{blankLabel(map) ?? '🗺'}</div>
                   }
                 </div>
 
@@ -484,19 +503,47 @@ export default function MapEngine() {
 
           {!editingMap && (
             <>
-              <label style={s.label}>Background Image</label>
-              <div style={s.imageRow}>
-                <button style={s.btnSecondary} type="button" onClick={handleChooseImage}>
-                  Choose Image…
-                </button>
-                {chosenImagePath && (
-                  <span style={s.filename}>
-                    {chosenImagePath.split(/[/\\]/).pop()}
-                  </span>
-                )}
+              <label style={s.label}>Background</label>
+              <div style={s.segmented} role="radiogroup" aria-label="Background">
+                {[['image', 'Image'], ['blank', 'Blank grid']].map(([value, label]) => (
+                  <button key={value} type="button" role="radio" aria-checked={form.background === value}
+                    data-background={value}
+                    style={form.background === value ? { ...s.segment, ...s.segmentActive } : s.segment}
+                    onClick={() => setField('background', value)}>
+                    {label}
+                  </button>
+                ))}
               </div>
-              {imagePreview && (
-                <img src={imagePreview} alt="Preview" style={s.imagePreview} />
+
+              {form.background === 'image' ? (
+                <>
+                  <div style={s.imageRow}>
+                    <button style={s.btnSecondary} type="button" onClick={handleChooseImage}>
+                      Choose Image…
+                    </button>
+                    {chosenImagePath && (
+                      <span style={s.filename}>
+                        {chosenImagePath.split(/[/\\]/).pop()}
+                      </span>
+                    )}
+                  </div>
+                  {imagePreview && (
+                    <img src={imagePreview} alt="Preview" style={s.imagePreview} />
+                  )}
+                </>
+              ) : (
+                <div style={s.row2}>
+                  <div style={{ flex: 1 }}>
+                    <label style={s.label}>Width (squares)</label>
+                    <input style={s.input} type="number" min={BLANK_LIMITS.min} max={BLANK_LIMITS.max}
+                      data-field="cols" value={form.cols} onChange={e => setField('cols', e.target.value)} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={s.label}>Height (squares)</label>
+                    <input style={s.input} type="number" min={BLANK_LIMITS.min} max={BLANK_LIMITS.max}
+                      data-field="rows" value={form.rows} onChange={e => setField('rows', e.target.value)} />
+                  </div>
+                </div>
               )}
             </>
           )}
@@ -514,6 +561,14 @@ export default function MapEngine() {
 }
 
 // ── Sub-components ──────────────────────────────────────────────────
+
+function blankLabel(map) {
+  if (map.image_path) return null
+  try {
+    const p = JSON.parse(map.generated_params ?? 'null')
+    return p?.kind === 'blank' ? <span style={{ fontSize: '0.9rem' }}>▦ {p.cols}×{p.rows}</span> : null
+  } catch { return null }
+}
 
 function ImageThumb({ imagePath }) {
   const src = window.electronAPI.file.getLocalUrl(imagePath)
@@ -576,6 +631,9 @@ const s = {
   label:       { display: 'block', color: '#a89060', fontSize: '0.82rem', marginBottom: '0.35rem' },
   input:       { display: 'block', width: '100%', background: '#0d0a05', border: '1px solid #3a2a10', borderRadius: 4, color: '#e8e0d0', padding: '0.45rem 0.7rem', fontSize: '0.9rem', marginBottom: '0.9rem', outline: 'none', boxSizing: 'border-box' },
   row2:        { display: 'flex', gap: '0.75rem' },
+  segmented:   { display: 'flex', gap: 0, marginBottom: '0.75rem' },
+  segment:     { flex: 1, background: 'transparent', color: '#a89060', border: '1px solid #3a2a10', padding: '0.4rem 0.6rem', cursor: 'pointer', fontSize: '0.85rem' },
+  segmentActive: { background: '#3a2a10', color: '#c9a84c', borderColor: '#c9a84c', fontWeight: 600 },
   imageRow:    { display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' },
   filename:    { color: '#a89060', fontSize: '0.82rem', fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 },
   imagePreview:{ display: 'block', width: '100%', maxHeight: 140, objectFit: 'contain', borderRadius: 4, marginBottom: '0.9rem', border: '1px solid #3a2a10' },

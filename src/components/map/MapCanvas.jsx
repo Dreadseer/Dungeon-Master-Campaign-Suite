@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Stage, Layer, Image as KonvaImage, Line, Rect, Text } from 'react-konva'
+import { Stage, Layer, Image as KonvaImage, Line, Rect, Text, Circle } from 'react-konva'
 import {
   initFog, isCellRevealed, setBrushRevealed, isCellInViewport,
 } from '../../utils/fogUtils'
@@ -10,6 +10,10 @@ import AddTokenModal  from './AddTokenModal'
 import TokenInspector from './TokenInspector'
 import { findCombatantForToken, findTokenForCombatant } from '../../utils/tokenCombatLink'
 import { measurePath, formatMeasurement } from '../../utils/measureUtils'
+import {
+  parseAnnotations, annotationsForMode, createTextAnnotation, createShapeAnnotation,
+  removeAnnotation, moveAnnotation, DEFAULT_ANNOTATION_COLOR,
+} from '../../utils/annotationUtils'
 
 const srOnly = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' }
 
@@ -42,6 +46,8 @@ export default function MapCanvas({
   combatRoster = [],      // live combatants from the initiative tracker, if a fight is running
   combatSelectedId = null,// whose turn it is, so the map can follow the tracker
   onImageSize,            // (size) => void — the loaded image size, for the toolbar's grid plan
+  annotationKind  = 'text',                    // 'text' | 'rect' | 'circle' — chosen in the toolbar
+  annotationColor = DEFAULT_ANNOTATION_COLOR,
 }) {
   const stageRef = useRef(null)
 
@@ -72,6 +78,55 @@ export default function MapCanvas({
   const [measurePoints, setMeasurePoints] = useState([])
   const [measureCursor, setMeasureCursor] = useState(null)
   const [isMeasuring,   setIsMeasuring]   = useState(false)
+
+  // Annotations (Phase 8): DM-only labels and shapes, saved to maps.annotations.
+  // Never drawn in player mode — annotationsForMode returns nothing for it.
+  const [annotations,  setAnnotations]  = useState([])
+  const [selectedNote, setSelectedNote] = useState(null)   // annotation id
+  const [noteDraft,    setNoteDraft]    = useState(null)   // { start, end } while dragging a shape
+  const [labelInput,   setLabelInput]   = useState(null)   // { x, y, text } while typing a label
+
+  useEffect(() => {
+    setAnnotations(parseAnnotations(map.annotations))
+    setSelectedNote(null)
+    setNoteDraft(null)
+    setLabelInput(null)
+  }, [map.id, map.annotations])
+
+  const saveAnnotations = useCallback((next) => {
+    setAnnotations(next)
+    window.electronAPI.db.maps.updateAnnotations(map.id, next)
+      .catch(err => notifyError(err, 'Save map note'))
+  }, [map.id])
+
+  useEffect(() => {
+    if (activeTool !== 'annotate') { setSelectedNote(null); setNoteDraft(null); setLabelInput(null) }
+  }, [activeTool])
+
+  useEffect(() => {
+    if (activeTool !== 'annotate' || !selectedNote) return
+    const onKey = (e) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      saveAnnotations(removeAnnotation(annotations, selectedNote))
+      setSelectedNote(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [activeTool, selectedNote, annotations, saveAnnotations])
+
+  // Enter commits and unmounts the input, and the unmount can fire its blur —
+  // which also commits. The ref makes the second call a no-op.
+  const labelDoneRef = useRef(false)
+  useEffect(() => { if (labelInput && labelInput.text === '') labelDoneRef.current = false }, [labelInput])
+
+  function commitLabel() {
+    if (!labelInput || labelDoneRef.current) return
+    labelDoneRef.current = true
+    const note = createTextAnnotation({ x: labelInput.x, y: labelInput.y }, labelInput.text, annotationColor)
+    setLabelInput(null)
+    if (note) saveAnnotations([...annotations, note])
+  }
 
   const clearMeasure = useCallback(() => {
     setMeasurePoints([])
@@ -440,7 +495,19 @@ export default function MapCanvas({
       }
       setIsMeasuring(true)
     }
-  }, [activeTool, applyFogBrush, mode, pointerToStage, measurePoints.length, isMeasuring])
+    // Annotate: a press on empty map starts a note. A press on an existing note
+    // is handled by the note itself (it selects, and can be dragged).
+    if (e.evt.button === 0 && activeTool === 'annotate' && mode === 'dm' && e.target === e.target.getStage()) {
+      const point = pointerToStage(e)
+      setSelectedNote(null)
+      if (annotationKind === 'text') {
+        e.evt.preventDefault()   // keep focus for the label input about to appear
+        setLabelInput({ x: point.x, y: point.y, text: '' })
+      } else {
+        setNoteDraft({ start: point, end: point })
+      }
+    }
+  }, [activeTool, applyFogBrush, mode, pointerToStage, measurePoints.length, isMeasuring, annotationKind])
 
   const handleMouseMove = useCallback((e) => {
     if (isPanning) {
@@ -456,11 +523,24 @@ export default function MapCanvas({
     if (isMeasuring) {
       setMeasureCursor(pointerToStage(e))
     }
-  }, [isPanning, lastPanPos, setStagePos, isFogPainting, applyFogBrush, isMeasuring, pointerToStage])
+    if (noteDraft) {
+      const end = pointerToStage(e)
+      setNoteDraft(d => (d ? { ...d, end } : d))
+    }
+  }, [isPanning, lastPanPos, setStagePos, isFogPainting, applyFogBrush, isMeasuring, pointerToStage, noteDraft])
 
   const handleMouseUp = useCallback(() => {
     setIsPanning(false)
     setIsFogPainting(false)
+    if (noteDraft) {
+      // createShapeAnnotation returns null for a drag too small to be deliberate.
+      const shape = createShapeAnnotation(annotationKind, noteDraft.start, noteDraft.end, annotationColor)
+      setNoteDraft(null)
+      if (shape) {
+        saveAnnotations([...annotations, shape])
+        setSelectedNote(shape.id)
+      }
+    }
     if (isMeasuring) {
       setIsMeasuring(false)
       const grid = gridSize || map.grid_size || 50
@@ -477,7 +557,8 @@ export default function MapCanvas({
         setMeasureCursor(null)
       }
     }
-  }, [isMeasuring, measurePoints, measureCursor, gridSize, map.grid_size, clearMeasure])
+  }, [isMeasuring, measurePoints, measureCursor, gridSize, map.grid_size, clearMeasure,
+      noteDraft, annotationKind, annotationColor, annotations, saveAnnotations])
 
   // ── Cursor style ──────────────────────────────────────────────────
   const cursor = isPanning     ? 'grabbing'
@@ -485,6 +566,7 @@ export default function MapCanvas({
     : activeTool === 'fog-reveal' || activeTool === 'fog-hide' ? 'cell'
     : activeTool === 'token'   ? 'crosshair'
     : activeTool === 'measure' ? 'crosshair'
+    : activeTool === 'annotate' ? (annotationKind === 'text' ? 'text' : 'crosshair')
     : 'default'
 
   const effectiveGrid = gridSize || map.grid_size || 50
@@ -495,6 +577,12 @@ export default function MapCanvas({
         effectiveGrid, map.feet_per_cell)
     : null
   const measureLabel = formatMeasurement(measurement)
+
+  const visibleNotes = annotationsForMode(annotations, mode)
+  const draftShape = noteDraft
+    ? createShapeAnnotation(annotationKind, noteDraft.start, noteDraft.end, annotationColor, 'draft')
+    : null
+  const editingNotes = mode === 'dm' && activeTool === 'annotate'
 
   return (
     <div style={{ position: 'relative', width: canvasSize.width, height: canvasSize.height }}>
@@ -552,6 +640,44 @@ export default function MapCanvas({
           {renderFog()}
         </Layer>
 
+        {/* Layer 3b — DM annotations. Above the fog so the DM can read them
+             through it; below tokens so a note never hides a creature. Drawn
+             only in DM mode, and stripped server-side for remote players. */}
+        {(visibleNotes.length > 0 || draftShape) && (
+          <Layer listening={editingNotes}>
+            {[...visibleNotes, ...(draftShape ? [draftShape] : [])].map(note => {
+              const selected = note.id === selectedNote
+              const common = {
+                x: note.x,
+                y: note.y,
+                draggable: editingNotes && note.id !== 'draft',
+                onMouseDown: (e) => { if (editingNotes) { e.cancelBubble = true; setSelectedNote(note.id) } },
+                onDragEnd: (e) => saveAnnotations(moveAnnotation(annotations, note.id, e.target.x(), e.target.y())),
+                opacity: note.id === 'draft' ? 0.6 : 1,
+              }
+              if (note.kind === 'text') {
+                return (
+                  <Text key={note.id} {...common} text={note.text} fontSize={18} fontStyle="bold"
+                    fill={note.color} stroke={selected ? '#ffffff' : '#0d0a05'} strokeWidth={selected ? 1.5 : 3}
+                    fillAfterStrokeEnabled />
+                )
+              }
+              if (note.kind === 'rect') {
+                return (
+                  <Rect key={note.id} {...common} width={note.width} height={note.height}
+                    stroke={note.color} strokeWidth={selected ? 4 : 2.5} dash={selected ? [8, 4] : undefined}
+                    fill={`${note.color}22`} />
+                )
+              }
+              return (
+                <Circle key={note.id} {...common} radius={note.radius}
+                  stroke={note.color} strokeWidth={selected ? 4 : 2.5} dash={selected ? [8, 4] : undefined}
+                  fill={`${note.color}22`} />
+              )
+            })}
+          </Layer>
+        )}
+
         {/* Layer 4 — Tokens
              Player mode: only render tokens on revealed (fog-lifted) cells.
              DM mode: all tokens visible regardless of fog. */}
@@ -607,6 +733,46 @@ export default function MapCanvas({
       {/* The measurement as text, for screen readers and the acceptance driver —
           the Konva label above is pixels on a canvas. */}
       <output data-measure-label aria-live="polite" style={srOnly}>{measureLabel}</output>
+      {/* How many notes this view is drawing: 0 in player mode, always. */}
+      <output data-annotation-count style={srOnly}>{visibleNotes.length}</output>
+
+      {labelInput && (
+        <input
+          autoFocus
+          data-annotation-input
+          placeholder="Note — Enter to place, Esc to cancel"
+          value={labelInput.text}
+          maxLength={120}
+          onChange={e => setLabelInput(l => ({ ...l, text: e.target.value }))}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { e.preventDefault(); commitLabel() }
+            if (e.key === 'Escape') { e.preventDefault(); labelDoneRef.current = true; setLabelInput(null) }
+          }}
+          onBlur={commitLabel}
+          style={{
+            position: 'absolute',
+            left: labelInput.x * stageScale + stagePos.x,
+            top: labelInput.y * stageScale + stagePos.y,
+            zIndex: 20, width: 240,
+            background: '#0d0a05', color: '#e8e0d0', border: `1px solid ${annotationColor}`,
+            borderRadius: 3, padding: '0.25rem 0.45rem', fontSize: '0.85rem', outline: 'none',
+          }}
+        />
+      )}
+
+      {editingNotes && selectedNote && (
+        <button
+          data-annotation-delete
+          onClick={() => { saveAnnotations(removeAnnotation(annotations, selectedNote)); setSelectedNote(null) }}
+          style={{
+            position: 'absolute', top: 10, right: 10, zIndex: 20,
+            background: '#1a0a0a', color: '#e05050', border: '1px solid #6a2020',
+            borderRadius: 4, padding: '0.3rem 0.7rem', cursor: 'pointer', fontSize: '0.8rem',
+          }}
+        >
+          ✕ Delete note
+        </button>
+      )}
 
       {/* Token inspector overlay — bottom-left of canvas */}
       {selectedToken && (

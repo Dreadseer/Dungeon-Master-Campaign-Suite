@@ -122,6 +122,74 @@ async function main() {
   record('feet_per_cell scales the answer (10 ft squares → 30 ft)',
     /^30 ft\b/.test(tenFt ?? '') ? 'PASS' : 'FAIL', `label "${tenFt}"`)
 
+  // ══ L2: a blank map, created through the modal ═════════════════════════════
+  await ui.page.locator('button', { hasText: '← Maps' }).first().click()
+  await sleep(800)
+  await ui.page.locator('button', { hasText: '+ New Map' }).first().click()
+  await ui.page.locator('input[placeholder="Riverdale Town Square"]').fill('Blank Hall')
+  await ui.page.locator('[data-background="blank"]').click()
+  await ui.page.locator('[data-field="cols"]').fill('24')
+  await ui.page.locator('[data-field="rows"]').fill('16')
+  const shotModal = await ui.screenshot('m03-blank-map-modal')
+  await ui.page.locator('button', { hasText: 'Create Map' }).click()
+  await sleep(1200)
+
+  const blankRow = await ui.page.evaluate(async (cid) =>
+    (await window.electronAPI.db.maps.getAll(cid)).find(m => m.name === 'Blank Hall'), campaignId)
+  const blankParams = blankRow ? JSON.parse(blankRow.generated_params ?? 'null') : null
+  record('"Blank grid" creates a map with no image, sized in squares',
+    blankRow && blankRow.image_path === null && blankParams?.kind === 'blank' &&
+    blankParams.cols === 24 && blankParams.rows === 16 && blankRow.fog_cols === 24 ? 'PASS' : 'FAIL',
+    blankRow ? `image_path=${blankRow.image_path} params=${blankRow.generated_params} fog_cols=${blankRow.fog_cols}` : 'no row',
+    shotModal)
+
+  await openMapByName(ui, 'Blank Hall')
+  // Reveal a 3x3 block centred on (4,4) and check the mask is sized to the blank
+  // map (24x16 = 384), not the 3000px fallback (60x60 = 3600).
+  await ui.clickButton('Reveal')
+  await ui.page.locator('button', { hasText: '3×3' }).click()
+  const revealAt = await toScreen(ui, centre(4, 4))
+  await ui.page.mouse.click(revealAt.x, revealAt.y)
+  await sleep(1100)
+  const blankFog = await getMap(ui, blankRow.id)
+  const blankMask = JSON.parse(blankFog.fog_data)
+  const painted = blankMask.filter(v => v === true).length
+  const shotBlank = await ui.screenshot('m04-blank-map-fog')
+  record('Fog paints on a blank map against its own grid, not the 3000px fallback',
+    blankMask.length === 24 * 16 && painted === 9 && blankMask[4 * 24 + 4] === true && blankFog.fog_cols === 24 ? 'PASS' : 'FAIL',
+    `mask ${blankMask.length} cells (want 384), ${painted} revealed, (4,4)=${blankMask[4 * 24 + 4]}, fog_cols=${blankFog.fog_cols}`,
+    shotBlank)
+
+  // ══ L3: DM annotations — saved, and never drawn in player view ════════════
+  await ui.page.locator('[data-tool="annotate"]').click()
+  await sleep(200)
+  const labelAt = await toScreen(ui, { x: 12 * G, y: 3 * G })
+  await ui.page.mouse.click(labelAt.x, labelAt.y)
+  await ui.page.locator('[data-annotation-input]').fill('Secret door behind the tapestry')
+  await ui.page.keyboard.press('Enter')
+  await sleep(600)
+
+  await ui.page.locator('[data-annotation-kind="rect"]').click()
+  await drag(ui, { x: 2 * G, y: 9 * G }, { x: 7 * G, y: 13 * G })
+  await sleep(600)
+
+  const notes = JSON.parse((await getMap(ui, blankRow.id)).annotations ?? '[]')
+  const dmCount = await ui.page.locator('[data-annotation-count]').first().textContent()
+  const shotNotes = await ui.screenshot('m05-annotations-dm')
+  record('A label and a box are saved to maps.annotations and drawn for the DM',
+    notes.length === 2 && notes.some(n => n.kind === 'text' && n.text === 'Secret door behind the tapestry') &&
+    notes.some(n => n.kind === 'rect' && n.width === 250 && n.height === 200) && dmCount === '2' ? 'PASS' : 'FAIL',
+    `${notes.length} saved (${notes.map(n => n.kind).join(', ')}), ${dmCount} drawn`, shotNotes)
+
+  await ui.page.locator('button', { hasText: '👁 Player' }).click()
+  await sleep(500)
+  const playerCount = await ui.page.locator('[data-annotation-count]').first().textContent()
+  const shotPlayer = await ui.screenshot('m06-annotations-player-view')
+  record('Player view draws no annotations', playerCount === '0' ? 'PASS' : 'FAIL',
+    `${playerCount} drawn in player view (2 stored)`, shotPlayer)
+  await ui.page.locator('button', { hasText: '🎲 DM' }).click()
+  await sleep(300)
+
   // ══ Console ════════════════════════════════════════════════════════════════
   const errors = ui.consoleErrors.filter(e => !/net::ERR_|Failed to load resource/.test(e))
   record('No unexpected renderer console errors', errors.length === 0 ? 'PASS' : 'FAIL',

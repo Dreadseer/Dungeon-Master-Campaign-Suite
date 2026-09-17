@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { authHeaders } from '../api'
+import { mapGridDimensions } from '../../src/utils/mapGridUtils'
+
+// The drawable width/height of either an <img> or a <canvas> stand-in.
+const widthOf  = (img) => img.naturalWidth  || img.width
+const heightOf = (img) => img.naturalHeight || img.height
 
 export default function MapView({ map }) {
   const canvasRef = useRef(null)
@@ -21,13 +26,14 @@ export default function MapView({ map }) {
   const draw = useCallback(() => {
     const canvas = canvasRef.current
     const img    = imgRef.current
-    if (!canvas || !img || !img.complete) return
+    // A blank map draws onto a <canvas> stand-in, which has no `complete`.
+    if (!canvas || !img || (img instanceof HTMLImageElement && !img.complete)) return
 
     const ctx      = canvas.getContext('2d')
     const fogData  = (() => { try { return JSON.parse(map?.fog_data ?? '[]') } catch { return [] } })()
     const tokens   = (() => { try { return JSON.parse(map?.tokens   ?? '[]') } catch { return [] } })()
     const gridSize = map?.grid_size ?? 50
-    const numCols  = Math.ceil(img.naturalWidth  / gridSize)
+    const numCols  = Math.ceil(widthOf(img)  / gridSize)
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
@@ -39,7 +45,7 @@ export default function MapView({ map }) {
     ctx.drawImage(img, 0, 0)
 
     if (fogData.length > 0) {
-      const numRows = Math.ceil(img.naturalHeight / gridSize)
+      const numRows = Math.ceil(heightOf(img) / gridSize)
       ctx.fillStyle = 'rgba(0,0,0,0.88)'
       for (let row = 0; row < numRows; row++) {
         for (let col = 0; col < numCols; col++) {
@@ -113,6 +119,36 @@ export default function MapView({ map }) {
     setScale(1)
 
     let cancelled = false
+
+    const fitTo = (img) => {
+      const canvas = canvasRef.current
+      if (!canvas) return
+      const cw = canvas.parentElement?.clientWidth  || window.innerWidth
+      const ch = canvas.parentElement?.clientHeight || window.innerHeight - 52
+      canvas.width  = cw
+      canvas.height = ch
+      const fit = Math.min(cw / widthOf(img), ch / heightOf(img), 1)
+      setScale(fit)
+      setOffset({ x: (cw - widthOf(img) * fit) / 2, y: (ch - heightOf(img) * fit) / 2 })
+    }
+
+    // A map with no image (a blank grid, Phase 8) has nothing to fetch —
+    // /api/map-image would 404. Draw a neutral field the size the DM's map
+    // is, so fog and tokens land on the same cells they do on the DM's screen.
+    if (!map.image_path) {
+      const dims  = mapGridDimensions(map, null)
+      const field = document.createElement('canvas')
+      field.width  = dims.width
+      field.height = dims.height
+      const ctx = field.getContext('2d')
+      ctx.fillStyle = '#2b2620'
+      ctx.fillRect(0, 0, dims.width, dims.height)
+      imgRef.current = field
+      fitTo(field)
+      setStatus('ready')
+      return () => { cancelled = true }
+    }
+
     fetch(`/api/map-image/${map.id}?t=${Date.now()}`, { headers: authHeaders() })
       .then(r => {
         if (!r.ok) return r.text().then(t => { throw new Error(`${r.status}: ${t.slice(0, 200)}`) })
@@ -125,16 +161,7 @@ export default function MapView({ map }) {
         img.onload = () => {
           if (cancelled) { URL.revokeObjectURL(url); return }
           imgRef.current = img
-          const canvas = canvasRef.current
-          if (canvas) {
-            const cw = canvas.parentElement?.clientWidth  || window.innerWidth
-            const ch = canvas.parentElement?.clientHeight || window.innerHeight - 52
-            canvas.width  = cw
-            canvas.height = ch
-            const fit = Math.min(cw / img.naturalWidth, ch / img.naturalHeight, 1)
-            setScale(fit)
-            setOffset({ x: (cw - img.naturalWidth * fit) / 2, y: (ch - img.naturalHeight * fit) / 2 })
-          }
+          fitTo(img)
           URL.revokeObjectURL(url)
           setStatus('ready')
         }
@@ -258,9 +285,9 @@ export default function MapView({ map }) {
     if (!canvas || !img) return
     const cw  = canvas.clientWidth
     const ch  = canvas.clientHeight
-    const fit = Math.min(cw / img.naturalWidth, ch / img.naturalHeight, 1)
+    const fit = Math.min(cw / widthOf(img), ch / heightOf(img), 1)
     setScale(fit)
-    setOffset({ x: (cw - img.naturalWidth * fit) / 2, y: (ch - img.naturalHeight * fit) / 2 })
+    setOffset({ x: (cw - widthOf(img) * fit) / 2, y: (ch - heightOf(img) * fit) / 2 })
   }, [])
 
   // ── Render ───────────────────────────────────────────────────────────────

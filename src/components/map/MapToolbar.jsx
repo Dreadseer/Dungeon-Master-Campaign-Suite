@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { planGridChange, fogForGridChange } from '../../utils/mapGridUtils'
 import { notifyError, notifySuccess, notifyInfo } from '../../stores/toastStore'
 import EntityModal from '../world/EntityModal'
+import { ANNOTATION_COLORS } from '../../utils/annotationUtils'
 
 export default function MapToolbar({
   activeTool,
@@ -27,6 +28,11 @@ export default function MapToolbar({
   imageSize,           // the loaded image, so the plan knows the real cell count
   getCurrentFog,       // () => the mask MapCanvas holds NOW, not the one saved at open
   cancelPendingFogSave,// () => drop a debounced fog save that would land after ours
+  // Annotations (Phase 8)
+  annotationKind,
+  onAnnotationKindChange,
+  annotationColor,
+  onAnnotationColorChange,
 }) {
   const [savingGrid,  setSavingGrid]  = useState(false)
   const [savingThumb, setSavingThumb] = useState(false)
@@ -191,6 +197,35 @@ export default function MapToolbar({
           >
             📏 Measure
           </button>
+          <button
+            style={activeTool === 'annotate' ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn}
+            onClick={() => onToolChange('annotate')}
+            title="DM notes — labels and shapes players never see"
+            data-tool="annotate"
+          >
+            🏷 Notes
+          </button>
+        </div>
+      )}
+
+      {isDm && activeTool === 'annotate' && (
+        <div style={s.section}>
+          {[['text', 'Label'], ['rect', 'Box'], ['circle', 'Circle']].map(([kind, label]) => (
+            <button key={kind} data-annotation-kind={kind}
+              style={annotationKind === kind ? { ...s.brushBtn, ...s.brushBtnActive } : s.brushBtn}
+              onClick={() => onAnnotationKindChange?.(kind)}>
+              {label}
+            </button>
+          ))}
+          {ANNOTATION_COLORS.map(c => (
+            <button key={c} title={c} aria-label={`Note colour ${c}`}
+              onClick={() => onAnnotationColorChange?.(c)}
+              style={{
+                width: 16, height: 16, borderRadius: 3, background: c, cursor: 'pointer', padding: 0,
+                border: annotationColor === c ? '2px solid #ffffff' : '1px solid #3a2a10',
+              }} />
+          ))}
+          <span style={s.hint}>DM only · Del removes</span>
         </div>
       )}
 
