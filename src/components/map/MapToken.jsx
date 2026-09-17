@@ -1,7 +1,7 @@
 import { Group, Circle, Text, Line } from 'react-konva'
 import { tokenToPixel, snapToGrid } from '../../utils/tokenUtils'
 
-export default function MapToken({ token, gridSize, isSelected, onSelect, onDragEnd, mode, stageScale = 1 }) {
+export default function MapToken({ token, gridSize, isSelected, onSelect, onDragEnd, mode, stageScale = 1, locked = false }) {
   const { x, y } = tokenToPixel(token.col, token.row, gridSize)
   const radius    = gridSize * 0.38
   const label     = token.label ?? token.name ?? ''
@@ -17,7 +17,9 @@ export default function MapToken({ token, gridSize, isSelected, onSelect, onDrag
     <Group
       x={x}
       y={y}
-      draggable={mode === 'dm'}
+      // locked: the measure tool starts on tokens — "how far is he from me?" —
+      // and a press that picked the token up would move it instead.
+      draggable={mode === 'dm' && !locked}
       onClick={(e) => {
         e.cancelBubble = true   // don't bubble to Stage onClick
         onSelect(token)

@@ -25,9 +25,10 @@ export default function MapEngine() {
   const [loading, setLoading]     = useState(true)
   const [activeMap, setActiveMap] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
+  const [editingMap, setEditingMap] = useState(null)   // non-null: the modal edits this map
 
   // Form state
-  const [form, setForm]           = useState({ name: '', location_id: null, grid_size: 50 })
+  const [form, setForm]           = useState({ name: '', location_id: null, grid_size: 50, feet_per_cell: 5 })
   const [chosenImagePath, setChosenImagePath] = useState(null)
   const [imagePreview, setImagePreview]       = useState(null)
   const [saving, setSaving]       = useState(false)
@@ -179,7 +180,22 @@ export default function MapEngine() {
 
   // ── Modal helpers ──────────────────────────────────────────────────
   function openCreate() {
-    setForm({ name: '', location_id: null, grid_size: 50 })
+    setEditingMap(null)
+    setForm({ name: '', location_id: null, grid_size: 50, feet_per_cell: 5 })
+    setChosenImagePath(null)
+    setImagePreview(null)
+    setError('')
+    setModalOpen(true)
+  }
+
+  function openEdit(map) {
+    setEditingMap(map)
+    setForm({
+      name: map.name ?? '',
+      location_id: map.location_id ?? null,
+      grid_size: map.grid_size || 50,
+      feet_per_cell: map.feet_per_cell || 5,
+    })
     setChosenImagePath(null)
     setImagePreview(null)
     setError('')
@@ -188,6 +204,7 @@ export default function MapEngine() {
 
   function closeModal() {
     setModalOpen(false)
+    setEditingMap(null)
     setChosenImagePath(null)
     setImagePreview(null)
     setError('')
@@ -203,27 +220,62 @@ export default function MapEngine() {
     setImagePreview(window.electronAPI.file.getLocalUrl(sourcePath))
   }
 
+  function feetFromForm() {
+    const feet = Number(form.feet_per_cell)
+    return Number.isInteger(feet) && feet > 0 ? feet : null
+  }
+
   async function handleCreate(e) {
     e.preventDefault()
     if (!form.name.trim()) { setError('Map name is required.'); return }
+    const feet = feetFromForm()
+    if (feet === null) { setError('Feet per square must be a whole number above 0.'); return }
+    if (editingMap) return handleSaveEdit(feet)
     setSaving(true)
 
-    let storedImagePath = null
-    if (chosenImagePath) {
-      storedImagePath = await window.electronAPI.file.copyMapImage(chosenImagePath)
+    try {
+      let storedImagePath = null
+      if (chosenImagePath) {
+        storedImagePath = await window.electronAPI.file.copyMapImage(chosenImagePath)
+      }
+
+      await window.electronAPI.db.maps.create({
+        campaign_id:   activeCampaign.id,
+        name:          form.name.trim(),
+        location_id:   form.location_id || null,
+        grid_size:     Number(form.grid_size) || 50,
+        image_path:    storedImagePath,
+        feet_per_cell: feet,
+      })
+      load()
+      closeModal()
+    } catch (err) {
+      notifyError(err, 'Create map')
+    } finally {
+      setSaving(false)
     }
+  }
 
-    await window.electronAPI.db.maps.create({
-      campaign_id: activeCampaign.id,
-      name:        form.name.trim(),
-      location_id: form.location_id || null,
-      grid_size:   Number(form.grid_size) || 50,
-      image_path:  storedImagePath,
-    })
-
-    setSaving(false)
-    load()
-    closeModal()
+  async function handleSaveEdit(feet) {
+    setSaving(true)
+    try {
+      // grid_size is sent as it is: the edit modal does not change it (the
+      // toolbar does, with the fog dialog), and db:maps:update would otherwise
+      // reset it to 50.
+      await window.electronAPI.db.maps.update(editingMap.id, {
+        name:          form.name.trim(),
+        location_id:   form.location_id || null,
+        grid_size:     editingMap.grid_size || 50,
+        feet_per_cell: feet,
+      })
+      notifySuccess(`Saved "${form.name.trim()}".`)
+      load()
+      closeModal()
+    } catch (err) {
+      notifyError(err, 'Save map')
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function handleDelete(map) {
@@ -238,21 +290,29 @@ export default function MapEngine() {
   }
 
   async function handleDuplicate(map) {
-    const result = await window.electronAPI.db.maps.create({
-      campaign_id: activeCampaign.id,
-      name:        `${map.name} (Copy)`,
-      location_id: map.location_id || null,
-      grid_size:   map.grid_size   || 50,
-      image_path:  map.image_path  || null,
-    })
-    // Copy fog and token data to the new map
-    const newId = result.lastInsertRowid
-    if (newId) {
+    try {
       const src = await window.electronAPI.db.maps.getById(map.id)
-      if (src?.fog_data)  await window.electronAPI.db.maps.updateFog(newId,    JSON.parse(src.fog_data))
-      if (src?.tokens)    await window.electronAPI.db.maps.updateTokens(newId, JSON.parse(src.tokens))
+      const result = await window.electronAPI.db.maps.create({
+        campaign_id:      activeCampaign.id,
+        name:             `${map.name} (Copy)`,
+        location_id:      map.location_id || null,
+        grid_size:        map.grid_size   || 50,
+        image_path:       map.image_path  || null,
+        feet_per_cell:    src?.feet_per_cell,
+        generated_params: src?.generated_params ?? null,
+        annotations:      src?.annotations ?? '[]',
+      })
+      // Copy fog (with the column count it was painted on) and tokens.
+      const newId = result.lastInsertRowid
+      if (newId) {
+        if (src?.fog_data) await window.electronAPI.db.maps.updateFog(newId, JSON.parse(src.fog_data), src.fog_cols ?? undefined)
+        if (src?.tokens)   await window.electronAPI.db.maps.updateTokens(newId, JSON.parse(src.tokens))
+      }
+      notifySuccess(`Duplicated "${map.name}".`)
+      load()
+    } catch (err) {
+      notifyError(err, 'Duplicate map')
     }
-    load()
   }
 
   // ── View B — Canvas ────────────────────────────────────────────────
@@ -372,7 +432,7 @@ export default function MapEngine() {
                   </div>
 
                   <div style={s.cardMeta}>
-                    <span style={s.metaItem}>Grid: {map.grid_size}px</span>
+                    <span style={s.metaItem}>Grid: {map.grid_size}px · {map.feet_per_cell || 5} ft</span>
                     {tokenCount > 0 && <span style={s.metaItem}>{tokenCount} token{tokenCount !== 1 ? 's' : ''}</span>}
                     {fogPct !== null && <span style={s.metaItem}>{fogPct}% revealed</span>}
                     <span style={s.metaDate}>{new Date(map.created_at).toLocaleDateString()}</span>
@@ -380,6 +440,7 @@ export default function MapEngine() {
 
                   <div style={s.cardActions}>
                     <button style={s.btnPrimary} onClick={() => openMap(map)}>Open Map</button>
+                    <button style={s.btnDuplicate} onClick={() => openEdit(map)} title="Edit name, location and scale">✎ Edit</button>
                     <button style={s.btnDuplicate} onClick={() => handleDuplicate(map)} title="Duplicate this map">⧉ Dupe</button>
                     <DeleteBtn onConfirm={() => handleDelete(map)} name={map.name} />
                   </div>
@@ -391,7 +452,7 @@ export default function MapEngine() {
       )}
 
       {/* Create Map modal */}
-      <EntityModal title="New Map" isOpen={modalOpen} onClose={closeModal}>
+      <EntityModal title={editingMap ? `Edit ${editingMap.name}` : 'New Map'} isOpen={modalOpen} onClose={closeModal}>
         <form onSubmit={handleCreate}>
           <label style={s.label}>Map Name *</label>
           <input style={s.input} value={form.name} onChange={e => setField('name', e.target.value)}
@@ -405,28 +466,44 @@ export default function MapEngine() {
             {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
 
-          <label style={s.label}>Grid Cell Size (pixels)</label>
-          <input style={s.input} type="number" min={20} max={100} value={form.grid_size}
-            onChange={e => setField('grid_size', e.target.value)} />
-
-          <label style={s.label}>Background Image</label>
-          <div style={s.imageRow}>
-            <button style={s.btnSecondary} type="button" onClick={handleChooseImage}>
-              Choose Image…
-            </button>
-            {chosenImagePath && (
-              <span style={s.filename}>
-                {chosenImagePath.split(/[/\\]/).pop()}
-              </span>
+          <div style={s.row2}>
+            {!editingMap && (
+              <div style={{ flex: 1 }}>
+                <label style={s.label}>Grid Cell Size (pixels)</label>
+                <input style={s.input} type="number" min={20} max={100} value={form.grid_size}
+                  onChange={e => setField('grid_size', e.target.value)} />
+              </div>
             )}
+            <div style={{ flex: 1 }}>
+              <label style={s.label}>Feet per square</label>
+              <input style={s.input} type="number" min={1} step={1} value={form.feet_per_cell}
+                data-field="feet_per_cell"
+                onChange={e => setField('feet_per_cell', e.target.value)} />
+            </div>
           </div>
-          {imagePreview && (
-            <img src={imagePreview} alt="Preview" style={s.imagePreview} />
+
+          {!editingMap && (
+            <>
+              <label style={s.label}>Background Image</label>
+              <div style={s.imageRow}>
+                <button style={s.btnSecondary} type="button" onClick={handleChooseImage}>
+                  Choose Image…
+                </button>
+                {chosenImagePath && (
+                  <span style={s.filename}>
+                    {chosenImagePath.split(/[/\\]/).pop()}
+                  </span>
+                )}
+              </div>
+              {imagePreview && (
+                <img src={imagePreview} alt="Preview" style={s.imagePreview} />
+              )}
+            </>
           )}
 
           <div style={s.footer}>
             <button style={s.btnPrimary} type="submit" disabled={saving}>
-              {saving ? 'Creating…' : 'Create Map'}
+              {editingMap ? (saving ? 'Saving…' : 'Save') : (saving ? 'Creating…' : 'Create Map')}
             </button>
             <button style={s.btnSecondary} type="button" onClick={closeModal}>Cancel</button>
           </div>
@@ -498,6 +575,7 @@ const s = {
   // Modal
   label:       { display: 'block', color: '#a89060', fontSize: '0.82rem', marginBottom: '0.35rem' },
   input:       { display: 'block', width: '100%', background: '#0d0a05', border: '1px solid #3a2a10', borderRadius: 4, color: '#e8e0d0', padding: '0.45rem 0.7rem', fontSize: '0.9rem', marginBottom: '0.9rem', outline: 'none', boxSizing: 'border-box' },
+  row2:        { display: 'flex', gap: '0.75rem' },
   imageRow:    { display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' },
   filename:    { color: '#a89060', fontSize: '0.82rem', fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 },
   imagePreview:{ display: 'block', width: '100%', maxHeight: 140, objectFit: 'contain', borderRadius: 4, marginBottom: '0.9rem', border: '1px solid #3a2a10' },

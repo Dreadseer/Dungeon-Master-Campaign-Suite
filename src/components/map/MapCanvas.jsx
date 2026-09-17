@@ -9,6 +9,9 @@ import MapToken    from './MapToken'
 import AddTokenModal  from './AddTokenModal'
 import TokenInspector from './TokenInspector'
 import { findCombatantForToken, findTokenForCombatant } from '../../utils/tokenCombatLink'
+import { measurePath, formatMeasurement } from '../../utils/measureUtils'
+
+const srOnly = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' }
 
 // Layout constants — keep in sync with Sidebar, TopBar, and MapToolbar heights
 const SIDEBAR_W      = 240
@@ -62,6 +65,30 @@ export default function MapCanvas({
   const [showAddTokenModal, setShowAddTokenModal] = useState(false)
   const [addTokenCell,      setAddTokenCell]      = useState({ col: 0, row: 0 })
   const saveTokensRef = useRef(null)
+
+  // Measurement (Phase 8). `measurePoints` are the fixed vertices of the path;
+  // `measureCursor` is the free end while a leg is being dragged. Nothing here
+  // is saved or sent to players — a ruler is a question the DM asks, not map state.
+  const [measurePoints, setMeasurePoints] = useState([])
+  const [measureCursor, setMeasureCursor] = useState(null)
+  const [isMeasuring,   setIsMeasuring]   = useState(false)
+
+  const clearMeasure = useCallback(() => {
+    setMeasurePoints([])
+    setMeasureCursor(null)
+    setIsMeasuring(false)
+  }, [])
+
+  // A ruler left on screen after switching tools is a stale answer.
+  useEffect(() => { if (activeTool !== 'measure') clearMeasure() }, [activeTool, clearMeasure])
+  useEffect(() => { clearMeasure() }, [map.id, clearMeasure])
+
+  useEffect(() => {
+    if (activeTool !== 'measure') return
+    const onKey = (e) => { if (e.key === 'Escape') clearMeasure() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [activeTool, clearMeasure])
 
   // Follow the tracker's turn order: when the active combatant changes, select
   // the token standing for it. Silently does nothing when the creature has no
@@ -401,7 +428,19 @@ export default function MapCanvas({
     if (e.evt.button === 0 && activeTool === 'token' && e.target === e.target.getStage()) {
       setSelectedToken(null)
     }
-  }, [activeTool, applyFogBrush])
+    // Measure: drag from a square. Shift-press on a finished measurement adds a
+    // leg from where it ended instead of starting over.
+    if (e.evt.button === 0 && activeTool === 'measure' && mode === 'dm') {
+      const point = pointerToStage(e)
+      if (e.evt.shiftKey && measurePoints.length >= 2 && !isMeasuring) {
+        setMeasureCursor(point)
+      } else {
+        setMeasurePoints([point])
+        setMeasureCursor(point)
+      }
+      setIsMeasuring(true)
+    }
+  }, [activeTool, applyFogBrush, mode, pointerToStage, measurePoints.length, isMeasuring])
 
   const handleMouseMove = useCallback((e) => {
     if (isPanning) {
@@ -414,22 +453,48 @@ export default function MapCanvas({
     if (isFogPainting) {
       applyFogBrush(e)
     }
-  }, [isPanning, lastPanPos, setStagePos, isFogPainting, applyFogBrush])
+    if (isMeasuring) {
+      setMeasureCursor(pointerToStage(e))
+    }
+  }, [isPanning, lastPanPos, setStagePos, isFogPainting, applyFogBrush, isMeasuring, pointerToStage])
 
   const handleMouseUp = useCallback(() => {
     setIsPanning(false)
     setIsFogPainting(false)
-  }, [])
+    if (isMeasuring) {
+      setIsMeasuring(false)
+      const grid = gridSize || map.grid_size || 50
+      const last = measurePoints[measurePoints.length - 1]
+      const sameSquare = last && measureCursor &&
+        Math.floor(last.x / grid) === Math.floor(measureCursor.x / grid) &&
+        Math.floor(last.y / grid) === Math.floor(measureCursor.y / grid)
+      if (sameSquare) {
+        // A click without a drag: nothing to measure. Keep an existing path.
+        if (measurePoints.length < 2) clearMeasure()
+        setMeasureCursor(null)
+      } else if (measureCursor) {
+        setMeasurePoints(prev => [...prev, measureCursor])
+        setMeasureCursor(null)
+      }
+    }
+  }, [isMeasuring, measurePoints, measureCursor, gridSize, map.grid_size, clearMeasure])
 
   // ── Cursor style ──────────────────────────────────────────────────
   const cursor = isPanning     ? 'grabbing'
     : activeTool === 'pan'     ? 'grab'
     : activeTool === 'fog-reveal' || activeTool === 'fog-hide' ? 'cell'
     : activeTool === 'token'   ? 'crosshair'
+    : activeTool === 'measure' ? 'crosshair'
     : 'default'
 
   const effectiveGrid = gridSize || map.grid_size || 50
   const dims = mapGridDimensions(map, imageSize, effectiveGrid)
+
+  const measurement = mode === 'dm' && activeTool === 'measure'
+    ? measurePath(isMeasuring && measureCursor ? [...measurePoints, measureCursor] : measurePoints,
+        effectiveGrid, map.feet_per_cell)
+    : null
+  const measureLabel = formatMeasurement(measurement)
 
   return (
     <div style={{ position: 'relative', width: canvasSize.width, height: canvasSize.height }}>
@@ -506,11 +571,42 @@ export default function MapCanvas({
                 onDragEnd={handleTokenDragEnd}
                 mode={mode}
                 stageScale={stageScale}
+                locked={activeTool === 'measure'}
               />
             ))
           }
         </Layer>
+
+        {/* Layer 5 — Measurement (DM only, never saved or broadcast).
+             Sizes are divided by the zoom so the ruler reads the same at any scale. */}
+        {measurement && (
+          <Layer listening={false}>
+            <Line points={measurement.points} stroke="#f5c542" strokeWidth={3 / stageScale}
+              dash={[10 / stageScale, 6 / stageScale]} lineCap="round" lineJoin="round" />
+            {measurement.points.reduce((acc, v, i) => (i % 2 ? acc : [...acc, [v, measurement.points[i + 1]]]), [])
+              .map(([x, y], i) => (
+                <Rect key={i} x={x - 4 / stageScale} y={y - 4 / stageScale}
+                  width={8 / stageScale} height={8 / stageScale} fill="#f5c542" />
+              ))}
+            <Text
+              x={measurement.points[measurement.points.length - 2] + 12 / stageScale}
+              y={measurement.points[measurement.points.length - 1] - 26 / stageScale}
+              text={measureLabel}
+              fontSize={15 / stageScale}
+              fontStyle="bold"
+              fill="#fff6d8"
+              stroke="#0d0a05"
+              strokeWidth={4 / stageScale}
+              fillAfterStrokeEnabled
+              padding={2 / stageScale}
+            />
+          </Layer>
+        )}
       </Stage>
+
+      {/* The measurement as text, for screen readers and the acceptance driver —
+          the Konva label above is pixels on a canvas. */}
+      <output data-measure-label aria-live="polite" style={srOnly}>{measureLabel}</output>
 
       {/* Token inspector overlay — bottom-left of canvas */}
       {selectedToken && (

@@ -30,7 +30,8 @@
     "test:lore": "node --experimental-sqlite scripts/verify-lore-index.mjs",
     "verify:ai": "node scripts/ui-verify-ai.mjs",
     "verify:aimode": "node scripts/ui-verify-aimode.mjs",
-    "verify:encounters": "node scripts/ui-verify-encounters.mjs"
+    "verify:encounters": "node scripts/ui-verify-encounters.mjs",
+    "verify:maps": "node scripts/ui-verify-maps.mjs"
   },
   "build": {
     "appId": "com.dmcs.app",

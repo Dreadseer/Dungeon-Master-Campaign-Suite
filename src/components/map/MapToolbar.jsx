@@ -183,6 +183,22 @@ export default function MapToolbar({
           >
             🪙 Token
           </button>
+          <button
+            style={activeTool === 'measure' ? { ...s.toolBtn, ...s.toolBtnActive } : s.toolBtn}
+            onClick={() => onToolChange('measure')}
+            title="Measure — drag between squares; Shift-drag adds a leg; Esc clears"
+            data-tool="measure"
+          >
+            📏 Measure
+          </button>
+        </div>
+      )}
+
+      {isDm && activeTool === 'measure' && (
+        <div style={s.section}>
+          <span style={s.hint}>
+            Drag · Shift adds a leg · Esc clears · 1 sq = {map?.feet_per_cell || 5} ft
+          </span>
         </div>
       )}
 

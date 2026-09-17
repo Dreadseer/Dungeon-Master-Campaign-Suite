@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import MapCanvas         from '../map/MapCanvas'
+import { normaliseFeetPerCell, formatFeet } from '../../utils/measureUtils'
 import PlayerMapControls from './PlayerMapControls'
 
 const PLAYER_TOPBAR_H = 48
@@ -61,8 +62,9 @@ export default function PlayerMapView({ campaignId, broadcastMsg }) {
       const pixels     = Math.sqrt(dx * dx + dy * dy)
       const gridPx     = activeMap.grid_size ?? 50
       const squares    = pixels / gridPx
-      const feet       = Math.round(squares * 5)
-      setDistLabel({ x: e.clientX - rect.left, y: e.clientY - rect.top, text: `${feet} ft` })
+      // The map's own scale, not a hard-coded 5 ft (Phase 8).
+      const feet       = squares * normaliseFeetPerCell(activeMap.feet_per_cell)
+      setDistLabel({ x: e.clientX - rect.left, y: e.clientY - rect.top, text: formatFeet(Math.round(feet)) })
     }
 
     window.addEventListener('keyup', onKeyUp)
