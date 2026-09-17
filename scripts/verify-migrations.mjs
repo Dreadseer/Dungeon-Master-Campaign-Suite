@@ -18,11 +18,15 @@
 //                          table, then 009 applied on top
 //
 // Then the acceptance cases from the phase brief are exercised as real deletes.
-import { readFileSync } from 'node:fs'
-import { DatabaseSync } from 'node:sqlite'
+//
+// The migration runner itself (SQL extraction, guarded/atomic handling, applying
+// and skipping) lives in scripts/lib/migration-sql.mjs and is shared with
+// scripts/soak-migrations.mjs, so the two harnesses cannot apply migrations
+// differently from each other or from the app.
+import { LATEST, MIGRATION_IDS, sqlFor, newDb, applyMigration as applyOne, migrateTo as bringTo }
+  from './lib/migration-sql.mjs'
 
-const SRC = readFileSync('electron/database/DatabaseService.js', 'utf8')
-const LAST = 14
+const LAST = LATEST
 
 let failures = 0
 let checks = 0
@@ -34,69 +38,11 @@ const check = (label, ok, detail = '') => {
   return ok
 }
 
-const sqlFor = (n) => {
-  const tag = 'const MIGRATION_' + String(n).padStart(3, '0') + ' = `'
-  const start = SRC.indexOf(tag)
-  if (start === -1) throw new Error(tag + ' not found')
-  const from = start + tag.length
-  const end = SRC.indexOf('`', from)
-  return SRC.slice(from, end)
-}
-
-// Mirrors DatabaseService.runGuardedMigration: FKs off, transaction,
-// foreign_key_check before commit, FKs back on. Migrations flagged `atomic`
-// (014) run in a plain transaction, as runSimpleMigration does for them.
-const ATOMIC = new Set([14])
-const applyMigration = (db, id) => {
-  const guarded = id === 9 || id === 10
-  if (ATOMIC.has(id)) {
-    db.exec('BEGIN')
-    try {
-      db.exec(sqlFor(id))
-      db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(id, 'm' + id)
-      db.exec('COMMIT')
-    } catch (err) {
-      db.exec('ROLLBACK')
-      throw err
-    }
-    return
-  }
-  if (guarded) db.exec('PRAGMA foreign_keys = OFF')
-  try {
-    if (guarded) db.exec('BEGIN')
-    db.exec(sqlFor(id))
-    if (guarded) {
-      const violations = db.prepare('PRAGMA foreign_key_check').all()
-      if (violations.length) {
-        db.exec('ROLLBACK')
-        throw new Error(`migration ${id} left ${violations.length} FK violations`)
-      }
-      db.exec('COMMIT')
-    }
-    db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(id, 'm' + id)
-  } finally {
-    if (guarded) db.exec('PRAGMA foreign_keys = ON')
-  }
-}
-
-const newDb = () => {
-  const db = new DatabaseSync(':memory:')
-  db.exec('PRAGMA foreign_keys = ON')
-  db.exec(`CREATE TABLE IF NOT EXISTS _migrations (
-    id INTEGER PRIMARY KEY, name TEXT NOT NULL, run_at DATETIME DEFAULT (datetime('now')))`)
-  return db
-}
-
-// Skips what has already run, exactly as DatabaseService does, so a database
-// can be migrated PART way, populated, and then brought the rest of the way —
-// which is the only way to test a migration against rows from the old schema.
-const migrateTo = (db, last) => {
-  const ran = new Set(db.prepare('SELECT id FROM _migrations').all().map(r => r.id))
-  for (let id = 1; id <= last; id++) {
-    if (!ran.has(id)) applyMigration(db, id)
-  }
-  return db
-}
+// This harness checks the SQL of each migration in isolation, so migration 011's
+// data-import hook is left off; scripts/verify-sessions.mjs covers that import,
+// and scripts/soak-migrations.mjs runs it over a realistic database.
+const applyMigration = (db, id) => applyOne(db, id, { hooks: false })
+const migrateTo = (db, last) => bringTo(db, last, { hooks: false })
 
 const fkList = (db, table) => db.prepare(`PRAGMA foreign_key_list(${table})`).all()
 const fkFor = (db, table, column) => fkList(db, table).find(f => f.from === column)
@@ -560,11 +506,89 @@ console.log('\n=== F. Migration 014: maps columns ===\n')
   fresh.close(); aged.close(); partial.close()
 }
 
+// ── Migration 015: ai_usage_log ON DELETE CASCADE (Phase 9) ─────────────────
+//
+// The bug: a campaign that had ever used AI could not be deleted at all.
+// ai_usage_log.campaign_id was declared with no ON DELETE, so NO ACTION, and
+// db:campaigns:delete is a bare DELETE — it aborted with "FOREIGN KEY
+// constraint failed" for any campaign with one logged AI call.
+console.log(`\n=== G. Migration 015: ai_usage_log CASCADE ===\n`)
+{
+  // ── The bug itself, on the pre-015 schema ────────────────────────────────
+  const broken = migrateTo(newDb(), 14)
+  broken.exec(`INSERT INTO campaigns (id, name) VALUES (1, 'Saltmarsh');
+               INSERT INTO ai_usage_log (campaign_id, mode, type) VALUES (1, 'online', 'chat');`)
+  let refused = null
+  try {
+    broken.exec('DELETE FROM campaigns WHERE id = 1')
+  } catch (err) {
+    refused = err.message
+  }
+  check('before 015: deleting a campaign with AI usage was REFUSED', refused !== null,
+    refused ? refused.split(/\r?\n/)[0] : 'the delete succeeded, so this migration fixes nothing')
+  check('before 015: the FK was declared with no ON DELETE behaviour',
+    fkFor(broken, 'ai_usage_log', 'campaign_id')?.on_delete === 'NO ACTION',
+    fkFor(broken, 'ai_usage_log', 'campaign_id')?.on_delete)
+
+  // ── Fresh ────────────────────────────────────────────────────────────────
+  const fresh = migrateTo(newDb(), 15)
+  check('fresh: ai_usage_log.campaign_id CASCADEs',
+    fkFor(fresh, 'ai_usage_log', 'campaign_id')?.on_delete === 'CASCADE',
+    fkFor(fresh, 'ai_usage_log', 'campaign_id')?.on_delete)
+  check('fresh: the columns are unchanged',
+    columns(fresh, 'ai_usage_log').join(',') ===
+      'id,campaign_id,mode,type,prompt_len,response_len,duration_ms,created_at',
+    columns(fresh, 'ai_usage_log').join(','))
+
+  // ── Populated: usage rows written under the old schema ───────────────────
+  const aged = migrateTo(newDb(), 14)
+  populate(aged)
+  aged.exec(`
+    INSERT INTO ai_usage_log (id, campaign_id, mode, type, prompt_len, response_len, duration_ms, created_at)
+      VALUES (1, 1, 'online', 'chat', 1200, 800, 2400, '2026-01-01 10:00:00');
+    INSERT INTO ai_usage_log (id, campaign_id, mode, type, prompt_len, response_len, duration_ms, created_at)
+      VALUES (2, 1, 'offline-ollama', 'rag', 3000, 1500, 9000, '2026-02-02 11:00:00');
+    INSERT INTO ai_usage_log (id, campaign_id, mode, type, prompt_len, response_len, duration_ms, created_at)
+      VALUES (3, NULL, 'online', 'chat', 10, 10, 10, '2026-03-03 12:00:00');`)
+  const usageBefore = aged.prepare('SELECT * FROM ai_usage_log ORDER BY id').all()
+  const rowsBefore = snapshot(aged)
+
+  migrateTo(aged, 15)
+
+  const usageAfter = aged.prepare('SELECT * FROM ai_usage_log ORDER BY id').all()
+  check('populated: every usage row was copied, ids and values included',
+    JSON.stringify(usageAfter) === JSON.stringify(usageBefore),
+    `${usageBefore.length} rows before, ${usageAfter.length} after`)
+  check('populated: a usage row with no campaign (NULL) survived',
+    usageAfter.some(r => r.campaign_id === null))
+  const changedTables = Object.keys(rowsBefore)
+    .filter(t => JSON.stringify(snapshot(aged)[t]) !== JSON.stringify(rowsBefore[t]))
+  check('populated: no other table was touched', changedTables.length === 0, changedTables.join(', '))
+
+  aged.exec('PRAGMA foreign_keys = ON')
+  let stillRefused = null
+  try {
+    aged.exec('DELETE FROM campaigns WHERE id = 1')
+  } catch (err) {
+    stillRefused = err.message
+  }
+  check('populated: the campaign can now be deleted', stillRefused === null,
+    stillRefused ? stillRefused.split(/\r?\n/)[0] : '')
+  check('populated: its usage rows went with it, and the campaign-less row stayed',
+    aged.prepare('SELECT COUNT(*) c FROM ai_usage_log').get().c === 1 &&
+    aged.prepare('SELECT campaign_id FROM ai_usage_log').get().campaign_id === null)
+  check('populated: foreign_key_check is clean afterwards',
+    aged.prepare('PRAGMA foreign_key_check').all().length === 0)
+
+  broken.close(); fresh.close(); aged.close()
+}
+
 console.log('\n=== D. Re-running the migration set is a no-op ===\n')
 {
   const db = migrateTo(newDb(), LAST)
   const ran = new Set(db.prepare('SELECT id FROM _migrations').all().map(r => r.id))
-  check(`all ${LAST} ids recorded, so a second launch skips every one`, ran.size === LAST)
+  check(`all ${MIGRATION_IDS.length} ids recorded, so a second launch skips every one`,
+    ran.size === MIGRATION_IDS.length)
   db.close()
 }
 

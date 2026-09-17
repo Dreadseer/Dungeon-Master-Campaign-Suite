@@ -55,6 +55,9 @@ class DatabaseService {
       // landed between two of them on the auto-commit path, the next launch
       // would fail on "duplicate column name" forever.
       { id: 14, name: 'maps_measure_generate', sql: MIGRATION_014, atomic: true },
+      // Phase 9. Table-recreate, so foreign keys off for the duration — same
+      // procedure and same flag as 009 and 010.
+      { id: 15, name: 'ai_usage_log_cascade', sql: MIGRATION_015, foreignKeysOff: true },
     ]
 
     for (const m of migrations) {
@@ -803,6 +806,43 @@ const MIGRATION_014 = `
   ALTER TABLE maps ADD COLUMN fog_cols INTEGER;
   ALTER TABLE maps ADD COLUMN generated_params TEXT;
   ALTER TABLE maps ADD COLUMN annotations TEXT DEFAULT '[]';
+`
+
+// ── Migration 015 — ai_usage_log.campaign_id ON DELETE CASCADE (Phase 9) ─────
+//
+// THE BUG THIS FIXES: a campaign that had ever used AI could not be deleted.
+//
+// `ai_usage_log.campaign_id REFERENCES campaigns(id)` was written in migration
+// 005 with no ON DELETE clause, which means NO ACTION. Migration 009 rebuilt the
+// world tables with correct delete behaviour but did not touch this one, so
+// `DELETE FROM campaigns` — which is all db:campaigns:delete does — aborted with
+// "FOREIGN KEY constraint failed" for any campaign with a single logged AI call.
+// Every other reference to campaigns CASCADEs; this was the last one that did
+// not, and the only reason it went unnoticed is that nothing deletes a campaign
+// in the test suite and AI usage is easy not to have.
+//
+// SQLite cannot add ON DELETE to an existing constraint, so this is the
+// create/copy/drop/rename procedure from 002/008/009. The copy carries every
+// column and every row, ids included: usage history is small but it is the only
+// record of what the AI has cost, and there is no reason to lose it.
+const MIGRATION_015 = `
+  CREATE TABLE ai_usage_log_m015 (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id  INTEGER REFERENCES campaigns(id) ON DELETE CASCADE,
+    mode         TEXT,
+    type         TEXT,
+    prompt_len   INTEGER,
+    response_len INTEGER,
+    duration_ms  INTEGER,
+    created_at   DATETIME DEFAULT (datetime('now'))
+  );
+  INSERT INTO ai_usage_log_m015
+    (id, campaign_id, mode, type, prompt_len, response_len, duration_ms, created_at)
+  SELECT
+     id, campaign_id, mode, type, prompt_len, response_len, duration_ms, created_at
+  FROM ai_usage_log;
+  DROP TABLE ai_usage_log;
+  ALTER TABLE ai_usage_log_m015 RENAME TO ai_usage_log;
 `
 
 // ── SRD Subclass Seed Data — 27 subclasses (2–3 per class × 12 classes) ────────
