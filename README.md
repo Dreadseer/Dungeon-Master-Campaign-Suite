@@ -28,11 +28,15 @@ app against a scratch database — not mock-ups.
 
 ![The AI Assistant answering a rules question in Rules Q&A mode, with its SRD citations expanded](docs/screenshots/rag-citation.png)
 
-### The campaign list, and the sessions behind it
+### The campaign dashboard, and the sessions behind it
 
-![The Campaign Manager listing campaigns with their world counts](docs/screenshots/campaign-manager.png)
+![The Campaign Manager dashboard: counts of NPCs, locations, encounters and characters, the current session's notes, and quick actions](docs/screenshots/campaign-manager.png)
 
-![The Sessions page, showing each session played and the notes it left behind](docs/screenshots/sessions.png)
+![The Sessions page, showing each session played, its notes, and the buttons that generate a recap for the DM or for the players](docs/screenshots/sessions.png)
+
+### Licence and attribution, in the app — Settings → About
+
+![The About panel in Settings: MIT licence, the SRD 5.1 CC-BY-4.0 attribution, credit to dnd5eapi.co, and the full path to the single SQLite file holding the campaign](docs/screenshots/settings-about.png)
 
 ---
 
@@ -429,7 +433,7 @@ migrated and some not, and any idempotence check then skips the rest forever.
 | Combat Calculator | Standalone XP/CR calculator. |
 | AI Assistant | Streaming chat with **budgeted** campaign context and retrieval over your own lore; "Save as…" turns any reply into saved records; history persists per campaign. "Rules Q&A" routes through the RAG pipeline. |
 | AI Sources | Upload PDFs, monitor indexing, trigger embedding. |
-| Settings | Anthropic key (safeStorage), Ollama status, RAG settings, **Rules Q&A index**, ngrok token, AI usage stats (including failed calls). |
+| Settings | Anthropic key (safeStorage), Ollama status, RAG settings, **Rules Q&A index**, ngrok token, AI usage stats (including failed calls), and **About** — licence, the SRD attribution, and where your campaign file lives. |
 
 ---
 

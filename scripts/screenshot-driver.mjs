@@ -196,16 +196,26 @@ async function main() {
   }, campaignId)
 
   // ── 1. Campaign Manager ──────────────────────────────────────────────────
-  await ui.goto('/campaigns')
+  // The Campaign Manager is the INDEX route. There is no /campaigns path and no
+  // catch-all, so '#/campaigns' renders an empty shell — which is exactly the
+  // blank screenshot this driver committed the first time.
+  await ui.goto('/')
   await sleep(1500)
   await ui.dismissFirstRun()
   // seedCampaign puts only the id in storage, which leaves the top bar reading
   // "No Campaign Loaded". Load it the way a DM does.
   const load = ui.page.locator('button', { hasText: 'Load Campaign' })
   if (await load.count()) { await load.first().click(); await sleep(1200) }
-  await ui.goto('/campaigns')
-  await sleep(1500)
-  await shoot(ui, 'campaign-manager', 'the campaign list, with the world counts for each')
+  // Leave the route and come back so the dashboard REMOUNTS: its counts are
+  // loaded in an effect keyed on the campaign id, so navigating to the route it
+  // is already on leaves the pre-seed zeros on screen. (Ordinary navigation
+  // remounts it; only a driver that never leaves the page sees this.)
+  await ui.goto('/compendium')
+  await sleep(1000)
+  await ui.goto('/')
+  await sleep(2000)
+  await shoot(ui, 'campaign-manager',
+    'the campaign dashboard: world counts, session notes and quick actions')
 
   // ── 2. Map Engine: a generated dungeon with fog and tokens ───────────────
   await ui.goto('/maps')
@@ -420,6 +430,21 @@ async function main() {
         skipped.push(`rag-citation: no cited answer appeared within 240 s (Ollama ${ai.model})`)
       }
     }
+  }
+
+  // ── 6. Settings → About: the licence and attribution, on screen ──────────
+  await ui.goto('/settings')
+  await sleep(1800)
+  await ui.dismissFirstRun()
+  const about = ui.page.locator('[data-about-panel]')
+  if (await about.count()) {
+    await about.scrollIntoViewIfNeeded().catch(() => {})
+    await sleep(600)
+    const dbPath = await ui.page.locator('[data-about-db-path]').textContent().catch(() => '')
+    await shoot(ui, 'settings-about',
+      `the About panel: MIT, the SRD 5.1 attribution, and the campaign file at ${(dbPath ?? '').trim().slice(-28)}`)
+  } else {
+    skipped.push('settings-about: the About panel was not found on the Settings page')
   }
 
   // ── Report ───────────────────────────────────────────────────────────────

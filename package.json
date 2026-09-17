@@ -34,7 +34,8 @@
     "verify:encounters": "node scripts/ui-verify-encounters.mjs",
     "verify:maps": "node scripts/ui-verify-maps.mjs",
     "verify:migrations": "node --experimental-sqlite scripts/soak-migrations.mjs",
-    "screenshots": "node scripts/screenshot-driver.mjs"
+    "screenshots": "node scripts/screenshot-driver.mjs",
+    "verify:packaged": "node scripts/verify-packaged.mjs"
   },
   "build": {
     "appId": "com.dmcs.app",

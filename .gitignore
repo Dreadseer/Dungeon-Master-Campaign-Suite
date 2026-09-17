@@ -44,3 +44,4 @@ scripts/.maps-userdata/
 # Scratch Electron profiles from scripts/screenshot-driver.mjs and one-off probes.
 scripts/.shots-userdata/
 scripts/.probe2-userdata/
+scripts/.packaged-userdata/
