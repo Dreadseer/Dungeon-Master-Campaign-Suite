@@ -236,3 +236,21 @@ app.on('before-quit', async () => {
 registerHandler('app:version', () => app.getVersion())
 
 registerHandler('shell:openExternal', (_, url) => shell.openExternal(url))
+
+// Where the campaign lives. The About panel shows this because "your whole
+// campaign is one SQLite file you own" is only a real promise if the DM can
+// find the file.
+registerHandler('app:dataPath', () => ({
+  userData: app.getPath('userData'),
+  database: path.join(app.getPath('userData'), 'dmcs.db'),
+}))
+
+// Open a folder in the OS file manager. Refuses anything outside userData: this
+// is called from the renderer, and "open any path on disk" is a wider door than
+// the About panel needs.
+registerHandler('shell:openDataFolder', async () => {
+  const dir = app.getPath('userData')
+  const err = await shell.openPath(dir)
+  if (err) throw new Error(err)
+  return dir
+})

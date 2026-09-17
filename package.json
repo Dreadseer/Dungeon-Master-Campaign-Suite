@@ -1,8 +1,9 @@
 {
   "name": "dmcs",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Dungeon Master's Campaign Suite — AI-assisted desktop application",
+  "license": "MIT",
   "author": "Christopher Clarke",
   "main": "electron/main.js",
   "engines": {
@@ -31,7 +32,8 @@
     "verify:ai": "node scripts/ui-verify-ai.mjs",
     "verify:aimode": "node scripts/ui-verify-aimode.mjs",
     "verify:encounters": "node scripts/ui-verify-encounters.mjs",
-    "verify:maps": "node scripts/ui-verify-maps.mjs"
+    "verify:maps": "node scripts/ui-verify-maps.mjs",
+    "verify:migrations": "node --experimental-sqlite scripts/soak-migrations.mjs"
   },
   "build": {
     "appId": "com.dmcs.app",

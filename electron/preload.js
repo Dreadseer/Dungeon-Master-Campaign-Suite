@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getVersion: () => ipcRenderer.invoke('app:version'),
+  // { userData, database } — shown in Settings → About.
+  getDataPath: () => ipcRenderer.invoke('app:dataPath'),
 
   db: {
     campaigns: {
@@ -327,5 +329,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── Shell ──────────────────────────────────────────────────────────────────
   shell: {
     openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+    openDataFolder: () => ipcRenderer.invoke('shell:openDataFolder'),
   },
 })

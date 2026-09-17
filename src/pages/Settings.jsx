@@ -43,6 +43,42 @@ export default function Settings() {
   const [ragSaving,       setRagSaving]       = useState(false)
   const [ragMsg,          setRagMsg]          = useState('')
 
+  // ── About (Phase 9) ────────────────────────────────────────────────────────
+  const [about, setAbout] = useState({ version: null, paths: null })
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [version, paths] = await Promise.all([
+          window.electronAPI.getVersion(),
+          window.electronAPI.getDataPath(),
+        ])
+        if (!cancelled) setAbout({ version, paths })
+      } catch (err) {
+        // Not fatal: the panel still shows the licence and attribution.
+        notifyError(err, 'Read app version')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  async function openLink(url) {
+    try {
+      await window.electronAPI.shell.openExternal(url)
+    } catch (err) {
+      notifyError(err, 'Open link')
+    }
+  }
+
+  async function openDataFolder() {
+    try {
+      await window.electronAPI.shell.openDataFolder()
+    } catch (err) {
+      notifyError(err, 'Open data folder')
+    }
+  }
+
   // ── SRD rules index state (Phase 3) ────────────────────────────────────────
   const [srdIndex,      setSrdIndex]      = useState(null)   // { status, chunks, embedded, srdCached }
   const [indexBusy,     setIndexBusy]     = useState(false)
@@ -759,6 +795,66 @@ export default function Settings() {
           <button style={s.btnSecondary} onClick={loadUsageStats}>↺ Refresh</button>
         </div>
       </section>
+
+      {/* ── About ─── */}
+      <section style={s.section} data-about-panel>
+        <h2 style={s.sectionTitle}>About</h2>
+
+        <p style={s.aboutLine}>
+          <strong style={s.aboutStrong}>Dungeon Master&rsquo;s Campaign Suite</strong>
+          {about.version ? ` ${about.version}` : ''}
+          {' — '}© 2026 Christopher Clarke.
+        </p>
+        <p style={s.aboutLine}>
+          Released under the <strong style={s.aboutStrong}>MIT licence</strong>. The source, and the
+          full licence text, ship with the app.
+        </p>
+
+        <h3 style={s.aboutHeading}>Game content and attribution</h3>
+        <p style={s.aboutLine}>
+          This work includes material from the System Reference Document 5.1 (&ldquo;SRD 5.1&rdquo;) by
+          Wizards of the Coast LLC, available at{' '}
+          <button style={s.aboutLink} onClick={() => openLink('https://dnd.wizards.com/resources/systems-reference-document')}>
+            dnd.wizards.com/resources/systems-reference-document
+          </button>
+          . The SRD 5.1 is licensed under the Creative Commons Attribution 4.0 International License,
+          available at{' '}
+          <button style={s.aboutLink} onClick={() => openLink('https://creativecommons.org/licenses/by/4.0/legalcode')}>
+            creativecommons.org/licenses/by/4.0/legalcode
+          </button>
+          . Earlier SRD releases were made available under the Open Gaming License 1.0a, which applies
+          to that material where it is used.
+        </p>
+        <p style={s.aboutLine}>
+          Monster, spell, equipment and class data is fetched from the{' '}
+          <button style={s.aboutLink} onClick={() => openLink('https://www.dnd5eapi.co')}>
+            D&amp;D 5e API (dnd5eapi.co)
+          </button>
+          , an independent open-source project, on first run. Thanks to its maintainers.
+        </p>
+        <p style={s.aboutNote}>
+          DMCS is an unofficial, fan-made tool. It is not affiliated with, endorsed or sponsored by
+          Wizards of the Coast. Dungeons &amp; Dragons is a trademark of Wizards of the Coast LLC.
+          Any rulebook PDFs you index remain your own — they are read on this machine and never
+          uploaded anywhere.
+        </p>
+
+        <h3 style={s.aboutHeading}>Your data</h3>
+        <p style={s.aboutLine}>
+          No account, no subscription, no telemetry. The whole campaign is one SQLite file you can
+          copy, back up or open with any SQLite client:
+        </p>
+        <p style={s.aboutPath} data-about-db-path>{about.paths?.database ?? 'locating…'}</p>
+        <div style={s.row}>
+          <button style={s.btnSecondary} onClick={openDataFolder} disabled={!about.paths}>
+            Open data folder
+          </button>
+        </div>
+        <p style={s.aboutNote}>
+          AI features are optional. With no key and no Ollama, everything except rules Q&amp;A and the
+          AI panels works exactly as it does now — see <em>Current mode</em> at the top of this page.
+        </p>
+      </section>
     </div>
   )
 }
@@ -841,6 +937,20 @@ const s = {
   srdCounts:    { color: '#6b5a3a', fontSize: '0.8rem' },
   srdWarn:      { color: '#c9a84c', fontSize: '0.82rem', margin: '6px 0' },
   srdProgress:  { color: '#a89060', fontSize: '0.82rem', margin: '6px 0', fontStyle: 'italic' },
+  aboutLine:    { color: '#a89060', fontSize: '0.84rem', lineHeight: 1.6, margin: '0 0 0.7rem' },
+  aboutStrong:  { color: '#e8e0d0' },
+  aboutHeading: { color: '#c9a84c', fontSize: '0.92rem', margin: '1.2rem 0 0.6rem' },
+  aboutNote:    { color: '#6b5a3a', fontSize: '0.78rem', lineHeight: 1.6, margin: '0 0 0.7rem' },
+  aboutPath:    {
+    color: '#e8e0d0', fontSize: '0.78rem', fontFamily: 'Consolas, monospace',
+    background: '#0d0a05', border: '1px solid #2a1c08', borderRadius: 4,
+    padding: '0.45rem 0.6rem', margin: '0 0 0.7rem', wordBreak: 'break-all',
+  },
+  aboutLink:    {
+    background: 'none', border: 'none', padding: 0, margin: 0,
+    color: '#c9a84c', textDecoration: 'underline', cursor: 'pointer',
+    fontSize: 'inherit', fontFamily: 'inherit',
+  },
   page:         { padding: '2rem', maxWidth: 640, overflowY: 'auto' },
   pageTitle:    { color: '#c9a84c', fontSize: '1.8rem', marginBottom: '2rem' },
   section:      { background: '#1a1208', border: '1px solid #3a2a10', borderRadius: 8, padding: '1.5rem', marginBottom: '1.5rem' },
