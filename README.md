@@ -30,15 +30,16 @@ DMCS solves the "twelve browser tabs and a stack of PDFs" problem. Everything a 
 10. [Modules](#modules)
 11. [AI Layer](#ai-layer)
 12. [AI that writes to the world](#ai-that-writes-to-the-world)
-13. [Building encounters](#building-encounters)
 13. [Sessions, plot threads and reveals](#sessions-plot-threads-and-reveals)
-14. [Combat that survives](#combat-that-survives)
-15. [Player Views](#player-views)
-16. [Testing](#testing)
-17. [Building the Windows Installer](#building-the-windows-installer)
-18. [Troubleshooting](#troubleshooting)
-19. [Open Questions](#open-questions)
-20. [License](#license)
+14. [Building encounters](#building-encounters)
+15. [Combat that survives](#combat-that-survives)
+16. [Maps: measurement and generation](#maps-measurement-and-generation)
+17. [Player Views](#player-views)
+18. [Testing](#testing)
+19. [Building the Windows Installer](#building-the-windows-installer)
+20. [Troubleshooting](#troubleshooting)
+21. [Open Questions](#open-questions)
+22. [License](#license)
 
 ---
 
@@ -333,8 +334,10 @@ The database is created and migrated automatically on first launch — you never
 | 010 | `shared_pdf_sources` | Drops `NOT NULL` from `pdf_sources.campaign_id`, so an SRD source can be shared (Phase 3) |
 | 011 | `sessions_plots_reveals` | `sessions`, `plot_threads`, `reveals` and their link tables; copies each campaign description into a first session (Phase 4) |
 | 012 | `combat_state` | One saved fight per encounter, so combat survives navigation and relaunch (Phase 5) |
+| 013 | `encounter_tables` | Random encounter tables, optionally tied to a location (Phase 7) |
+| 014 | `maps_measure_generate` | `maps.feet_per_cell` (default 5), `fog_cols`, `generated_params`, `annotations` (Phase 8) |
 
-> Registered at `electron/database/DatabaseService.js:24-46`. Exact column definitions live in the `MIGRATION_0NN` constants in that file.
+> Registered at `electron/database/DatabaseService.js:24-58`. Exact column definitions live in the `MIGRATION_0NN` constants in that file.
 
 `combat_state` holds the whole fight as two JSON blobs — `combatants` and
 `log_entries` — under a `UNIQUE(encounter_id)`, so saving is an upsert and an
@@ -344,7 +347,7 @@ versioned envelope (`{ schema_version, combatants }`), which is what lets
 row is deleted only when the DM ends combat; `ON DELETE CASCADE` from both
 `campaigns` and `encounters` takes care of the rest.
 
-Several columns store JSON strings (SQLite has no JSON type) — always `JSON.parse()` on read and `JSON.stringify()` on write. Examples: `characters.stats`, `characters.inventory`, `characters.spell_slots`, `maps.fog_data`, `maps.tokens`, `encounters.monsters`, `subclasses.features`.
+Several columns store JSON strings (SQLite has no JSON type) — always `JSON.parse()` on read and `JSON.stringify()` on write. Examples: `characters.stats`, `characters.inventory`, `characters.spell_slots`, `maps.fog_data`, `maps.tokens`, `maps.generated_params`, `maps.annotations`, `encounters.monsters`, `subclasses.features`.
 
 ### Where is the database?
 
@@ -398,7 +401,7 @@ migrated and some not, and any idempotence check then skips the rest forever.
 | Sessions | One row per session played, with long-form notes that autosave on blur. Shows the plot threads opened or closed in each session and what the party learned in it, and generates **AI recaps** in DM and player variants. |
 | Plot Threads | A board of what is unresolved, grouped open / active / resolved / abandoned. Closing a thread stamps it with the session in progress. |
 | Mind Map | React Flow graph of all world entities with Dagre auto-layout and PNG export. |
-| Map Engine | Upload battle maps, paint fog of war, place tokens; opens a pop-out combat-map window. Changing a map's grid size re-indexes the fog mask, so saving a new size on a painted map asks for confirmation and then clears the fog. |
+| Map Engine | Upload battle maps, start from a blank grid, or generate a dungeon; paint fog of war, place tokens, measure distance, and keep DM-only notes on the map. Opens a pop-out combat-map window. See [Maps: measurement and generation](#maps-measurement-and-generation). |
 | Compendium | Browse SRD monsters/spells/equipment + homebrew, **and** the [Source Book Importer](DMCS_Source_Book_Importer.md) (📥 Single / 📦 Bulk) that turns indexed PDF passages into structured entries via AI. |
 | Character Sheets | Full 5e sheets (stats, inventory, spell slots, death saves) with a level-up wizard and AI assistant. |
 | Encounter Builder | Build encounters from SRD monsters and homebrew, **generate them from a difficulty and a theme**, and assemble them from **who is standing at the location**; XP/difficulty calculator; initiative tracker with **per-copy monster HP**. **Combat is saved as it happens** (Phase 5) — see below. |
@@ -861,6 +864,113 @@ security model below, the player window is not trusted with DM information.
 
 ---
 
+## Maps: measurement and generation
+
+**DMCS does not do Dungeon Alchemist-style 3D map generation, and is not trying
+to.** That is a Unity application with a 3D asset pipeline, furniture placement
+and real-time lighting; DMCS is a 2D canvas app on a locked stack. Make or buy
+your best maps in Dungeon Alchemist, Dungeondraft or Inkarnate and **import**
+them — DMCS is designed to take those images and handle everything afterwards:
+the grid, fog, tokens, measurement, and what players are allowed to see. What
+DMCS generates is the map you need in ten seconds when the party goes somewhere
+you did not prepare.
+
+### Measuring distance
+
+The **📏 Measure** tool answers "can I reach him?". Drag from one square to
+another and the map shows two numbers:
+
+- **Grid distance** — the 5e rule: count squares, and a diagonal step counts as
+  one square. Three squares diagonally is **15 ft**.
+- **Direct distance** — the straight line between the same two squares (21.2 ft
+  for that diagonal), shown only when it differs.
+
+Both are measured centre-to-centre of the squares the drag starts and ends in, so
+a careless click measures the same as a careful one. **Shift-drag** adds a leg
+from where the last one ended — a path round a corner sums grid distance per
+leg, and the direct figure becomes start-to-finish. **Esc** clears the ruler.
+Tokens are locked while measuring, so you can measure from a creature without
+picking it up. Nothing is saved and nothing is sent to players.
+
+Each map has a **feet per square** (default 5), set in New Map or the map's
+**✎ Edit** dialog. The maths is `src/utils/measureUtils.js`.
+
+### Blank maps
+
+**New Map → Background → Blank grid** makes a map with no image, sized in
+squares (4–150 each way). It is a neutral field with the grid, fog and tokens on
+it — for a fight in an unremarkable room, or a theatre-of-the-mind scene that
+needs positions. The size is stored in `generated_params` as
+`{ kind: 'blank', cols, rows }`. Because a blank map is defined in squares,
+changing its grid size only changes how big each square is drawn: the fog never
+needs rescaling.
+
+Before this, an imageless map fell back to a hard-coded 3000×3000 px canvas
+(`fogUtils.getMapDimensions`). Old imageless maps keep that fallback, because
+their fog was painted against it.
+
+### Generating a dungeon
+
+**⚄ Generate Dungeon** on the Maps page. Choose a size, room density, corridor
+width, a colour theme and a **seed** — a number, or any word ("goblin warren"
+hashes to the same dungeon every time). The preview updates as you change
+anything; **Generate** saves it as a map.
+
+It is a binary-space-partition room-and-corridor generator
+(`src/utils/dungeonGen.js`): split the map recursively, put a room in each piece,
+join the two halves of every split with an L-shaped corridor. Every room is
+reachable by construction, and the test suite checks it across every density,
+corridor width and many seeds. Doors are drawn where a one-square corridor meets
+a room; wider corridors meet rooms as open archways.
+
+- **Offline and AI-free.** It works in `no-ai` mode and needs no network.
+- **Deterministic.** The same settings and seed produce the same image, byte for
+  byte.
+- **Grid-aligned.** One dungeon square is one map square at 50 px, and the map is
+  saved with `grid_size`, `fog_cols` and 5 ft squares to match — fog, snapping and
+  measurement line up with the walls with no alignment step.
+- **Re-roll and Tweak.** The settings and seed are saved on the map. **🎲 Re-roll**
+  reopens the generator with the same settings and a new seed; **⚙ Tweak** reopens
+  it with the same seed so you can change one thing. Both save a **new** map —
+  the original, and its fog and tokens, are never replaced.
+
+It makes dungeons. It is not good at towns, wilderness or anything above ground,
+and the output is clean and geometric rather than artwork.
+
+### Changing the grid on a painted map
+
+A fog mask is indexed by grid square, so changing the grid size changes which
+square every stored reveal refers to. Saving a new grid size that changes the
+number of squares on a painted map now asks **"Grid changed — clear or keep
+fog?"**:
+
+- **Keep fog** redraws what was revealed onto the new grid, so what the party has
+  seen stays where it was on the map (edges can shift by up to one square).
+- **Clear fog** hides the whole map again.
+
+It does not ask when a nudge happens to leave the square count unchanged, and
+never on a blank map. Grid size, the mask and `fog_cols` are saved in one
+transaction.
+
+`maps.fog_cols` records the column count the stored mask was painted against, so
+a stale mask is detected rather than guessed from its length (a 40×30 and a
+30×40 mask are the same length). Maps from before Phase 8 get it filled in the
+first time they are opened.
+
+### DM notes
+
+**🏷 Notes** puts labels, boxes and circles on the map — "secret door", "the trap
+triggers here", "reinforcements arrive from this side". Pick Label, Box or Circle
+and a colour; click to place a label, drag for a shape; drag a note to move it and
+**Delete** to remove it. They are saved to `maps.annotations`.
+
+**Players never see them.** The notes layer is drawn only in DM view, and the
+player server strips the `annotations` column from every map it serves — the
+in-app Player View window and players' browsers both get nothing. (The pop-out
+combat map is a second DM window, and shows them.)
+
+---
+
 ## Player Views
 
 DMCS has **two** distinct ways for players to see content:
@@ -887,8 +997,11 @@ this, the server sent every token and the player's browser merely declined to
 draw the hidden ones — devtools, or a single `curl`, showed the whole board.
 
 The filter (`electron/server/fogFilter.js`) **fails closed**: if the map image
-cannot be measured, or the saved fog mask's length does not match the current
-grid, *every* token is withheld rather than guessed at.
+cannot be measured, the saved fog mask's length does not match the current grid,
+or the map's `fog_cols` says the mask was painted on a different grid, *every*
+token is withheld rather than guessed at. Blank maps are sized from their own
+square count, exactly as the DM's screen sizes them. DM notes (`maps.annotations`)
+are removed from every map row and broadcast before it leaves the process.
 
 **Tokens live in memory only.** They are never written to disk and die when the
 server stops, so restarting the app ends every player session and everyone must
@@ -914,7 +1027,7 @@ server.
 ```bash
 npm test              # vitest run — one pass, exits non-zero on failure
 npm run test:watch
-npm run test:migrations   # replays migrations 001-012 on a fresh AND a populated database
+npm run test:migrations   # replays migrations 001-014 on a fresh AND a populated database
 npm run test:ipc          # cross-checks channel names across the preload/handler layers
 npm run test:server       # starts a real player server and checks auth, scoping and fog
 npm run test:rag          # indexes the SRD and runs real queries, including in no-ai mode
@@ -924,6 +1037,7 @@ npm run test:lore         # the campaign lore index, against a real database
 npm run verify:ai         # Phase 6 acceptance — calls a real model, needs Ollama
 npm run verify:aimode     # Phase 6.1 acceptance — detection, provider switch, batch save
 npm run verify:encounters # Phase 7 acceptance — location assembly, generation, tables
+npm run verify:maps       # Phase 8 acceptance — measurement, blank maps, generator, grid dialog, notes
 ```
 
 `npx electron scripts/probe-anthropic.cjs` answers "is my saved key actually
@@ -973,7 +1087,10 @@ no jsdom and no component testing yet — everything covered so far is a pure ES
 | `src/utils/__tests__/combatUtils.test.js` | Initiative sort and DEX tiebreak, monster count expansion, turn wraparound, the 15 PHB conditions |
 | `src/utils/__tests__/ipcError.test.js` | Unwrapping Electron's IPC rejection envelope; plain-language rewrites of the seven common database/filesystem failures |
 | `src/utils/__tests__/locationUtils.test.js` | Ancestor-chain walking, cycle detection at any depth, the 50-hop bound |
-| `src/utils/__tests__/mapGridUtils.test.js` | Counting painted fog cells; deciding when a grid-size change destroys a mask |
+| `src/utils/__tests__/mapGridUtils.test.js` | Map dimensions for image, blank and legacy maps; stale-mask detection with `fog_cols`; resampling fog onto a new grid; the clear-or-keep plan |
+| `src/utils/__tests__/measureUtils.test.js` | 5e grid distance (diagonal = one square) and direct distance between cell centres, chained legs, feet-per-square fallback |
+| `src/utils/__tests__/dungeonGen.test.js` | Seeded determinism, every room reachable across densities/corridor widths/seeds, room bounds and overlap, doors, painting within bounds, stored-parameter round trip |
+| `src/utils/__tests__/annotationUtils.test.js` | Parsing and normalising DM notes, shape creation from drags in any direction, nothing for any view but the DM's |
 | `src/utils/__tests__/sessionUtils.test.js` | Session labelling and date formatting, next-session numbering, plot-status grouping and transitions |
 | `electron/server/__tests__/fogFilter.test.js` | Server-side fog enforcement, asserted against the renderer's own `fogUtils` so the two copies cannot drift |
 | `electron/server/__tests__/imageSize.test.js` | PNG/JPEG/GIF/WebP header parsing, including the JPEG markers that are not frame headers |

@@ -2112,3 +2112,264 @@ Warming Ollama first, the suite passes 14/14.
 The driver now reports the elapsed time on that line, so a slow answer can never
 again be misread as a model returning nothing. Run `verify:ai` and
 `verify:encounters` against a warm Ollama, or expect the first one to be slow.
+
+---
+
+## Phase 8 — Maps: measurement and generation
+
+**Date:** 2026-09-16
+**Branch:** `phase-8-maps`, from `main` (`5323bce`, `v1.1.0-alpha.3`)
+**Verdict changes:** **Q5 PARTIAL → SOLVED. Q6 MISSING → PARTIAL.**
+
+Q5's review listed five gaps: no measurement or scale, no layers or drawing,
+location deletes refused, map deletes orphaning files, an unauthenticated player
+server, and fog/grid coupling. Phases 1 and 2 closed the lifecycle and security
+items; this phase closes measurement, scale, an annotation layer and the fog/grid
+coupling. Q6 moves to PARTIAL rather than SOLVED because the generator makes
+dungeons only — see Deferred.
+
+### Two deviations from the brief, stated up front
+
+1. **Migration 014, not 013.** Phase 7 shipped `encounter_tables` as 013.
+   Migrations are append-only. The DDL is exactly the brief's four columns.
+2. **Generated images are saved through a new channel, `file:saveMapImage`, not
+   `file:saveExportedImage`.** The existing handler opens an *"Export Mind Map"*
+   save dialog and writes wherever the DM points it. A generated map is app data,
+   not an export — and `db:maps:delete` removes a map's image file, so a map whose
+   image lived in a user-chosen folder would have that file deleted from under
+   them. `saveMapImage` writes into `userData/maps/` beside uploaded images,
+   refuses anything that is not a PNG (signature-checked), and adds a random
+   suffix so two maps saved in the same millisecond cannot overwrite each other.
+   It goes through all four IPC layers like any other channel.
+
+### What shipped
+
+**Task 1 — migration 014** (`97e4e90`). `maps.feet_per_cell INTEGER DEFAULT 5`,
+`fog_cols INTEGER`, `generated_params TEXT`, `annotations TEXT DEFAULT '[]'`.
+ADD COLUMN only, so no existing value changes. Flagged **atomic**: the simple
+migration path auto-commits statement by statement, ADD COLUMN is not idempotent,
+and a crash between two of the four would make every later launch fail on
+"duplicate column name". The runner change is a flag on the migration entry, not
+an edit to any existing migration.
+
+`fog_cols` is backfilled by the renderer the first time a map is opened with its
+real size known (after the image loads — before that, the 3000 px fallback would
+be recorded). The handler is guarded on `fog_cols IS NULL`, so it can never
+overwrite a real value. Every fog save now carries the column count it was painted
+against.
+
+The Phase 2 `window.confirm` is replaced by a **"Grid changed — clear or keep
+fog?"** dialog. **Keep** resamples the painted mask onto the new grid — each new
+cell takes the state of the old cell under its centre, so what the party has seen
+stays where it was on the map. **Clear** hides the map again. Grid size, mask and
+`fog_cols` save in **one transaction** (`db:maps:saveGridChange`). The dialog no
+longer appears when a nudge leaves the cell count unchanged (1000 px ÷ 52 is still
+20 columns), and never on a blank map.
+
+**Task 2 — measurement** (`52c2680`). `src/utils/measureUtils.js` (29 tests).
+📏 Measure in the toolbar: drag for 5e grid distance (a diagonal step is one
+square) and direct distance, both centre-to-centre of the squares so a sloppy
+click measures the same as a careful one. Shift-drag chains legs; Esc clears. A
+fifth Konva layer draws a `Line` and `Text` sized against the zoom, mirrored into a
+visually hidden `<output>` for screen readers and the driver. `feet_per_cell` is
+in the New Map modal and a new **✎ Edit** modal (name, location, scale).
+
+**Task 3 — blank maps** (`4b284f3`). New Map → Background → **Blank grid**, sized
+in squares (4–150), stored as `generated_params = { kind: 'blank', cols, rows }`.
+The brief asked to verify that `getMapDimensions`' fallback handles this. **It
+does not**: a blank 24×16 map would have been sized as the 3000×3000 px fallback —
+60×60 cells — so its fog mask, grid lines and token filtering would all be wrong.
+Every sizing decision now goes through `mapGridDimensions` in
+`src/utils/mapGridUtils.js` (51 tests, from 19): image → from the image; blank →
+from its own square count, independent of grid size; otherwise the legacy
+fallback, which old imageless maps keep because their fog was painted against it.
+
+**Task 4 — the generator** (`e256305`, `4b80119`). `src/utils/dungeonGen.js`
+(47 tests): seeded BSP room-and-corridor generation with a mulberry32 PRNG consumed
+in a fixed order. Every walkable cell is reachable *by construction* (each split
+is joined exactly once, so it is a spanning tree over the rooms), and the tests
+check it across 3 densities × 3 corridor widths × many seeds, plus the size
+extremes. Doors are placed only on one-wide corridors; a wider passage meeting a
+room is an archway, and marking it would paint a row of doors.
+
+`MapGeneratorModal.jsx`: size, density, corridor width, seed (a number or any
+word, hashed), theme and location, with a live preview on a Konva stage. Generate
+paints at 50 px a square — one dungeon square is one map square — and saves with
+`grid_size` 50, `fog_cols` = cols, 5 ft squares, and
+`generated_params = { kind: 'dungeon', version: 1, …params, gridSize: 50 }`.
+Generated map cards get **🎲 Re-roll** (stored settings, new seed) and **⚙ Tweak**
+(stored settings and seed). **Both save a new map**: replacing in place would
+throw away the old map's fog and tokens.
+
+**Task 5 — annotations** (`4b284f3`). `src/utils/annotationUtils.js` (20 tests).
+🏷 Notes: Label, Box or Circle in five colours; drag to move, Delete to remove;
+saved through a new `db:maps:updateAnnotations`. Drawn above the fog (the DM has to
+read them through it) and below tokens (a note must never hide a creature).
+**Hidden from players in three independent places**: `annotationsForMode` returns
+nothing for any mode but `'dm'`; `fogFilter.js` strips the column from every map
+row and broadcast payload the player server sends; nothing on the player side reads
+it. `test:server` gained a real-HTTP check, and **I confirmed that check fails
+(62/63) with the strip disabled** before trusting it.
+
+**Server** (`97e4e90`). `fogFilter.js` now sizes blank maps from their square count
+(otherwise it computed 60×60 for a 30×20 map, saw a length mismatch, and withheld
+every token on every blank map), withholds every token when `fog_cols` disagrees
+with the grid, and strips annotations. 11 new tests, including an agreement test
+against the renderer's `mapGridDimensions` for blank, legacy and image maps. The
+remote player web app draws imageless maps locally instead of fetching
+`/api/map-image` and showing a 404.
+
+**Task 6 — README.** New section *Maps: measurement and generation*, stating
+plainly that DMCS does not do Dungeon Alchemist-style 3D generation and is designed
+to import those maps. Also updated: the modules table, the schema table (which was
+also missing Phase 7's migration 013), the player-server fog paragraph, and the
+testing section.
+
+### Acceptance
+
+`npm run verify:maps` (new) — every line driven through the built renderer in a
+launched Electron window against a scratch database, with screenshots. No model or
+network needed. **19 PASS · 0 FAIL.**
+
+| Check | Result | Detail | Screenshot |
+|---|---|---|---|
+| **Measure two tokens 3 squares apart diagonally → 15 ft** | **PASS** | label "15 ft · 21.2 ft direct" | `m01-measure-diagonal.png` |
+| Measuring from a token does not move it | **PASS** | Ogre still at (5,5) | — |
+| Shift-drag chains a second leg and sums grid distance | **PASS** | label "35 ft (2 legs) · 38.1 ft direct" | `m02-measure-chained.png` |
+| Escape clears the ruler | **PASS** | label "" | — |
+| feet_per_cell scales the answer (10 ft squares → 30 ft) | **PASS** | label "30 ft · 42.4 ft direct" | — |
+| "Blank grid" creates a map with no image, sized in squares | **PASS** | image_path=null, params {"kind":"blank","cols":24,"rows":16}, fog_cols=24 | `m03-blank-map-modal.png` |
+| Fog paints on a blank map against its own grid, not the 3000px fallback | **PASS** | mask 384 cells (want 384), 9 revealed, (4,4)=true, fog_cols=24 | `m04-blank-map-fog.png` |
+| A label and a box are saved to maps.annotations and drawn for the DM | **PASS** | 2 saved (text, rect), 2 drawn | `m05-annotations-dm.png` |
+| Player view draws no annotations | **PASS** | 0 drawn in player view (2 stored) | `m06-annotations-player-view.png` |
+| **Generate seed 42 twice → identical images** | **PASS** | two separate files, sha256 `74371a53a43d3712…` both, 79,173 bytes, 720 ms | `m07-generator-seed-42-a.png` |
+| …and a different seed gives a different image (the comparison can fail) | **PASS** | seed 43 sha256 `e244cc54c5725e41…` | `m07-generator-seed-43.png` |
+| The generated map is saved with grid, fog_cols and parameters to match | **PASS** | 2000×1500 px, grid 50, fog_cols 40, params stored | — |
+| **Fog paints correctly on the generated map** | **PASS** | mask 1200 cells (want 1200), 9 revealed around room 1's centre (6,10) | — |
+| **Tokens snap to the generated grid** — placed and dragged from off-centre points | **PASS** | placed at (6,10) want (6,10); dragged to (8,11) want (8,11) | `m08-generated-fog-and-token.png` |
+| **Change grid size on a map with fog → dialog appears** | **PASS** | shown | `m09-grid-change-dialog.png` |
+| **Choosing "Clear" clears** and records the new fog_cols | **PASS** | grid 55, fog_cols 37, mask 1036 cells, 0 revealed | — |
+| **Choosing "Keep" keeps, and fog_cols updates** | **PASS** | grid 60, fog_cols 34 (was 37), mask 850 cells, 6 revealed (9 before), the painted pixel still revealed | `m10-grid-change-kept.png` |
+| Tweak reopens the generator with the stored seed; Re-roll with a new one | **PASS** | Tweak seed 42, name "Seed 42 B (tweaked)"; Re-roll seed 335785 | `m11-reroll.png` |
+| No unexpected renderer console errors | **PASS** | clean | — |
+
+The screenshots were read, not just produced: the ruler is drawn snapped to cell
+centres with a legible label; the generated preview is a connected dungeon; the
+revealed 3×3 lands on room 1's floor with the token centred in its cell; and after
+"Keep" the revealed area sits where it was on the map.
+
+**`npm test` green with `dungeonGen.js` and `measureUtils.js` covered: PASS.**
+
+**Harness results on the branch:**
+
+```
+npm test              1242 passing (31 files) — 1103 at the start of the phase
+test:migrations       104/104 (section F: migration 014 fresh, populated, and a mid-migration rollback)
+test:ipc              0 problems — 203 channels (199 + saveGridChange, backfillFogCols,
+                      updateAnnotations, file:saveMapImage), no duplicate preload keys
+test:server           63/63 (includes the annotations-not-served check)
+test:lore             44/44
+test:sessions         51/51
+test:rag              42/42
+build:renderer        clean
+doctor                no problems
+```
+
+Regression on the branch (Ollama warmed first — the warm-up took 52 s):
+
+| Driver | Result |
+|---|---|
+| `verify:combat` | **16 PASS / 0 FAIL** — the tracker and its map link are unaffected |
+| `verify:encounters` | **13 PASS / 0 FAIL** |
+| `verify:aimode` | **14 PASS / 0 FAIL / 1 NOT VERIFIED** — the bogus-model line, unchanged since 6.1: no usable Anthropic key in this environment, so the model check is never reached |
+| `verify:ai` | **14 PASS / 0 FAIL** |
+
+#### NOT verified, and why
+
+- **The remote player web app against a real server.** The blank-map drawing
+  change in `player/components/MapView.jsx` builds, and the server side is covered
+  by `test:server` over real HTTP, but no browser was driven against a running
+  player server with a blank or generated map. No driver for the player web app
+  exists; Playwright drives the Electron window, not a browser on the LAN.
+- **The in-app Player View window** (`#/player`, a separate `BrowserWindow`) was
+  not opened. It renders through the same `MapCanvas` with `mode="player"` that
+  the DM's 👁 Player toggle exercises in the driver, so the annotation-hiding and
+  blank-map paths are the same code — but that window itself was not driven.
+- **Very large generated maps.** 100×100 squares is a 5000×5000 px PNG. Unit tests
+  cover generation at that size; saving one through the UI was not run.
+
+### Bugs found
+
+Four real ones, all pre-existing, found while wiring the grid dialog and the
+generator:
+
+1. **The grid prompt read a stale mask.** It decided whether fog was painted from
+   `activeMap.fog_data` — the mask as it was when the map was *opened*; painting
+   saves straight to the database without updating it. Paint fog, change the grid,
+   and it believed nothing was painted and cleared the fog without asking. It now
+   reads the live mask from `MapCanvas`, and cancels a pending debounced fog save,
+   which could otherwise land half a second *after* the grid save and write the
+   old-grid mask back.
+2. **Token broadcasts sent players the same stale mask**, re-hiding everything
+   revealed since the map was opened, every time a token moved.
+3. **"Clear" wrote `[]`**, which the player server reads as *no fog at all* — so
+   after a grid change, remote players saw every token on the map until the DM
+   painted again. Clear now writes a fully hidden mask at the new size.
+4. **Deleting a duplicated map deleted the other copy's image.** Duplicate shares
+   `image_path`, and `db:maps:delete` unlinked the file unconditionally. It now
+   deletes only an image no other map references.
+
+And one introduced-then-caught: tokens are draggable under every tool, so
+"measure from the ogre" picked the ogre up. Tokens are locked while measuring, and
+the driver checks the token did not move.
+
+Two in my own work, caught before commit: two test fixtures had wrong arithmetic
+(the code was right), and pressing Enter on a note label unmounts the input, whose
+blur then committed the label a second time.
+
+### Data safety
+
+Migration 014 only adds columns. The populated-database check compares every
+pre-existing map value and every other table before and after, and a painted
+3,600-cell fog mask byte for byte. No existing row is altered by this phase except
+through a deliberate DM action (a grid save, a note, an edit), and Re-roll/Tweak
+never replace a map.
+
+### Deferred / known issues
+
+- **Q6 stays PARTIAL.** The generator makes dungeons. It is poor at towns,
+  wilderness and anything above ground, and the output is geometric, not artwork.
+- **No editing of a generated map.** The review's Option B (a tile brush as an
+  editing layer on top of generated output) is not built.
+- **Tokens keep their cell indices when the grid changes.** "Keep fog" preserves
+  where fog is *on the map*; tokens stay at the same column/row and so move in
+  pixel terms (visible in `m10-grid-change-kept.png`). This predates Phase 8, but
+  is now inconsistent with Keep.
+- **The toolbar overflows** when a tool's options are showing (Measure hint, Notes
+  palette) at a window around 1,400 CSS px wide; it scrolls horizontally rather
+  than wrapping, because the canvas height is computed from a fixed 46 px toolbar.
+- **Measurement is DM-local.** It is not shown in the pop-out or to players, and
+  there are no area templates (cone, sphere, line).
+- **An empty fog mask still means "no fog" to the player server** but "all hidden"
+  on the DM's screen. A brand-new map with tokens and no painting shows every token
+  to remote players. Pre-existing; see open question 2.
+- **`describeGridChange` was removed** — replaced by `planGridChange` /
+  `fogForGridChange`, with its regression cases (unusable sizes, numeric strings)
+  carried over.
+
+### Open questions
+
+1. **Should "Keep fog" move tokens with the map, too?** Rescaling token positions by
+   pixel centre is a few lines. But a DM changing the grid to *align it with the
+   image* might have placed tokens against the old, wrong grid — so it is not
+   obviously right.
+2. **Should a never-painted map hide tokens from remote players?** Today `[]`
+   means "no fog", which is convenient for an unfogged battle map and surprising for
+   a dungeon the DM simply has not started revealing.
+3. **Replace-in-place for Re-roll?** Saving a new map each time is safe but
+   accumulates maps. An explicit "Replace this map (discards its fog and tokens)"
+   with a confirm would be cheap.
+4. **Area-of-effect templates** (cone, sphere, line) are the natural next step after
+   a ruler, and use the same distance maths.
+5. **Should generated maps be tied to encounters automatically?** A generated
+   dungeon plus Phase 7's encounter generator is most of an improvised session.
