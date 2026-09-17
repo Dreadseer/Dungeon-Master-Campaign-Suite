@@ -1158,6 +1158,33 @@ build:renderer        clean
   `node:sqlite` at all**, so those three need Node ≥ 22.5 even though `engines`
   allows 20.
 
+### Regression sweep at the end of the phase
+
+Everything re-run after the last commit, because this phase changed retrieval,
+the schema and two drivers:
+
+| Harness | Result |
+|---|---|
+| `npm test` | **1247 passing** (31 files) |
+| `verify:migrations` / `test:migrations` | 62/62 · 114/114 |
+| `test:ipc` / `test:server` / `test:rag` / `test:lore` / `test:sessions` | 0 problems · 63/63 · 42/42 · 44/44 · 51/51 |
+| `build:renderer` / `doctor` | clean · no problems |
+| `verify:combat` / `verify:maps` | **16/16** · **19/19** |
+| `verify:encounters` | **13/13 on rerun** — see below |
+| `verify:aimode` / `verify:ai` | 14 PASS / 0 FAIL / 1 NOT VERIFIED · **14/14** |
+| `verify:packaged` | **19/19** |
+
+**One flake, recorded rather than hidden.** `verify:encounters` failed twice in one
+run — the generator produced no preview, and the renderer logged
+`SyntaxError: Expected ',' or ']' after array element in JSON at position 128`.
+The immediate rerun passed 13/13 ("Swamp Ambush", 1× Swamp Troll, 4× Drowned
+Thrall, 2× Bog Lurker, rated Deadly · 5,500 adj. XP). So this is llama3 emitting
+malformed JSON that Phase 6's repair parser could not salvage on that occasion —
+not a regression from this phase. It does mean the repair parser has a gap: the
+failing payload was not captured, so the specific malformation is unknown, and
+guessing at a fix without it would be worse than recording it. **If it recurs, log
+the raw model output first.**
+
 ### Deferred / known issues
 
 - **`npm run postinstall` can report success while leaving a Node-ABI binary.**
