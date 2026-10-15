@@ -56,6 +56,22 @@ const formatAC = (ac) => {
       .filter(Boolean)
       .join(', ')
   }
+  // Equipment armour is an object: { base, dex_bonus, max_bonus }. This used to
+  // fall through to text(ac) and index the literal string "[object Object]" —
+  // 13 chunks of the SRD index said "Armor Class: [object Object]", which is
+  // both useless to retrieve on and nonsense to show a DM in a citation.
+  if (typeof ac === 'object') {
+    // No object ever reaches text(): stringifying one is what produced
+    // "[object Object]". A shape with no usable base is left out entirely.
+    if (ac.base == null) return ''
+    const base = text(ac.base)
+    if (ac.dex_bonus === true) {
+      return ac.max_bonus != null
+        ? `${base} + Dex modifier (max ${text(ac.max_bonus)})`
+        : `${base} + Dex modifier`
+    }
+    return ac.dex_bonus === false ? `${base} (no Dex bonus)` : base
+  }
   return text(ac)
 }
 

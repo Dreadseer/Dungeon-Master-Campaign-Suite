@@ -61,7 +61,9 @@ export default function AIToolbox({ onInsertPrompt, ragMode, onToggleRag, hasEmb
             style={ragMode ? s.toggleOn : s.toggleOff}
             onClick={onToggleRag}
             disabled={!hasEmbeddedSources}
-            title={!hasEmbeddedSources ? 'Upload and embed a PDF source to enable Rules Q&A' : 'Toggle RAG pipeline'}
+            title={!hasEmbeddedSources
+              ? 'Index the SRD in Settings, or upload a PDF source, to enable Rules Q&A'
+              : 'Toggle RAG pipeline'}
           >
             {ragMode ? 'ON' : 'OFF'}
           </button>

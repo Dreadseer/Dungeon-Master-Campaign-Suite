@@ -157,8 +157,8 @@ export function parseSuggestions(rawText) {
     const one = normaliseSuggestion(entry)
     if (!one) { dropped++; continue }
     // A model asked for a guild sometimes proposes the same NPC twice.
-    if (seen.has(one.kind + ' ' + nameKey(one.name))) { dropped++; continue }
-    seen.add(one.kind + ' ' + nameKey(one.name))
+    if (seen.has(one.kind + '::' + nameKey(one.name))) { dropped++; continue }
+    seen.add(one.kind + '::' + nameKey(one.name))
     suggestions.push(one)
   }
 
