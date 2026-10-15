@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildSuggestionPrompt,
+  buildExtractPrompt,
   parseSuggestions,
   normaliseSuggestion,
   normaliseLocationType,
@@ -202,6 +203,79 @@ describe('parseSuggestions', () => {
 
   it('throws on genuinely unparseable output, so the caller can say so', () => {
     expect(() => parseSuggestions('the model refused')).toThrow()
+  })
+
+  it('flags a clean response as not truncated', () => {
+    expect(parseSuggestions(wrap([{ kind: 'npc', name: 'Sera' }])).truncated).toBe(false)
+  })
+})
+
+describe('parseSuggestions — a reply cut off at the token ceiling', () => {
+  // The reported failure: ten NPCs extracted from a chat table, output stopped
+  // mid-record, and JSON.parse threw "Expected ',' or ']' after array element"
+  // — losing every NPC, not just the last one.
+  const npc = (n) => `    {
+      "kind": "npc",
+      "name": "NPC ${n}",
+      "fields": { "role": "Scavenger", "notes": "Says \\"hi\\" — and {braces} in a string" },
+      "links": [ { "to": "NPC ${n + 1}", "relationship": "owes" } ]
+    }`
+  const cutOff = `{\n  "suggestions": [\n${[1, 2, 3].map(npc).join(',\n')},\n    {\n      "kind": "npc",\n      "name": "NPC 4",\n      "fields": { "role": "Scav`
+
+  it('keeps every suggestion that was complete', () => {
+    const { suggestions, truncated } = parseSuggestions(cutOff)
+    expect(truncated).toBe(true)
+    expect(suggestions.map(s => s.name)).toEqual(['NPC 1', 'NPC 2', 'NPC 3'])
+  })
+
+  it('ignores brackets and quotes inside strings', () => {
+    const { suggestions } = parseSuggestions(cutOff)
+    expect(suggestions[0].fields.notes).toBe('Says "hi" — and {braces} in a string')
+  })
+
+  it('drops a half-written suggestion rather than saving part of it', () => {
+    // Cut inside NPC 4's links: its links array has one whole element, which
+    // must not make the half-record look complete.
+    const raw = cutOff.replace(/"fields": \{ "role": "Scav$/,
+      '"fields": {}, "links": [ { "to": "A", "relationship": "b" }, { "to": "B"')
+    expect(parseSuggestions(raw).suggestions.map(s => s.name)).toEqual(['NPC 1', 'NPC 2', 'NPC 3'])
+  })
+
+  it('works on a bare array too', () => {
+    const raw = '[{"kind":"npc","name":"A"},{"kind":"npc","name":"B"},{"kind":"np'
+    const { suggestions, truncated } = parseSuggestions(raw)
+    expect(truncated).toBe(true)
+    expect(suggestions.map(s => s.name)).toEqual(['A', 'B'])
+  })
+
+  it('still throws when nothing was complete', () => {
+    expect(() => parseSuggestions('{"suggestions": [{"kind": "npc", "na')).toThrow()
+  })
+})
+
+describe('buildExtractPrompt — "Save as…" on a chat message', () => {
+  const table = '| 1 | Dolores Finch | Ticket-booth attendant | Knows a shortcut |'
+
+  it('carries the text to extract from', () => {
+    const { user } = buildExtractPrompt({ campaign: { name: 'X' }, sourceText: table })
+    expect(user).toContain('Dolores Finch')
+  })
+
+  it('does NOT demand all four kinds — a list of NPCs is only NPCs', () => {
+    const { user } = buildExtractPrompt({ campaign: { name: 'X' }, sourceText: table })
+    expect(user).not.toMatch(/MUST include all four/)
+    expect(user).toMatch(/only NPCs/)
+  })
+
+  it('keeps the same JSON contract and location types as suggestions', () => {
+    const { system, user } = buildExtractPrompt({ campaign: { name: 'X' }, sourceText: table })
+    expect(system).toMatch(/ONLY valid JSON/i)
+    for (const t of LOCATION_TYPES) expect(system).toContain(t)
+    expect(user).toContain('"suggestions"')
+  })
+
+  it('asks for compact JSON, so a long list fits the output budget', () => {
+    expect(buildExtractPrompt({ sourceText: table }).user).toMatch(/compactly/)
   })
 })
 

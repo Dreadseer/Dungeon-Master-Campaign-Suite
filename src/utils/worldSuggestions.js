@@ -12,7 +12,7 @@
 //
 // The JSON repair rules are NOT reimplemented here; extractJsonObject in
 // compendiumExtractor.js is the one parser, shared with the PDF importers.
-import { extractJsonValue } from './compendiumExtractor.js'
+import { extractJsonValue, repairTruncatedJson } from './compendiumExtractor.js'
 
 /** The four things the World Builder can hold, and the four the AI may propose. */
 export const SUGGESTION_KINDS = ['npc', 'location', 'faction', 'lore']
@@ -127,6 +127,41 @@ export function buildSuggestionPrompt({ campaign, request = '', count = 3, conte
   return { system, user }
 }
 
+/**
+ * Build the { system, user } pair for pulling records out of text the model
+ * already wrote — the AI Assistant's "Save as…".
+ *
+ * Not buildSuggestionPrompt with a different request: that prompt's "MUST
+ * include all four" checklist is right for "invent me a guild" and wrong here.
+ * Handed a table of ten NPCs, it told the model to also invent a faction, a
+ * location and a lore entry the text never mentioned — and those, plus
+ * indented JSON, ran the reply past its token ceiling mid-record.
+ */
+export function buildExtractPrompt({ campaign, sourceText = '', context = '' } = {}) {
+  const { system } = buildSuggestionPrompt({ campaign })
+
+  const user = [
+    campaign?.name
+      ? `Campaign: "${campaign.name}"${campaign.world_setting ? ` — set in ${campaign.world_setting}` : ''}`
+      : 'Campaign: (unnamed)',
+    '',
+    context ? `Here is what already exists in this world:\n${context}\n` : '',
+    'Extract every concrete NPC, location, faction and piece of lore described in the text below, exactly as described.',
+    'Return only the kinds the text actually contains — if it only describes NPCs, return only NPCs. Do not invent anything that is not there.',
+    'Keep everything the text says about each one. For an NPC, put their job or position in "role", and their appearance, hooks and quirks in "notes".',
+    'Only add a link when the text states the connection.',
+    'Write the JSON compactly, without indentation, so that long lists fit.',
+    '',
+    'Return ONLY this JSON:',
+    SUGGESTION_SCHEMA,
+    '',
+    '--- The text to extract from ---',
+    str(sourceText),
+  ].filter(l => l !== '').join('\n')
+
+  return { system, user }
+}
+
 // ── Parsing ──────────────────────────────────────────────────────────────────
 
 /**
@@ -137,17 +172,28 @@ export function buildSuggestionPrompt({ campaign, request = '', count = 3, conte
  * error. A response with nothing usable in it returns an empty array, and the
  * caller tells the DM to try again.
  *
- * @returns {{ suggestions: Array, dropped: number }}
+ * A reply cut off mid-record (the model ran out of output tokens) keeps every
+ * suggestion that was complete, and says so with `truncated`.
+ *
+ * @returns {{ suggestions: Array, dropped: number, truncated: boolean }}
  */
 export function parseSuggestions(rawText) {
   // allowArray: asked for { suggestions: [...] }, local models often answer
   // with just the array. Both shapes are accepted.
-  const data = extractJsonValue(rawText)
+  let data
+  let truncated = false
+  try {
+    data = extractJsonValue(rawText)
+  } catch (err) {
+    data = repairTruncatedJson(rawText)
+    if (data == null) throw err
+    truncated = true
+  }
 
   const raw = Array.isArray(data?.suggestions) ? data.suggestions
     : Array.isArray(data) ? data
       : null
-  if (!raw) return { suggestions: [], dropped: 0 }
+  if (!raw) return { suggestions: [], dropped: 0, truncated }
 
   const seen = new Set()
   const suggestions = []
@@ -162,7 +208,7 @@ export function parseSuggestions(rawText) {
     suggestions.push(one)
   }
 
-  return { suggestions, dropped }
+  return { suggestions, dropped, truncated }
 }
 
 /** One suggestion, with every field coerced to the type the save step expects. */

@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   nameKey,
   buildSuggestionPrompt,
+  buildExtractPrompt,
   parseSuggestions,
   toCreatePayload,
   buildEntityIndex,
@@ -92,14 +93,13 @@ export default function SuggestionCards({
       if (sourceText) {
         // Same contract, different input: pull records out of prose the model
         // already wrote rather than asking for new ideas.
-        const built = buildSuggestionPrompt({
+        const built = buildExtractPrompt({
           campaign,
-          request: 'Extract every concrete NPC, location, faction and piece of lore described in the text below, exactly as described. Do not invent anything that is not there.',
+          sourceText,
           context: buildWorldSummary(world, { budget: 1500 }),
-          existingNames: existingNames(world),
         })
         system = built.system
-        user = `${built.user}\n\n--- The text to extract from ---\n${sourceText}`
+        user = built.user
       } else {
         const built = buildSuggestionPrompt({
           campaign,
@@ -111,9 +111,12 @@ export default function SuggestionCards({
         user = built.user
       }
 
+      // Extraction gets more room: a chat message listing ten NPCs becomes ten
+      // records, and 3000 tokens ran out partway through them. Kept under 8k so
+      // Ollama's context window (capped at 8192, input included) still fits.
       const raw = await window.electronAPI.ai.complete(system, user,
-        { maxTokens: 3000, campaignId: campaign.id, type: sourceText ? 'extract' : 'suggest' })
-      const { suggestions, dropped } = parseSuggestions(raw)
+        { maxTokens: sourceText ? 6000 : 3000, campaignId: campaign.id, type: sourceText ? 'extract' : 'suggest' })
+      const { suggestions, dropped, truncated } = parseSuggestions(raw)
 
       if (suggestions.length === 0) {
         setError('The AI did not return anything saveable. Try rephrasing, or run it again.')
@@ -123,6 +126,7 @@ export default function SuggestionCards({
 
       const clashes = findNameClashes(suggestions, world)
       setNote([
+        truncated ? 'The AI ran out of room before it finished — anything after the last card below is missing. Save these, then ask for the rest separately.' : '',
         dropped > 0 ? `${dropped} malformed suggestion${dropped === 1 ? '' : 's'} skipped.` : '',
         clashes.length > 0 ? `${clashes.map(c => `"${c.name}"`).join(', ')} already exist${clashes.length === 1 ? 's' : ''} in this campaign — saving will create a second record.` : '',
       ].filter(Boolean).join(' '))
@@ -131,8 +135,11 @@ export default function SuggestionCards({
         suggestion: sg, saved: false, savedId: null, checking: false, conflicts: null,
       })))
     } catch (err) {
-      // Parse failures and AI failures both land here; the message distinguishes.
-      setError(err?.message ?? 'The request failed.')
+      // Parse failures and AI failures both land here. A raw JSON.parse message
+      // ("Expected ',' or ']' after array element…") means nothing to a DM.
+      setError(err instanceof SyntaxError
+        ? 'The AI replied, but not in a form that could be read as records. Try again.'
+        : (err?.message ?? 'The request failed.'))
       notifyError(err, sourceText ? 'Extract records' : 'Generate suggestions')
     } finally {
       setLoading(false)

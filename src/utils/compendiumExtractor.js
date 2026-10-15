@@ -204,6 +204,17 @@ export function extractJsonObject(rawText) {
  * @param {{allowArray?: boolean}} opts
  */
 export function extractJsonValue(rawText, { allowArray = true } = {}) {
+  const { cleaned, start, takeArray } = locateJson(rawText, allowArray)
+  const end = cleaned.lastIndexOf(takeArray ? ']' : '}')
+
+  // If the model added explanatory text before or after, take just the block.
+  const body = (start !== -1 && end > start) ? cleaned.slice(start, end + 1) : cleaned
+
+  return JSON.parse(body)
+}
+
+/** Fence-stripping and start-bracket choice, shared by the parse and the repair. */
+function locateJson(rawText, allowArray) {
   if (typeof rawText !== 'string') {
     throw new SyntaxError('AI returned no text to parse')
   }
@@ -223,13 +234,59 @@ export function extractJsonValue(rawText, { allowArray = true } = {}) {
     && arrStart !== -1
     && (objStart === -1 || arrStart < objStart)
 
-  const start = takeArray ? arrStart : objStart
-  const end   = cleaned.lastIndexOf(takeArray ? ']' : '}')
+  return { cleaned, start: takeArray ? arrStart : objStart, takeArray }
+}
 
-  // If the model added explanatory text before or after, take just the block.
-  const body = (start !== -1 && end > start) ? cleaned.slice(start, end + 1) : cleaned
+/**
+ * Recover what is complete from JSON that stops mid-value.
+ *
+ * A model that hits its output-token ceiling stops mid-record, and the parse
+ * above then fails on the WHOLE reply — ten good NPCs lost to one half-written
+ * eleventh. This cuts back to the last value that closed at the shallowest
+ * depth (a whole suggestion, not a whole link inside a half-written one) and
+ * appends the brackets still open.
+ *
+ * Only brackets are closed; a reply cut inside its first element has nothing
+ * complete to keep, and returns null.
+ *
+ * @returns {any|null} the parsed, repaired value, or null if nothing is salvageable
+ */
+export function repairTruncatedJson(rawText, { allowArray = true } = {}) {
+  const { cleaned, start } = locateJson(rawText, allowArray)
+  if (start === -1) return null
 
-  return JSON.parse(body)
+  const stack = []
+  let inString = false
+  let escaped = false
+  let best = null   // { cut, open } — the shallowest, then latest, complete value
+
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') inString = true
+    else if (ch === '{' || ch === '[') stack.push(ch)
+    else if (ch === '}' || ch === ']') {
+      stack.pop()
+      // Depth 0 means the value was complete after all — nothing to repair.
+      if (stack.length === 0) return null
+      // A closing bracket always ends a value (keys are strings), so cutting
+      // here and closing every open bracket is valid JSON in an array or object.
+      if (!best || stack.length <= best.open.length) best = { cut: i + 1, open: [...stack] }
+    }
+  }
+
+  if (!best) return null
+  const closers = best.open.reverse().map(b => (b === '{' ? '}' : ']')).join('')
+  try {
+    return JSON.parse(cleaned.slice(start, best.cut) + closers)
+  } catch {
+    return null
+  }
 }
 
 export function parseExtraction(type, rawText) {
